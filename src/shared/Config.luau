@@ -1,22 +1,42 @@
 --!strict
--- Shared names and arena/shell values used by both server and client.
--- Combat tuning lives in CombatConfig.
+-- Shared names: folders, attributes, remotes, shells.
+-- Combat tuning: CombatConfig. Items: WeaponDefinitions / ShieldDefinitions.
+-- Enemies: ZombieDefinitions. Rounds: RoundDefinitions. States: GameStates.
 
 local Config = {
 	ArenaFolderName = "GeneratedArena",
-	ArenaRadius = 40,
+	LobbyFolderName = "GeneratedLobby",
+	ZombiesFolderName = "Zombies",
+	ShopItemTag = "OttiShopItem",
 
-	ShellCount = 3,
+	-- Healing shells
+	ShellCount = 4,
 	ShellNamePrefix = "GoldenShell_",
-	-- Player attribute set by the server per collected shell, e.g. "CollectedShell_2"
-	ShellAttributePrefix = "CollectedShell_",
 	ShellPickupRange = 8,
+	ShellHealAmount = 3,
+	ShellRespawnSeconds = 12,
 
-	-- Player attribute set by the server once the player helped defeat the zombie
-	ZombieDefeatedAttribute = "DefeatedZombie",
+	-- Run state, published as attributes on Workspace.GeneratedArena
+	RoundAttribute = "Round",
+	RoundMaxAttribute = "RoundMax",
+	ZombiesAliveAttribute = "ZombiesAlive",
+	ZombiesTotalAttribute = "ZombiesTotal",
+	WavePhaseAttribute = "WavePhase", -- Idle | Starting | Fighting | Intermission | Victory
+	CountdownAttribute = "Countdown",
+	ArenaBusyAttribute = "ArenaBusy",
+	FighterNameAttribute = "FighterName",
+
+	-- Player attributes (server-owned, read by the HUD and shop)
+	CoinsAttribute = "Coins",
+	EquippedWeaponAttribute = "EquippedWeapon",
+	EquippedShieldAttribute = "EquippedShield",
+	OwnedWeaponsAttribute = "OwnedWeapons", -- comma-separated ids
+	OwnedShieldsAttribute = "OwnedShields",
+	RunKillsAttribute = "RunKills",
+	RunCoinsAttribute = "RunCoins",
 
 	RemotesFolderName = "Remotes",
-	SwordAttackRemoteName = "SwordAttack",
+	WeaponAttackRemoteName = "WeaponAttack",
 	ShieldBlockRemoteName = "ShieldBlock",
 	CombatFeedbackRemoteName = "CombatFeedback",
 }

@@ -1,6 +1,10 @@
 --!strict
--- Generates the circular training arena from plain Parts.
--- Calling build() again replaces the previous Workspace.GeneratedArena, so restarts never duplicate it.
+-- Generates a Colosseum-style arena from anchored Parts: an oval sand floor (~140 x 110),
+-- a podium wall with barred gates and red banners, stepped spectator seating, and a tall
+-- outer wall with three layers of arches. An invisible barrier on the podium keeps
+-- everyone on the arena floor. Decorations inside the floor area are non-collidable,
+-- so they never block movement or pathfinding.
+-- Calling build() again replaces the previous Workspace.GeneratedArena (no duplicates).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -9,43 +13,89 @@ local Config = require(ReplicatedStorage.Shared.Config)
 
 local PREFIX = "[OttiArena][Server]"
 
+-- Roman palette
 local SAND = Color3.fromRGB(226, 202, 145)
-local STONE = Color3.fromRGB(168, 162, 150)
-local STONE_LIGHT = Color3.fromRGB(196, 190, 176)
-local MARBLE = Color3.fromRGB(236, 231, 220)
-local WOOD = Color3.fromRGB(110, 72, 40)
-local DARK_WOOD = Color3.fromRGB(78, 50, 30)
+local TRAVERTINE = Color3.fromRGB(222, 210, 184)
+local SANDSTONE = Color3.fromRGB(204, 168, 120)
+local STONE_DARK = Color3.fromRGB(150, 128, 100)
+local OPENING = Color3.fromRGB(58, 44, 34)
 local BRONZE = Color3.fromRGB(176, 125, 60)
-local GOLD = Color3.fromRGB(255, 205, 70)
+local BANNER_RED = Color3.fromRGB(128, 22, 28)
+local GOLD = Color3.fromRGB(240, 196, 80)
 
-local RADIUS = Config.ArenaRadius
+-- Dimensions
+local A, B = 70, 55 -- semi-axes of the playable oval (140 x 110 studs)
 local FLOOR_TOP = 1
-local WALL_HEIGHT = 28
-local WALL_THICKNESS = 6
-local WALL_SEGMENTS = 40
-local COLUMN_HEIGHT = 22
-local GATE_WIDTH = 11
-local GATE_HEIGHT = 21
+local PODIUM_HEIGHT = 10
+local PODIUM_THICKNESS = 4
+local BARRIER_TOP = FLOOR_TOP + 70
+local SEAT_TIERS = 4
+local SEAT_DEPTH = 6
+local SEAT_RISE = 4.5
+local OUTER_OFFSET = PODIUM_THICKNESS + SEAT_TIERS * SEAT_DEPTH
+local OUTER_THICKNESS = 5
+local OUTER_TOP = FLOOR_TOP + 58
+local ARCADE_ROWS = { { bottom = 31, height = 6 }, { bottom = 40, height = 6 }, { bottom = 49, height = 5 } }
+
+local ZOMBIE_GATE_ANGLES = { 0, 45, 135, 180, 225, 270, 315 }
+local PLAYER_GATE_ANGLE = 90
 
 local Arena = {}
 
--- Positions other modules use to place things inside the arena.
 Arena.Layout = {
 	Center = Vector3.new(0, FLOOR_TOP, 0),
-	Radius = RADIUS,
+	SemiAxisX = A,
+	SemiAxisZ = B,
 	FloorTop = FLOOR_TOP,
-	WallHeight = WALL_HEIGHT,
-	SpawnPosition = Vector3.new(0, FLOOR_TOP + 0.5, RADIUS - 8),
-	ZombiePosition = Vector3.new(0, FLOOR_TOP, -4),
-	ShellPositions = {} :: { Vector3 },
+	BarrierTop = BARRIER_TOP,
+	OuterOffset = OUTER_OFFSET,
+	-- Where the fighter enters the arena floor (south, facing the center)
+	StartPosition = Vector3.new(0, FLOOR_TOP + 3.5, B - 10),
+	-- Lower tribune walkway (top of the first seating tier) and its return door
+	TribuneWalkwayY = FLOOR_TOP + PODIUM_HEIGHT + SEAT_RISE,
+	ReturnDoor = nil :: BasePart?,
+	ZombieSpawns = {} :: { CFrame },
+	ShellPositions = {
+		Vector3.new(35, FLOOR_TOP + 2, 0),
+		Vector3.new(-35, FLOOR_TOP + 2, 0),
+		Vector3.new(0, FLOOR_TOP + 2, 27),
+		Vector3.new(0, FLOOR_TOP + 2, -27),
+	},
 }
 
-for i, degrees in { 30, 150, 270 } do
-	local angle = math.rad(degrees)
-	Arena.Layout.ShellPositions[i] = Vector3.new(math.cos(angle) * 28, FLOOR_TOP + 2, math.sin(angle) * 28)
+-- Ellipse helpers (y = 0 plane). Offset moves along the outward normal.
+local function normal(theta: number): Vector3
+	return Vector3.new(math.cos(theta) / A, 0, math.sin(theta) / B).Unit
 end
 
-local function makePart(name: string, size: Vector3, cframe: CFrame, color: Color3, material: Enum.Material, parent: Instance): Part
+local function ellipsePoint(theta: number, offset: number): Vector3
+	return Vector3.new(A * math.cos(theta), 0, B * math.sin(theta)) + normal(theta) * offset
+end
+
+-- CFrame on the curve at height y whose LookVector (-Z) points into the arena.
+local function frameAt(theta: number, offset: number, y: number): CFrame
+	local p = ellipsePoint(theta, offset)
+	local n = normal(theta)
+	local position = Vector3.new(p.X, y, p.Z)
+	return CFrame.lookAt(position, position - n)
+end
+
+-- Frame for segment i of a ring, aligned with its chord (-Z points into the arena).
+local function segmentFrame(i: number, segments: number, offset: number, y: number): (CFrame, number)
+	local a = ellipsePoint(i / segments * 2 * math.pi, offset)
+	local b = ellipsePoint((i + 1) / segments * 2 * math.pi, offset)
+	local mid = (a + b) / 2
+	local tangent = (b - a).Unit
+	return CFrame.fromMatrix(Vector3.new(mid.X, y, mid.Z), -tangent, Vector3.yAxis), (b - a).Magnitude
+end
+
+type PartOptions = {
+	shape: Enum.PartType?,
+	collide: boolean?,
+	transparency: number?,
+}
+
+local function makePart(name: string, size: Vector3, cframe: CFrame, color: Color3, material: Enum.Material, parent: Instance, options: PartOptions?): Part
 	local part = Instance.new("Part")
 	part.Name = name
 	part.Anchored = true
@@ -55,128 +105,207 @@ local function makePart(name: string, size: Vector3, cframe: CFrame, color: Colo
 	part.Material = material
 	part.TopSurface = Enum.SurfaceType.Smooth
 	part.BottomSurface = Enum.SurfaceType.Smooth
+	if options then
+		if options.shape then
+			part.Shape = options.shape
+		end
+		if options.collide == false then
+			-- Decoration: never blocks players, zombies, pathfinding or combat raycasts
+			part.CanCollide = false
+			part.CanQuery = false
+			part.CanTouch = false
+		end
+		if options.transparency then
+			part.Transparency = options.transparency
+		end
+	end
 	part.Parent = parent
 	return part
 end
 
--- Faces the point at the same height toward the arena center.
-local function facingCenter(position: Vector3): CFrame
-	return CFrame.lookAt(position, Vector3.new(0, position.Y, 0))
+local DECOR: PartOptions = { collide = false }
+
+-- A closed ring of wall segments around the oval. Segments overlap generously so the
+-- outer corners never leave gaps.
+local function ring(parent: Instance, name: string, segments: number, innerOffset: number, thickness: number, bottomY: number, topY: number, color: Color3, material: Enum.Material, options: PartOptions?)
+	local model = Instance.new("Model")
+	model.Name = name
+	for i = 0, segments - 1 do
+		local frame, chord = segmentFrame(i, segments, innerOffset + thickness / 2, (bottomY + topY) / 2)
+		makePart("Segment", Vector3.new(chord + thickness * 0.2 + 0.6, topY - bottomY, thickness), frame, color, material, model, options)
+	end
+	model.Parent = parent
 end
 
 local function buildFloor(folder: Folder)
-	local diameter = (RADIUS + WALL_THICKNESS) * 2
-	-- Cylinders run along X, so roll 90° to make a flat disc.
-	local floor = makePart(
-		"Floor",
-		Vector3.new(FLOOR_TOP, diameter, diameter),
-		CFrame.new(0, FLOOR_TOP / 2, 0) * CFrame.Angles(0, 0, math.rad(90)),
-		SAND,
-		Enum.Material.Sand,
-		folder
-	)
-	floor.Shape = Enum.PartType.Cylinder
+	local width = (A + OUTER_OFFSET + OUTER_THICKNESS + 4) * 2
+	local depth = (B + OUTER_OFFSET + OUTER_THICKNESS + 4) * 2
+	makePart("Floor", Vector3.new(width, 1, depth), CFrame.new(0, FLOOR_TOP - 0.5, 0), SAND, Enum.Material.Sand, folder)
 end
 
--- A ring of straight segments. Each segment is sized for the OUTER radius, so neighbours
--- overlap on the inside and meet on the outside: no gaps to squeeze through.
-local function buildWall(folder: Folder)
-	local wall = Instance.new("Model")
-	wall.Name = "Wall"
-	local centerRadius = RADIUS + WALL_THICKNESS / 2
-	local outerRadius = RADIUS + WALL_THICKNESS
-	local segmentLength = 2 * outerRadius * math.tan(math.pi / WALL_SEGMENTS) + 0.4
+local function buildWalls(folder: Folder)
+	-- Podium wall around the floor, plus an invisible barrier up to BARRIER_TOP on top of it
+	ring(folder, "PodiumWall", 64, 0, PODIUM_THICKNESS, FLOOR_TOP, FLOOR_TOP + PODIUM_HEIGHT, TRAVERTINE, Enum.Material.Limestone)
+	ring(folder, "InvisibleBarrier", 64, 0, PODIUM_THICKNESS, FLOOR_TOP + PODIUM_HEIGHT, BARRIER_TOP, TRAVERTINE, Enum.Material.SmoothPlastic, { transparency = 1 })
 
-	for i = 0, WALL_SEGMENTS - 1 do
-		local angle = i / WALL_SEGMENTS * 2 * math.pi
-		local x, z = math.cos(angle), math.sin(angle)
-		local position = Vector3.new(x * centerRadius, FLOOR_TOP + WALL_HEIGHT / 2, z * centerRadius)
-		makePart("Segment", Vector3.new(segmentLength, WALL_HEIGHT, WALL_THICKNESS), facingCenter(position), STONE, Enum.Material.Slate, wall)
-
-		-- Decorative cornice on top
-		local capPosition = Vector3.new(x * centerRadius, FLOOR_TOP + WALL_HEIGHT + 0.5, z * centerRadius)
-		makePart("Cap", Vector3.new(segmentLength + 0.2, 1, WALL_THICKNESS + 1), facingCenter(capPosition), STONE_LIGHT, Enum.Material.Limestone, wall)
+	-- Spectator seating rising behind the podium
+	local seating = Instance.new("Model")
+	seating.Name = "Seating"
+	for tier = 0, SEAT_TIERS - 1 do
+		local top = FLOOR_TOP + PODIUM_HEIGHT + (tier + 1) * SEAT_RISE
+		local color = if tier % 2 == 0 then SANDSTONE else TRAVERTINE
+		ring(seating, "Tier" .. (tier + 1), 48, PODIUM_THICKNESS + tier * SEAT_DEPTH, SEAT_DEPTH, FLOOR_TOP, top, color, Enum.Material.Sandstone)
 	end
-	wall.Parent = folder
+	seating.Parent = folder
+
+	ring(folder, "OuterWall", 36, OUTER_OFFSET, OUTER_THICKNESS, FLOOR_TOP, OUTER_TOP, SANDSTONE, Enum.Material.Sandstone)
 end
 
-local function buildColumns(folder: Folder)
-	for _, degrees in { 45, 135, 225, 315 } do
-		local angle = math.rad(degrees)
-		local x, z = math.cos(angle) * (RADIUS - 4), math.sin(angle) * (RADIUS - 4)
-		local column = Instance.new("Model")
-		column.Name = "Column"
+-- Three rows of arches with engaged columns on the inner face of the outer wall.
+local function buildArcades(folder: Folder)
+	local arcades = Instance.new("Model")
+	arcades.Name = "Arcades"
+	local segments = 36
+	for i = 0, segments - 1 do
+		for _, row in ARCADE_ROWS do
+			local bottom = FLOOR_TOP + row.bottom
+			local frame, chord = segmentFrame(i, segments, OUTER_OFFSET, bottom + row.height / 2)
+			local face = frame * CFrame.new(0, 0, -0.2)
+			local width = chord * 0.5
 
-		makePart("Base", Vector3.new(4, 1, 4), CFrame.new(x, FLOOR_TOP + 0.5, z), STONE, Enum.Material.Slate, column)
-		local shaft = makePart(
-			"Shaft",
-			Vector3.new(COLUMN_HEIGHT, 3, 3),
-			CFrame.new(x, FLOOR_TOP + 1 + COLUMN_HEIGHT / 2, z) * CFrame.Angles(0, 0, math.rad(90)),
-			MARBLE,
-			Enum.Material.Marble,
-			column
-		)
-		shaft.Shape = Enum.PartType.Cylinder
-		makePart("Capital", Vector3.new(4, 1, 4), CFrame.new(x, FLOOR_TOP + 1.5 + COLUMN_HEIGHT, z), STONE, Enum.Material.Slate, column)
-
-		column.Parent = folder
+			makePart("Opening", Vector3.new(width, row.height, 0.4), face, OPENING, Enum.Material.Slate, arcades, DECOR)
+			makePart("ArchTop", Vector3.new(0.4, width, width), face * CFrame.new(0, row.height / 2, 0) * CFrame.Angles(0, math.rad(90), 0), OPENING, Enum.Material.Slate, arcades, { shape = Enum.PartType.Cylinder, collide = false })
+			makePart("Column", Vector3.new(row.height + 2.5, 1.3, 1.3), face * CFrame.new(-chord / 2, 0.6, 0) * CFrame.Angles(0, 0, math.rad(90)), TRAVERTINE, Enum.Material.Limestone, arcades, { shape = Enum.PartType.Cylinder, collide = false })
+			makePart("Cornice", Vector3.new(chord + 1, 0.8, 1.4), face * CFrame.new(0, -row.height / 2 - 1, 0), STONE_DARK, Enum.Material.Limestone, arcades, DECOR)
+		end
 	end
+	arcades.Parent = folder
 end
 
--- The entrance: an arched frame with closed wooden gate doors. The wall continues
--- solidly behind it, so the gate is purely visual and can't be passed.
-local function buildGate(folder: Folder)
+-- A barred gate in the podium wall (decoration only; the wall behind it is solid).
+local function buildGate(parent: Instance, theta: number, name: string)
 	local gate = Instance.new("Model")
-	gate.Name = "Gate"
-	local z = RADIUS - 0.5
-	local pillarX = GATE_WIDTH / 2 + 1.5
-
-	for _, side in { -1, 1 } do
-		makePart("Pillar", Vector3.new(3, GATE_HEIGHT + 2, 3), CFrame.new(side * pillarX, FLOOR_TOP + (GATE_HEIGHT + 2) / 2, z - 1), STONE_LIGHT, Enum.Material.Limestone, gate)
-	end
-	makePart("Lintel", Vector3.new(GATE_WIDTH + 6, 3, 3.4), CFrame.new(0, FLOOR_TOP + GATE_HEIGHT + 3.5, z - 1), STONE_LIGHT, Enum.Material.Limestone, gate)
-
-	makePart("Doors", Vector3.new(GATE_WIDTH, GATE_HEIGHT, 1), CFrame.new(0, FLOOR_TOP + GATE_HEIGHT / 2, z), DARK_WOOD, Enum.Material.WoodPlanks, gate)
-	makePart("Seam", Vector3.new(0.25, GATE_HEIGHT, 0.2), CFrame.new(0, FLOOR_TOP + GATE_HEIGHT / 2, z - 0.6), Color3.new(0.1, 0.07, 0.05), Enum.Material.Wood, gate)
-	for _, x in { -4.5, -1.5, 1.5, 4.5 } do
-		makePart("Bar", Vector3.new(0.5, GATE_HEIGHT, 0.4), CFrame.new(x, FLOOR_TOP + GATE_HEIGHT / 2, z - 0.7), BRONZE, Enum.Material.Metal, gate)
-	end
-	for _, y in { 5, 15 } do
-		makePart("Band", Vector3.new(GATE_WIDTH, 0.7, 0.4), CFrame.new(0, FLOOR_TOP + y, z - 0.75), BRONZE, Enum.Material.Metal, gate)
-	end
-	for _, x in { -1.2, 1.2 } do
-		local ring = makePart("Handle", Vector3.new(0.3, 1.2, 1.2), CFrame.new(x, FLOOR_TOP + 9, z - 1) * CFrame.Angles(0, math.rad(90), 0), BRONZE, Enum.Material.Metal, gate)
-		ring.Shape = Enum.PartType.Cylinder
+	gate.Name = name
+	local base = frameAt(theta, 0, FLOOR_TOP)
+	local function at(x: number, y: number, z: number): CFrame
+		return base * CFrame.new(x, y, z)
 	end
 
-	gate.Parent = folder
+	makePart("Opening", Vector3.new(7, 6, 0.4), at(0, 3, -0.2), OPENING, Enum.Material.Slate, gate, DECOR)
+	makePart("ArchTop", Vector3.new(0.4, 7, 7), at(0, 6, -0.2) * CFrame.Angles(0, math.rad(90), 0), OPENING, Enum.Material.Slate, gate, { shape = Enum.PartType.Cylinder, collide = false })
+	for x = -2.4, 2.41, 1.2 do
+		makePart("Bar", Vector3.new(0.3, 8.4, 0.3), at(x, 4.2, -0.55), BRONZE, Enum.Material.Metal, gate, DECOR)
+	end
+	for _, y in { 2.5, 5.5 } do
+		makePart("Band", Vector3.new(7, 0.3, 0.3), at(0, y, -0.6), BRONZE, Enum.Material.Metal, gate, DECOR)
+	end
+	for _, x in { -4.6, 4.6 } do
+		makePart("Column", Vector3.new(PODIUM_HEIGHT, 1.4, 1.4), at(x, PODIUM_HEIGHT / 2, -0.3) * CFrame.Angles(0, 0, math.rad(90)), TRAVERTINE, Enum.Material.Limestone, gate, { shape = Enum.PartType.Cylinder, collide = false })
+	end
+	makePart("Keystone", Vector3.new(1, 1.4, 0.6), at(0, 9.9, -0.35), SANDSTONE, Enum.Material.Sandstone, gate, DECOR)
+
+	gate.Parent = parent
 end
 
-local function buildSpawn(folder: Folder)
-	local spawn = Instance.new("SpawnLocation")
-	spawn.Name = "ArenaSpawn"
-	spawn.Anchored = true
-	spawn.Size = Vector3.new(6, 1, 6)
-	spawn.CFrame = facingCenter(Arena.Layout.SpawnPosition)
-	spawn.Color = STONE
-	spawn.Material = Enum.Material.Slate
-	spawn.Neutral = true
-	spawn.Duration = 0
-	spawn.TopSurface = Enum.SurfaceType.Smooth
-	spawn.Parent = folder
+local function buildGates(folder: Folder)
+	local gates = Instance.new("Model")
+	gates.Name = "Gates"
+	for _, degrees in ZOMBIE_GATE_ANGLES do
+		local theta = math.rad(degrees)
+		buildGate(gates, theta, "ZombieGate")
+		-- Zombies appear on the sand just in front of each gate, facing the center
+		table.insert(Arena.Layout.ZombieSpawns, frameAt(theta, -5, FLOOR_TOP))
+	end
+	buildGate(gates, math.rad(PLAYER_GATE_ANGLE), "PlayerGate")
+	gates.Parent = folder
+end
+
+local function buildBanners(folder: Folder)
+	local banners = Instance.new("Model")
+	banners.Name = "Banners"
+	for degrees = 22.5, 360, 45 do
+		local base = frameAt(math.rad(degrees), 0, FLOOR_TOP)
+		makePart("Rod", Vector3.new(4, 0.3, 0.3), base * CFrame.new(0, PODIUM_HEIGHT - 0.4, -0.4), BRONZE, Enum.Material.Metal, banners, DECOR)
+		makePart("Cloth", Vector3.new(3.4, 6, 0.15), base * CFrame.new(0, PODIUM_HEIGHT - 3.5, -0.3), BANNER_RED, Enum.Material.Fabric, banners, DECOR)
+		makePart("Stripe", Vector3.new(3.4, 0.4, 0.17), base * CFrame.new(0, PODIUM_HEIGHT - 5.6, -0.32), GOLD, Enum.Material.Fabric, banners, DECOR)
+	end
+	banners.Parent = folder
+end
+
+-- Accessible spectator stands, all outside the invisible barrier (zombies can't get there):
+-- lower walkway = top of seating tier 1, middle walkway = top of tier 3, two staircases between
+-- them, a railing along the front, two viewing platforms and the basement entrance/return door.
+local function buildTribune(folder: Folder)
+	local tribune = Instance.new("Model")
+	tribune.Name = "Tribune"
+	local lowerY = FLOOR_TOP + PODIUM_HEIGHT + SEAT_RISE
+	local middleY = lowerY + 2 * SEAT_RISE
+
+	-- Railing along the front edge of the lower walkway
+	ring(tribune, "Railing", 64, PODIUM_THICKNESS, 0.8, lowerY, lowerY + 2.8, TRAVERTINE, Enum.Material.Limestone)
+
+	-- Two staircases from the lower walkway (over tier 2) up to the middle walkway
+	local steps = 14
+	local run = (SEAT_DEPTH * 2 - 0.8) / steps
+	local rise = (middleY - lowerY) / steps
+	for _, degrees in { 30, 210 } do
+		local theta = math.rad(degrees)
+		local stair = Instance.new("Model")
+		stair.Name = "Staircase"
+		for k = 1, steps do
+			local height = rise * k
+			local offset = PODIUM_THICKNESS + 0.8 + run * (k - 0.5)
+			makePart("Step", Vector3.new(5, height, run + 0.05), frameAt(theta, offset, lowerY + height / 2), if k % 2 == 0 then TRAVERTINE else SANDSTONE, Enum.Material.Limestone, stair)
+		end
+		for _, side in { -1, 1 } do
+			local a = frameAt(theta, PODIUM_THICKNESS + 0.8, lowerY + 3) * CFrame.new(side * 2.7, 0, 0)
+			local b = frameAt(theta, PODIUM_THICKNESS + 0.8 + run * steps, middleY + 3) * CFrame.new(side * 2.7, 0, 0)
+			local length = (b.Position - a.Position).Magnitude
+			makePart("Handrail", Vector3.new(0.3, 0.3, length), CFrame.lookAt((a.Position + b.Position) / 2, b.Position), BRONZE, Enum.Material.Metal, stair, DECOR)
+		end
+		stair.Parent = tribune
+	end
+
+	-- Viewing platforms on the middle walkway, north and south
+	for _, degrees in { 90, 270 } do
+		local theta = math.rad(degrees)
+		makePart("ViewingPlatform", Vector3.new(14, 1, 5), frameAt(theta, PODIUM_THICKNESS + 2 * SEAT_DEPTH + 2.5, middleY + 0.5), TRAVERTINE, Enum.Material.Marble, tribune)
+		makePart("PlatformRail", Vector3.new(14, 2.5, 0.6), frameAt(theta, PODIUM_THICKNESS + 2 * SEAT_DEPTH + 0.3, middleY + 2.25), SANDSTONE, Enum.Material.Limestone, tribune)
+		for _, side in { -1, 1 } do
+			makePart("Post", Vector3.new(0.6, 5, 0.6), frameAt(theta, PODIUM_THICKNESS + 2 * SEAT_DEPTH + 0.3, middleY + 3.5) * CFrame.new(side * 6.7, 0, 0), BRONZE, Enum.Material.Metal, tribune)
+			makePart("Pennant", Vector3.new(1.6, 2.4, 0.1), frameAt(theta, PODIUM_THICKNESS + 2 * SEAT_DEPTH + 0.3, middleY + 4.6) * CFrame.new(side * 6.7 + side * 0.9, 0, 0), BANNER_RED, Enum.Material.Fabric, tribune, DECOR)
+		end
+	end
+
+	-- Basement entrance / RETURN TO LOBBY: a barred door in the riser of tier 2, east side
+	local doorBase = frameAt(0, PODIUM_THICKNESS + SEAT_DEPTH, lowerY)
+	makePart("DoorFrame", Vector3.new(6.4, 4.4, 0.4), doorBase * CFrame.new(0, 2.2, -0.15), STONE_DARK, Enum.Material.Limestone, tribune, DECOR)
+	local door = makePart("ReturnDoor", Vector3.new(5, 4, 0.4), doorBase * CFrame.new(0, 2, -0.4), OPENING, Enum.Material.Slate, tribune, DECOR)
+	for x = -2, 2, 1 do
+		makePart("Bar", Vector3.new(0.25, 4, 0.25), doorBase * CFrame.new(x, 2, -0.7), BRONZE, Enum.Material.Metal, tribune, DECOR)
+	end
+	local sign = makePart("ReturnSign", Vector3.new(9, 1.4, 0.3), doorBase * CFrame.new(0, 4.9, -0.6), BANNER_RED, Enum.Material.Fabric, tribune, DECOR)
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 40
+	gui.Parent = sign
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Text = "RETURN TO LOBBY"
+	label.Font = Enum.Font.GothamBold
+	label.TextScaled = true
+	label.TextColor3 = GOLD
+	label.Parent = gui
+	Arena.Layout.ReturnDoor = door
+
+	tribune.Parent = folder
 end
 
 local function buildSign(folder: Folder)
-	local z = -(RADIUS - 1.5)
-	local sign = Instance.new("Model")
-	sign.Name = "Sign"
-
-	for _, x in { -8, 8 } do
-		makePart("Post", Vector3.new(1, 7, 1), CFrame.new(x, FLOOR_TOP + 3.5, z), WOOD, Enum.Material.Wood, sign)
-	end
-	local board = makePart("Board", Vector3.new(18, 4, 1), facingCenter(Vector3.new(0, FLOOR_TOP + 9, z)), WOOD, Enum.Material.Wood, sign)
-
-	-- Front face (-Z) points at the arena center because of facingCenter().
+	-- Sits on top of the podium behind the barrier, above the north gate
+	local board = makePart("Sign", Vector3.new(22, 4, 0.8), frameAt(math.rad(270), 1.5, FLOOR_TOP + PODIUM_HEIGHT + 2.5), BRONZE, Enum.Material.Metal, folder, DECOR)
 	local gui = Instance.new("SurfaceGui")
 	gui.Face = Enum.NormalId.Front
 	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
@@ -185,14 +314,12 @@ local function buildSign(folder: Folder)
 
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1
+	label.BackgroundColor3 = BANNER_RED
 	label.Text = "OTTI ARENA"
 	label.Font = Enum.Font.Garamond
 	label.TextScaled = true
 	label.TextColor3 = GOLD
 	label.Parent = gui
-
-	sign.Parent = folder
 end
 
 -- Spawns from a template place (e.g. Baseplate) would compete with ours; disable them for this session only.
@@ -216,28 +343,58 @@ function Arena.build(): Folder
 		print(PREFIX, "Removed previous GeneratedArena before rebuilding")
 	end
 	disableOtherSpawns()
+	table.clear(Arena.Layout.ZombieSpawns)
 
 	local folder = Instance.new("Folder")
 	folder.Name = Config.ArenaFolderName
 	buildFloor(folder)
-	buildWall(folder)
-	buildGate(folder)
-	buildColumns(folder)
-	buildSpawn(folder)
+	buildWalls(folder)
+	buildArcades(folder)
+	buildGates(folder)
+	buildBanners(folder)
+	buildTribune(folder)
 	buildSign(folder)
-	folder.Parent = Workspace
 
+	local zombies = Instance.new("Folder")
+	zombies.Name = Config.ZombiesFolderName
+	zombies.Parent = folder
+
+	folder.Parent = Workspace
 	return folder
 end
 
--- True if a position is inside the playable area (with a little tolerance).
+-- True if a position is on the playable floor (margin > 0 is more forgiving).
 function Arena.isInside(position: Vector3, margin: number?): boolean
-	local flat = Vector3.new(position.X, 0, position.Z)
-	return flat.Magnitude <= RADIUS + (margin or 0) and position.Y >= FLOOR_TOP - 10
+	local m = margin or 0
+	local x = position.X / (A + m)
+	local z = position.Z / (B + m)
+	return x * x + z * z <= 1 and position.Y >= FLOOR_TOP - 10 and position.Y <= BARRIER_TOP + 20
 end
 
-function Arena.getSpawnCFrame(): CFrame
-	return facingCenter(Arena.Layout.SpawnPosition + Vector3.new(0, 3.5, 0))
+-- A floor-level point well inside the arena, in the direction of the given position.
+function Arena.getSafePoint(position: Vector3): Vector3
+	local theta = math.atan2(position.Z / B, position.X / A)
+	local p = ellipsePoint(theta, -10)
+	return Vector3.new(p.X, FLOOR_TOP, p.Z)
+end
+
+-- Where the fighter is placed when entering the arena.
+function Arena.getStartCFrame(): CFrame
+	local position = Arena.Layout.StartPosition
+	return CFrame.lookAt(position, Vector3.new(0, position.Y, 0))
+end
+
+-- Where spectators arrive on the lower tribune walkway (east, in front of the return door).
+function Arena.getTribuneCFrame(): CFrame
+	return frameAt(0, PODIUM_THICKNESS + 3.5, Arena.Layout.TribuneWalkwayY + 3)
+end
+
+-- True if a position is somewhere on the spectator stands (between barrier and outer wall).
+function Arena.isInTribune(position: Vector3): boolean
+	return not Arena.isInside(position, PODIUM_THICKNESS - 0.5)
+		and Arena.isInside(position, OUTER_OFFSET)
+		and position.Y >= Arena.Layout.TribuneWalkwayY - 2
+		and position.Y <= OUTER_TOP + 10
 end
 
 return Arena

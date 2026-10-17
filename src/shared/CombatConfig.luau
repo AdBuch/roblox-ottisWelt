@@ -2,55 +2,61 @@
 -- Combat tuning and shared combat names. Only the server applies these numbers to
 -- gameplay; the client reads them for display.
 
-export type FeedbackKind = "Swing" | "SwordHit" | "Block" | "PlayerHit"
-export type CombatState = "READY" | "ATTACKING" | "BLOCKING" | "HIT" | "VICTORY"
+export type FeedbackKind = "Swing" | "Hit" | "Block" | "PlayerHit" | "Heal" | "Coins" | "Shop" | "Slowed"
 
 local CombatConfig = {
-	-- Roman zombie
-	ZombieName = "RomanZombie",
-	ZombieMaxHealth = 60,
-	ZombieRespawnSeconds = 5,
-	ZombieWalkSpeed = 12,
-	ZombieDetectRadius = 60,
-	ZombieAttackRange = 5, -- starts an attack inside this distance
-	ZombieAttackReach = 6.5, -- the blow only lands if the target is still this close
-	ZombieAttackDamage = 10,
-	ZombieAttackCooldown = 1.4,
-	ZombieWindUpSeconds = 0.35,
-	ZombieThinkInterval = 0.1,
-	ZombiePathInterval = 0.6,
+	-- Zombies (per-variant stats live in ZombieDefinitions)
+	ZombieTag = "EnemyZombie", -- CollectionService tag on every LIVING zombie model
+	ZombieCollisionGroup = "Zombies",
+	MaxActiveZombies = 32, -- hard cap for this version (Round 6 = 32)
+	ZombieDamageMultiplier = 1, -- global difficulty knob for zombie hits
+	ZombieDetectRadius = 160, -- covers the whole Colosseum floor
+	ZombieRetargetInterval = 1,
+	ZombieThinkInterval = 0.15,
+	ZombiePathInterval = 1.0,
+	ZombieDirectMoveDistance = 30, -- move straight (no pathfinding) when the goal is this close and visible
+	ZombieDespawnSeconds = 1.0, -- death effect length before the model is removed
 
-	-- Arena folder attributes mirrored for the HUD
-	ZombieHealthAttribute = "ZombieHealth",
-	ZombieMaxHealthAttribute = "ZombieMaxHealth",
-	ZombieAliveAttribute = "ZombieAlive",
+	-- Crowd control around the fighter
+	MaxSimultaneousAttackers = 4,
+	AttackStartSpacing = 0.25, -- at most one new wind-up per target every this many seconds
+	CrowdSlotCount = 10,
+	CrowdSlotRadius = 4.4, -- melee slots around the player
+	CrowdWaitRadius = 11, -- zombies without a slot circle at this distance
+	CrowdApproachRadius = 16, -- claim a slot when this close
+	SeparationRadius = 3.8, -- zombies steer apart inside this distance
 
-	-- Player tools (built from Parts by the server)
-	ToolAttribute = "OttiTool",
-	SwordToolName = "Roman Sword",
-	SwordDamage = 15,
-	SwordCooldown = 0.65,
-	SwordRange = 7,
-	SwordFacingDot = 0.3, -- target must be within ~72° of where the player faces
+	-- Player
+	PlayerMaxHealth = 120,
+	PlayerWalkSpeed = 16,
+	BlockingWalkSpeed = 11,
+	HitImmunitySeconds = 0.35, -- after a landed zombie hit, further hits are ignored briefly
 
-	ShieldToolName = "Roman Shield",
-	ShieldDamageReduction = 0.8,
+	-- Shield (reduction values are per shield in ShieldDefinitions)
 	ShieldFacingDot = 0.5, -- attacker must be within 60° of where the player faces
-	ShieldBlockDistance = 10,
-	ShieldMaxBlockSeconds = 4, -- exploit safeguard: block drops after this; click again to re-raise
-	ShieldPushBackSpeed = 40,
-	ShieldStunSeconds = 0.6,
+	ShieldBlockDistance = 12,
+	ShieldMaxBlockSeconds = 4, -- exploit safeguard: release and press again to re-raise
+	ShieldPushBackSpeed = 34,
+
+	-- Temporary diagnostics for rejected attacks (rate limited per player and reason)
+	DebugRejectedAttacks = true,
+	RejectLogInterval = 2,
 
 	-- Built-in Studio sounds (rbxasset://, no uploaded asset IDs). Placeholders, swap freely.
-	SwordSoundId = "rbxasset://sounds/swordslash.wav",
+	SwingSoundId = "rbxasset://sounds/swordslash.wav",
 	ShieldSoundId = "rbxasset://sounds/unsheath.wav",
+	FanfareSoundId = "rbxasset://sounds/electronicpingshort.wav",
 
 	-- Server -> client messages on Remotes.CombatFeedback
 	Feedback = table.freeze({
-		Swing = "Swing" :: FeedbackKind,
-		SwordHit = "SwordHit" :: FeedbackKind,
-		Block = "Block" :: FeedbackKind,
-		PlayerHit = "PlayerHit" :: FeedbackKind,
+		Swing = "Swing" :: FeedbackKind, -- ()
+		Hit = "Hit" :: FeedbackKind, -- (zombieModel, damage, blockedByChampion)
+		Block = "Block" :: FeedbackKind, -- (isBlocking)
+		PlayerHit = "PlayerHit" :: FeedbackKind, -- (damage, wasBlocked)
+		Heal = "Heal" :: FeedbackKind, -- (amount)
+		Coins = "Coins" :: FeedbackKind, -- (amount)
+		Shop = "Shop" :: FeedbackKind, -- (message, success)
+		Slowed = "Slowed" :: FeedbackKind, -- (seconds)
 	}),
 }
 

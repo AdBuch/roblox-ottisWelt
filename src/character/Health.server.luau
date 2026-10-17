@@ -1,0 +1,4 @@
+--!strict
+-- Intentionally empty. A Script named "Health" in StarterCharacterScripts replaces Roblox's
+-- default Health script, so players never regenerate. Health only changes through zombie
+-- damage, healing shells or respawning (all handled on the server).

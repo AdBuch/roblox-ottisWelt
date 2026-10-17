@@ -1,5 +1,5 @@
 --!strict
--- Server entry point: checks required instances, builds the arena and wires up gameplay.
+-- Server entry point: checks required instances, builds the world and starts the services.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -8,42 +8,27 @@ local PREFIX = "[OttiArena][Server]"
 print(PREFIX, "Server script started")
 
 local shared = ReplicatedStorage:FindFirstChild("Shared")
-if not shared or not shared:FindFirstChild("Config") or not shared:FindFirstChild("CombatConfig") then
-	warn(PREFIX, "ReplicatedStorage.Shared (Config, CombatConfig) is missing. Is Rojo connected and mapping src/shared?")
-	return
+local required = { "Config", "CombatConfig", "GameStates", "WeaponDefinitions", "ShieldDefinitions", "ZombieDefinitions", "RoundDefinitions" }
+for _, name in required do
+	if not shared or not shared:FindFirstChild(name) then
+		warn(PREFIX, ("ReplicatedStorage.Shared.%s is missing. Is Rojo connected and mapping src/shared?"):format(name))
+		return
+	end
 end
 
 local Config = require(ReplicatedStorage.Shared.Config)
-local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
 local Arena = require(script.Parent.Arena)
 local ArenaSafetyService = require(script.Parent.ArenaSafetyService)
+local EquipmentShopService = require(script.Parent.EquipmentShopService)
+local GameStateService = require(script.Parent.GameStateService)
+local LobbyService = require(script.Parent.LobbyService)
+local PlayerCombatService = require(script.Parent.PlayerCombatService)
 local Remotes = require(script.Parent.Remotes)
-local Shells = require(script.Parent.Shells)
-local ShieldService = require(script.Parent.ShieldService)
-local SwordService = require(script.Parent.SwordService)
+local ShellService = require(script.Parent.ShellService)
+local WaveService = require(script.Parent.WaveService)
 local ZombieService = require(script.Parent.ZombieService)
 
-local BACKPACK_TIMEOUT = 5
-
-local function grantEquipment(player: Player)
-	local backpack = player:WaitForChild("Backpack", BACKPACK_TIMEOUT)
-	if not backpack then
-		warn(PREFIX, "No Backpack for", player.Name, "- equipment not granted")
-		return
-	end
-	SwordService.give(backpack)
-	ShieldService.give(player, backpack)
-	print(PREFIX, ("Equipment granted to %s: %s, %s"):format(player.Name, CombatConfig.SwordToolName, CombatConfig.ShieldToolName))
-end
-
-local function setupPlayer(player: Player)
-	player.CharacterAdded:Connect(function()
-		grantEquipment(player)
-	end)
-	if player.Character then
-		task.spawn(grantEquipment, player)
-	end
-
+local function setupLeaderstats(player: Player)
 	if player:FindFirstChild("leaderstats") then
 		return
 	end
@@ -53,29 +38,34 @@ local function setupPlayer(player: Player)
 	shells.Name = "Shells"
 	shells.Parent = leaderstats
 	leaderstats.Parent = player
-
-	player:GetAttributeChangedSignal(Config.ZombieDefeatedAttribute):Connect(function()
-		if player:GetAttribute(Config.ZombieDefeatedAttribute) == true then
-			print(PREFIX, player.Name, "completed the combat check (zombie defeated)")
-		end
-	end)
 end
 
-local arena = Arena.build()
-print(PREFIX, "Arena ready (walls", Arena.Layout.WallHeight, "studs high, gate closed)")
+-- World
+local arena = Arena.build() -- also disables template SpawnLocations
+local lobby = LobbyService.build() -- the only enabled SpawnLocation: everyone (re)spawns here
+print(PREFIX, ("Arena ready: Colosseum %dx%d studs, %d zombie gates, tribune walkways"):format(Arena.Layout.SemiAxisX * 2, Arena.Layout.SemiAxisZ * 2, #Arena.Layout.ZombieSpawns))
+print(PREFIX, "Lobby ready: underground hall, equipment wall, ENTER ARENA gate, TRIBUNE door")
+
+local _ = Remotes -- requiring the module validates/creates all remotes
+print(PREFIX, "Combat remotes ready (WeaponAttack, ShieldBlock, CombatFeedback)")
+
+-- Services
+ShellService.init(arena, Arena.Layout.ShellPositions)
+ZombieService.init(arena:WaitForChild(Config.ZombiesFolderName), {
+	getTargets = GameStateService.getFighters,
+	hitPlayer = PlayerCombatService.applyZombieHit,
+	isBlockingToward = PlayerCombatService.isBlockingToward,
+	slowPlayer = PlayerCombatService.applySlow,
+})
+PlayerCombatService.init()
+EquipmentShopService.build(lobby.folder, lobby.weaponSlots, lobby.shieldSlots)
+WaveService.init(arena)
+GameStateService.init(lobby, arena)
 ArenaSafetyService.init()
-Shells.init(arena, Arena.Layout.ShellPositions)
 
-ShieldService.init()
-SwordService.init()
-local _ = Remotes -- resolving the module validates/creates all remotes
-print(PREFIX, "Combat remotes ready (SwordAttack, ShieldBlock, CombatFeedback)")
-
-ZombieService.init(arena, Arena.Layout.ZombiePosition, Arena.Layout.SpawnPosition)
-
-Players.PlayerAdded:Connect(setupPlayer)
+Players.PlayerAdded:Connect(setupLeaderstats)
 for _, player in Players:GetPlayers() do
-	task.spawn(setupPlayer, player)
+	setupLeaderstats(player)
 end
 
-print(PREFIX, "Ready")
+print(PREFIX, "Ready: one fighter at a time, 6 rounds (1, 2, 4, 8, 16, 32 zombies)")
