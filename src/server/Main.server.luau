@@ -8,41 +8,42 @@ local PREFIX = "[OttiArena][Server]"
 print(PREFIX, "Server script started")
 
 local shared = ReplicatedStorage:FindFirstChild("Shared")
-if not shared or not shared:FindFirstChild("Config") then
-	warn(PREFIX, "ReplicatedStorage.Shared.Config is missing. Is Rojo connected and default.project.json mapping src/shared?")
+if not shared or not shared:FindFirstChild("Config") or not shared:FindFirstChild("CombatConfig") then
+	warn(PREFIX, "ReplicatedStorage.Shared (Config, CombatConfig) is missing. Is Rojo connected and mapping src/shared?")
 	return
 end
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
 local Arena = require(script.Parent.Arena)
+local ArenaSafetyService = require(script.Parent.ArenaSafetyService)
+local Remotes = require(script.Parent.Remotes)
 local Shells = require(script.Parent.Shells)
-local Dummy = require(script.Parent.Dummy)
-local Combat = require(script.Parent.Combat)
+local ShieldService = require(script.Parent.ShieldService)
+local SwordService = require(script.Parent.SwordService)
+local ZombieService = require(script.Parent.ZombieService)
 
--- Remotes are created by Rojo (default.project.json). Fall back to creating them so the test still runs.
-local function getAttackRemote(): RemoteEvent
-	local remotes = ReplicatedStorage:FindFirstChild(Config.RemotesFolderName)
-	if not remotes then
-		warn(PREFIX, "ReplicatedStorage.Remotes is missing (should come from Rojo); creating it at runtime")
-		local folder = Instance.new("Folder")
-		folder.Name = Config.RemotesFolderName
-		folder.Parent = ReplicatedStorage
-		remotes = folder
-	end
-	assert(remotes, "Remotes folder")
+local BACKPACK_TIMEOUT = 5
 
-	local remote = remotes:FindFirstChild(Config.AttackRemoteName)
-	if remote and remote:IsA("RemoteEvent") then
-		return remote
+local function grantEquipment(player: Player)
+	local backpack = player:WaitForChild("Backpack", BACKPACK_TIMEOUT)
+	if not backpack then
+		warn(PREFIX, "No Backpack for", player.Name, "- equipment not granted")
+		return
 	end
-	warn(PREFIX, "Remotes.Attack RemoteEvent is missing (should come from Rojo); creating it at runtime")
-	local created = Instance.new("RemoteEvent")
-	created.Name = Config.AttackRemoteName
-	created.Parent = remotes
-	return created
+	SwordService.give(backpack)
+	ShieldService.give(player, backpack)
+	print(PREFIX, ("Equipment granted to %s: %s, %s"):format(player.Name, CombatConfig.SwordToolName, CombatConfig.ShieldToolName))
 end
 
 local function setupPlayer(player: Player)
+	player.CharacterAdded:Connect(function()
+		grantEquipment(player)
+	end)
+	if player.Character then
+		task.spawn(grantEquipment, player)
+	end
+
 	if player:FindFirstChild("leaderstats") then
 		return
 	end
@@ -53,28 +54,28 @@ local function setupPlayer(player: Player)
 	shells.Parent = leaderstats
 	leaderstats.Parent = player
 
-	local completed = false
-	local function checkComplete()
-		if completed then
-			return
+	player:GetAttributeChangedSignal(Config.ZombieDefeatedAttribute):Connect(function()
+		if player:GetAttribute(Config.ZombieDefeatedAttribute) == true then
+			print(PREFIX, player.Name, "completed the combat check (zombie defeated)")
 		end
-		if shells.Value >= Config.ShellCount and player:GetAttribute(Config.ZombieDefeatedAttribute) == true then
-			completed = true
-			print(PREFIX, player.Name, "completed the setup check (3 shells + zombie defeated)")
-		end
-	end
-	shells.Changed:Connect(checkComplete)
-	player:GetAttributeChangedSignal(Config.ZombieDefeatedAttribute):Connect(checkComplete)
+	end)
 end
 
 local arena = Arena.build()
+print(PREFIX, "Arena ready (walls", Arena.Layout.WallHeight, "studs high, gate closed)")
+ArenaSafetyService.init()
 Shells.init(arena, Arena.Layout.ShellPositions)
-Dummy.init(arena, Arena.Layout.DummyPosition, Arena.Layout.SpawnPosition)
-Combat.init(getAttackRemote())
+
+ShieldService.init()
+SwordService.init()
+local _ = Remotes -- resolving the module validates/creates all remotes
+print(PREFIX, "Combat remotes ready (SwordAttack, ShieldBlock, CombatFeedback)")
+
+ZombieService.init(arena, Arena.Layout.ZombiePosition, Arena.Layout.SpawnPosition)
 
 Players.PlayerAdded:Connect(setupPlayer)
 for _, player in Players:GetPlayers() do
 	task.spawn(setupPlayer, player)
 end
 
-print(PREFIX, ("Ready: arena built with %d shells and a %d HP training zombie"):format(Config.ShellCount, Config.DummyMaxHealth))
+print(PREFIX, "Ready")

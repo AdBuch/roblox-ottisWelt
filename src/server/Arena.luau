@@ -11,23 +11,32 @@ local PREFIX = "[OttiArena][Server]"
 
 local SAND = Color3.fromRGB(226, 202, 145)
 local STONE = Color3.fromRGB(168, 162, 150)
+local STONE_LIGHT = Color3.fromRGB(196, 190, 176)
 local MARBLE = Color3.fromRGB(236, 231, 220)
 local WOOD = Color3.fromRGB(110, 72, 40)
+local DARK_WOOD = Color3.fromRGB(78, 50, 30)
+local BRONZE = Color3.fromRGB(176, 125, 60)
 local GOLD = Color3.fromRGB(255, 205, 70)
 
 local RADIUS = Config.ArenaRadius
 local FLOOR_TOP = 1
-local WALL_HEIGHT = 3
-local WALL_SEGMENTS = 32
-local COLUMN_HEIGHT = 14
+local WALL_HEIGHT = 28
+local WALL_THICKNESS = 6
+local WALL_SEGMENTS = 40
+local COLUMN_HEIGHT = 22
+local GATE_WIDTH = 11
+local GATE_HEIGHT = 21
 
 local Arena = {}
 
 -- Positions other modules use to place things inside the arena.
 Arena.Layout = {
+	Center = Vector3.new(0, FLOOR_TOP, 0),
+	Radius = RADIUS,
 	FloorTop = FLOOR_TOP,
+	WallHeight = WALL_HEIGHT,
 	SpawnPosition = Vector3.new(0, FLOOR_TOP + 0.5, RADIUS - 8),
-	DummyPosition = Vector3.new(0, FLOOR_TOP, -4),
+	ZombiePosition = Vector3.new(0, FLOOR_TOP, -4),
 	ShellPositions = {} :: { Vector3 },
 }
 
@@ -56,7 +65,7 @@ local function facingCenter(position: Vector3): CFrame
 end
 
 local function buildFloor(folder: Folder)
-	local diameter = RADIUS * 2 + 4
+	local diameter = (RADIUS + WALL_THICKNESS) * 2
 	-- Cylinders run along X, so roll 90° to make a flat disc.
 	local floor = makePart(
 		"Floor",
@@ -69,14 +78,26 @@ local function buildFloor(folder: Folder)
 	floor.Shape = Enum.PartType.Cylinder
 end
 
+-- A ring of straight segments. Each segment is sized for the OUTER radius, so neighbours
+-- overlap on the inside and meet on the outside: no gaps to squeeze through.
 local function buildWall(folder: Folder)
-	local wallRadius = RADIUS + 1
-	local segmentLength = 2 * math.pi * wallRadius / WALL_SEGMENTS + 0.6
+	local wall = Instance.new("Model")
+	wall.Name = "Wall"
+	local centerRadius = RADIUS + WALL_THICKNESS / 2
+	local outerRadius = RADIUS + WALL_THICKNESS
+	local segmentLength = 2 * outerRadius * math.tan(math.pi / WALL_SEGMENTS) + 0.4
+
 	for i = 0, WALL_SEGMENTS - 1 do
 		local angle = i / WALL_SEGMENTS * 2 * math.pi
-		local position = Vector3.new(math.cos(angle) * wallRadius, FLOOR_TOP + WALL_HEIGHT / 2, math.sin(angle) * wallRadius)
-		makePart("Wall", Vector3.new(segmentLength, WALL_HEIGHT, 2), facingCenter(position), STONE, Enum.Material.Slate, folder)
+		local x, z = math.cos(angle), math.sin(angle)
+		local position = Vector3.new(x * centerRadius, FLOOR_TOP + WALL_HEIGHT / 2, z * centerRadius)
+		makePart("Segment", Vector3.new(segmentLength, WALL_HEIGHT, WALL_THICKNESS), facingCenter(position), STONE, Enum.Material.Slate, wall)
+
+		-- Decorative cornice on top
+		local capPosition = Vector3.new(x * centerRadius, FLOOR_TOP + WALL_HEIGHT + 0.5, z * centerRadius)
+		makePart("Cap", Vector3.new(segmentLength + 0.2, 1, WALL_THICKNESS + 1), facingCenter(capPosition), STONE_LIGHT, Enum.Material.Limestone, wall)
 	end
+	wall.Parent = folder
 end
 
 local function buildColumns(folder: Folder)
@@ -100,6 +121,35 @@ local function buildColumns(folder: Folder)
 
 		column.Parent = folder
 	end
+end
+
+-- The entrance: an arched frame with closed wooden gate doors. The wall continues
+-- solidly behind it, so the gate is purely visual and can't be passed.
+local function buildGate(folder: Folder)
+	local gate = Instance.new("Model")
+	gate.Name = "Gate"
+	local z = RADIUS - 0.5
+	local pillarX = GATE_WIDTH / 2 + 1.5
+
+	for _, side in { -1, 1 } do
+		makePart("Pillar", Vector3.new(3, GATE_HEIGHT + 2, 3), CFrame.new(side * pillarX, FLOOR_TOP + (GATE_HEIGHT + 2) / 2, z - 1), STONE_LIGHT, Enum.Material.Limestone, gate)
+	end
+	makePart("Lintel", Vector3.new(GATE_WIDTH + 6, 3, 3.4), CFrame.new(0, FLOOR_TOP + GATE_HEIGHT + 3.5, z - 1), STONE_LIGHT, Enum.Material.Limestone, gate)
+
+	makePart("Doors", Vector3.new(GATE_WIDTH, GATE_HEIGHT, 1), CFrame.new(0, FLOOR_TOP + GATE_HEIGHT / 2, z), DARK_WOOD, Enum.Material.WoodPlanks, gate)
+	makePart("Seam", Vector3.new(0.25, GATE_HEIGHT, 0.2), CFrame.new(0, FLOOR_TOP + GATE_HEIGHT / 2, z - 0.6), Color3.new(0.1, 0.07, 0.05), Enum.Material.Wood, gate)
+	for _, x in { -4.5, -1.5, 1.5, 4.5 } do
+		makePart("Bar", Vector3.new(0.5, GATE_HEIGHT, 0.4), CFrame.new(x, FLOOR_TOP + GATE_HEIGHT / 2, z - 0.7), BRONZE, Enum.Material.Metal, gate)
+	end
+	for _, y in { 5, 15 } do
+		makePart("Band", Vector3.new(GATE_WIDTH, 0.7, 0.4), CFrame.new(0, FLOOR_TOP + y, z - 0.75), BRONZE, Enum.Material.Metal, gate)
+	end
+	for _, x in { -1.2, 1.2 } do
+		local ring = makePart("Handle", Vector3.new(0.3, 1.2, 1.2), CFrame.new(x, FLOOR_TOP + 9, z - 1) * CFrame.Angles(0, math.rad(90), 0), BRONZE, Enum.Material.Metal, gate)
+		ring.Shape = Enum.PartType.Cylinder
+	end
+
+	gate.Parent = folder
 end
 
 local function buildSpawn(folder: Folder)
@@ -171,12 +221,23 @@ function Arena.build(): Folder
 	folder.Name = Config.ArenaFolderName
 	buildFloor(folder)
 	buildWall(folder)
+	buildGate(folder)
 	buildColumns(folder)
 	buildSpawn(folder)
 	buildSign(folder)
 	folder.Parent = Workspace
 
 	return folder
+end
+
+-- True if a position is inside the playable area (with a little tolerance).
+function Arena.isInside(position: Vector3, margin: number?): boolean
+	local flat = Vector3.new(position.X, 0, position.Z)
+	return flat.Magnitude <= RADIUS + (margin or 0) and position.Y >= FLOOR_TOP - 10
+end
+
+function Arena.getSpawnCFrame(): CFrame
+	return facingCenter(Arena.Layout.SpawnPosition + Vector3.new(0, 3.5, 0))
 end
 
 return Arena

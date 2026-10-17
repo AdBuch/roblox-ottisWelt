@@ -61,6 +61,7 @@ function Shells.init(parent: Instance, positions: { Vector3 })
 		shell.Anchored = true
 		shell.CanCollide = false
 		shell.CanTouch = true
+		shell.CanQuery = false -- never blocks combat line-of-sight raycasts
 		shell.Color = GOLD
 		shell.Material = Enum.Material.Neon
 		shell:SetAttribute("ShellId", id)

@@ -1,5 +1,6 @@
 --!strict
--- Shared tuning values and names used by both server and client.
+-- Shared names and arena/shell values used by both server and client.
+-- Combat tuning lives in CombatConfig.
 
 local Config = {
 	ArenaFolderName = "GeneratedArena",
@@ -11,18 +12,13 @@ local Config = {
 	ShellAttributePrefix = "CollectedShell_",
 	ShellPickupRange = 8,
 
-	DummyName = "RomanZombie",
-	DummyMaxHealth = 30,
-	DummyRespawnSeconds = 5,
-	-- Player attribute set by the server once the player helped defeat the dummy
+	-- Player attribute set by the server once the player helped defeat the zombie
 	ZombieDefeatedAttribute = "DefeatedZombie",
 
-	AttackDamage = 10,
-	AttackRange = 8,
-	AttackCooldown = 0.5,
-
 	RemotesFolderName = "Remotes",
-	AttackRemoteName = "Attack",
+	SwordAttackRemoteName = "SwordAttack",
+	ShieldBlockRemoteName = "ShieldBlock",
+	CombatFeedbackRemoteName = "CombatFeedback",
 }
 
 return table.freeze(Config)
