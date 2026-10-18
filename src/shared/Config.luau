@@ -50,6 +50,8 @@ local Config = {
 	CrowdPulseAttribute = "CrowdPulse", -- increments with every crowd reaction
 	DamageFxModeAttribute = "DamageFxMode", -- STYLIZED | REDUCED | OFF (HUD display)
 	OttiTag = "OttiBoss", -- the living boss model (never a zombie)
+	OttiSpectatorTag = "OttiSpectator", -- Otti watching from the imperial box (never a target)
+	BossLandingAttribute = "BossLanding", -- increments when Otti lands (client camera shake)
 	CrowdSpectatorTag = "CrowdSpectator", -- animal spectators in the stands (client animates them)
 	IntroSeenAttribute = "BossIntroSeen", -- player attribute: may skip the intro
 

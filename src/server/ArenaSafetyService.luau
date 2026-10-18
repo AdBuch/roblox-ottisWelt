@@ -65,7 +65,8 @@ local function checkZombies()
 		end
 		local root = model.PrimaryPart
 		local humanoid = model:FindFirstChildOfClass("Humanoid")
-		if root and humanoid and not Arena.isInside(root.Position, 1) then
+		-- Anchored roots are moved by script (Otti's entrance arc): never pull them back
+		if root and humanoid and not root.Anchored and not Arena.isInside(root.Position, 1) then
 			local height = humanoid.HipHeight + root.Size.Y / 2
 			root.AssemblyLinearVelocity = Vector3.zero
 			model:PivotTo(CFrame.new(Arena.getSafePoint(root.Position) + Vector3.new(0, height, 0)))

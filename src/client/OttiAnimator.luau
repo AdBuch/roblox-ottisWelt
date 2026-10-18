@@ -111,6 +111,42 @@ local POSES: { [string]: PoseTable } = {
 	},
 }
 
+-- Spectating in the imperial box: sits like an otter, tail beside the throne, paws on the knees
+local SITTING: PoseTable = {
+	RootJoint = CFrame.new(0, -1.5, 0.4) * A(8, 0, 0),
+	Waist = A(-4, 0, 0),
+	Neck = A(6, 0, 0),
+	RightShoulder = A(35, 0, 6),
+	LeftShoulder = A(35, 0, -6),
+	RightHip = A(82, 0, 10),
+	LeftHip = A(82, 0, -10),
+	Tail1 = A(-20, 55, 0),
+	Tail2 = A(0, 18, 0),
+	Tail3 = A(0, 16, 0),
+	Tail4 = A(0, 14, 0),
+	Tail5 = A(4, 10, 0),
+	Tail6 = A(6, 8, 0),
+}
+
+-- Reactions in the box and the entrance
+local SPECTATOR_POSES: { [string]: PoseTable } = {
+	SitLean = { RootJoint = CFrame.new(0, -1.5, 0.1) * A(-18, 0, 0), RightShoulder = A(55, 0, 6), LeftShoulder = A(55, 0, -6), Neck = A(20, 0, 0) },
+	RailStrike = { RootJoint = CFrame.new(0, -1.5, 0.1) * A(-18, 0, 0), RightShoulder = A(100, 0, 10), LeftShoulder = A(55, 0, -6), Neck = A(20, 0, 0) },
+	PawRaise = { LeftShoulder = A(165, 0, -10), Neck = A(10, 0, 0) },
+	StandBrief = { RootJoint = A(-6, 0, 0), RightHip = A(10, 0, 0), LeftHip = A(10, 0, 0), RightShoulder = A(130, 0, 25), LeftShoulder = A(130, 0, -25), Tail1 = A(-15, 0, 0), Tail2 = A(0, 0, 0), Tail3 = A(0, 0, 0), Tail4 = A(0, 0, 0) },
+	Surprised = { RootJoint = CFrame.new(0, -1.5, 0.5) * A(14, 0, 0), RightShoulder = A(70, 0, 40), LeftShoulder = A(70, 0, -40), Neck = A(-12, 0, 0) },
+	Clap = { RightShoulder = A(70, 0, 15), LeftShoulder = A(70, 0, -15), Neck = A(12, 0, 0) },
+	SitBack = { RootJoint = CFrame.new(0, -1.6, 0.6) * A(20, 0, 0), Neck = A(-16, 0, 0), RightShoulder = A(10, 0, 8), LeftShoulder = A(10, 0, -8) },
+	SitImpatient = { RightShoulder = A(45, 0, 4), Tail1 = A(-15, 55, 0) },
+	StandUp = { RootJoint = A(-6, 0, 0), RightHip = A(10, 0, 0), LeftHip = A(10, 0, 0) },
+	ClimbRail = { RootJoint = A(-30, 0, 0), RightShoulder = A(100, 0, 10), LeftShoulder = A(100, 0, -10), RightHip = A(70, 0, 0), LeftHip = A(10, 0, 0) },
+	Leap = { RootJoint = A(-20, 0, 0), RightShoulder = A(110, 0, 60), LeftShoulder = A(110, 0, -60), RightHip = A(35, 0, 0), LeftHip = A(-15, 0, 0), Tail1 = A(30, 0, 0), Tail2 = A(5, 0, 0) },
+	Land = { RootJoint = CFrame.new(0, -1.4, 0) * A(-30, 0, 0), RightShoulder = A(40, 0, 40), LeftShoulder = A(40, 0, -40), RightHip = A(50, 0, 0), LeftHip = A(50, 0, 0), Tail1 = A(-40, 0, 0) },
+}
+for name, pose in SPECTATOR_POSES do
+	POSES[name] = pose
+end
+
 local LOCO_POSES: { [string]: PoseTable } = {
 	STAGGER = { RootJoint = A(14, 0, 0), RightShoulder = A(30, 0, 40), LeftShoulder = A(30, 0, -40), Neck = A(-10, 0, 0) },
 	KNOCKDOWN = { RootJoint = CFrame.new(0, -1.9, 0.6) * A(70, 0, 10), RightHip = A(40, 0, 0), LeftHip = A(40, 0, 0), RightShoulder = A(100, 0, 50), LeftShoulder = A(100, 0, -50) },
@@ -224,12 +260,25 @@ local function update(state: State, dt: number, ids: { [string]: string })
 	local s = math.sin(p)
 
 	local target: { [string]: CFrame } = {}
+	local sitting = loco == "SITTING"
 	for _, name in MOTORS do
-		target[name] = BIPED[name]:Lerp(QUAD[name], q)
+		target[name] = if sitting then SITTING[name] else BIPED[name]:Lerp(QUAD[name], q)
+	end
+	if sitting then
+		moving = 0
+		-- The head follows the fighting below
+		local lookAt = model:GetAttribute("LookAt")
+		if typeof(lookAt) == "Vector3" then
+			local localTarget = root.CFrame:PointToObjectSpace(lookAt)
+			local yaw = math.clamp(math.atan2(-localTarget.X, -localTarget.Z), rad(-70), rad(70))
+			target.Neck *= CFrame.Angles(0, yaw, 0)
+		end
 	end
 
 	-- Gait
-	if q > 0.5 then
+	if sitting then
+		target.Waist *= CFrame.Angles(math.sin(now * 1.6) * rad(2), 0, 0) -- breathing
+	elseif q > 0.5 then
 		local amp = rad(18 + 18 * running) * moving
 		target.RightShoulder *= CFrame.Angles(s * amp, 0, 0)
 		target.LeftShoulder *= CFrame.Angles(-s * amp, 0, 0)
@@ -283,6 +332,12 @@ local function update(state: State, dt: number, ids: { [string]: string })
 		for name, cframe in poseTable do
 			if pose == "IntroSweep" and name == "Tail1" then
 				cframe *= CFrame.Angles(0, math.sin(now * 6) * rad(60), 0)
+			elseif pose == "Clap" and (name == "RightShoulder" or name == "LeftShoulder") then
+				cframe *= CFrame.Angles(0, 0, math.sin(now * 14) * rad(14) * (if name == "RightShoulder" then -1 else 1))
+			elseif pose == "RailStrike" and name == "RightShoulder" then
+				cframe *= CFrame.Angles(math.abs(math.sin(now * 9)) * rad(-40), 0, 0)
+			elseif pose == "SitImpatient" and name == "Tail1" then
+				cframe *= CFrame.Angles(math.abs(math.sin(now * 7)) * rad(18), 0, 0) -- tail tapping
 			end
 			target[name] = target[name]:Lerp(cframe, blend)
 		end

@@ -998,6 +998,18 @@ function ZombieService.tryGuardBlock(z: Zombie, attackerPosition: Vector3): bool
 end
 
 -- Applies server-validated damage plus a short stagger and controlled knockback.
+-- GUARD BREAK combos: a raised guard is broken (true) and the zombie can't guard for a while.
+function ZombieService.breakGuard(z: Zombie): boolean
+	if not z.alive or not z.guarding then
+		return false
+	end
+	endGuard(z)
+	z.guardReadyAt = math.max(z.guardReadyAt, os.clock() + 4)
+	z.stunnedUntil = math.max(z.stunnedUntil, os.clock() + 1)
+	CombatEffects.burst(z.root.Position + Vector3.new(0, 1, 0), Color3.fromRGB(255, 150, 80), 1)
+	return true
+end
+
 -- Lost armor makes a zombie a little easier to hurt.
 function ZombieService.damageMultiplier(z: Zombie): number
 	return 1 + math.min(DamageEffectsConfig.MaxArmorDamageBonus, z.limbs.armorLost * DamageEffectsConfig.ArmorLostDamageBonus)

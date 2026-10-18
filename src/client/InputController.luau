@@ -1,9 +1,11 @@
 --!strict
 -- All player combat input. The client only sends INTENT (action + aim point); the server
 -- validates everything (state, ownership, cooldowns, combos, targets, damage).
---   Keyboard/mouse : LMB attack · RMB hold to block · Q Special 1 · E Special 2
---   Gamepad        : R2 attack · L2 hold to block · X Special 1 · Y Special 2
---   Touch          : ATK · hold BLOCK · the two special buttons (MobileControlsController)
+--   Keyboard/mouse : LMB attack · RMB block (tap = combo B, hold = guard) · Space jump · Enter execute
+--   Gamepad        : R2 attack · L2 block · A jump · Y execute
+--   Touch          : ATK · BLOCK · Roblox's jump button · COMBO (MobileControlsController)
+-- Attacks start immediately (nothing is charged). Jumps are reported as "Jump" inputs; the server
+-- only counts them if it saw a real jump. Aerial attacks = attack while airborne.
 -- For intuitive aiming the character turns toward the cursor before an action and keeps
 -- facing the camera direction while blocking. Interaction prompts use F (gamepad D-pad up).
 
@@ -24,9 +26,9 @@ export type Options = {
 	canAct: () -> boolean,
 	attackButton: TextButton, -- touch buttons come from MobileControlsController
 	blockButton: TextButton,
-	special1Button: TextButton,
-	special2Button: TextButton,
+	comboButton: TextButton,
 	onSchemeChanged: (scheme: Scheme) -> (),
+	onInput: (input: string) -> (), -- local A / B / J / E feedback (display only)
 }
 
 local InputController = {}
@@ -74,7 +76,7 @@ function InputController.init(options: Options): { isBlockHeld: () -> boolean }
 		return if result then result.Position else ray.Origin + ray.Direction * AIM_DISTANCE
 	end
 
-	local function act(action: "Basic" | "Special1" | "Special2")
+	local function act(action: "Basic" | "Execute")
 		if not options.canAct() then
 			return
 		end
@@ -86,8 +88,11 @@ function InputController.init(options: Options): { isBlockHeld: () -> boolean }
 			return
 		end
 		local point = aimPoint(root)
-		faceDirection(root, point - root.Position)
+		if action == "Basic" then
+			faceDirection(root, point - root.Position)
+		end
 		remotes.combatAction:FireServer(action, point)
+		options.onInput(if action == "Basic" then "A" else "E")
 	end
 
 	local function setBlock(held: boolean)
@@ -100,6 +105,9 @@ function InputController.init(options: Options): { isBlockHeld: () -> boolean }
 			humanoid.AutoRotate = not held
 		end
 		remotes.shieldBlock:FireServer(held)
+		if held and options.canAct() then
+			options.onInput("B") -- a block press is also a combo B (holding keeps guarding)
+		end
 	end
 
 	UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
@@ -111,10 +119,8 @@ function InputController.init(options: Options): { isBlockHeld: () -> boolean }
 			act("Basic")
 		elseif inputType == Enum.UserInputType.MouseButton2 or key == Enum.KeyCode.ButtonL2 then
 			setBlock(true)
-		elseif key == Enum.KeyCode.Q or key == Enum.KeyCode.ButtonX then
-			act("Special1")
-		elseif key == Enum.KeyCode.E or key == Enum.KeyCode.ButtonY then
-			act("Special2")
+		elseif key == Enum.KeyCode.Return or key == Enum.KeyCode.KeypadEnter or key == Enum.KeyCode.ButtonY then
+			act("Execute")
 		end
 	end)
 	UserInputService.InputEnded:Connect(function(input: InputObject)
@@ -139,12 +145,30 @@ function InputController.init(options: Options): { isBlockHeld: () -> boolean }
 		blockHeld = false
 	end)
 
-	-- The special cards on the HUD double as touch buttons
-	options.special1Button.Activated:Connect(function()
-		act("Special1")
+	-- COMBO button (touch) = Execute
+	options.comboButton.Activated:Connect(function()
+		act("Execute")
 	end)
-	options.special2Button.Activated:Connect(function()
-		act("Special2")
+
+	-- Jumps (Space, gamepad A, Roblox's touch jump button) are combo inputs too. The server decides
+	-- whether a real jump happened; one report per press.
+	local lastJump = 0
+	UserInputService.JumpRequest:Connect(function()
+		local now = os.clock()
+		if now - lastJump < 0.3 or not options.canAct() then
+			return
+		end
+		local humanoid = getParts()
+		if not humanoid then
+			return
+		end
+		local state = humanoid:GetState()
+		if state == Enum.HumanoidStateType.Freefall or state == Enum.HumanoidStateType.Jumping then
+			return -- already in the air: no new jump
+		end
+		lastJump = now
+		remotes.combatAction:FireServer("Jump")
+		options.onInput("J")
 	end)
 
 	-- Touch: ATTACK and hold-BLOCK buttons (drawn by MobileControlsController)

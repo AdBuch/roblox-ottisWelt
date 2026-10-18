@@ -126,6 +126,38 @@ function EffectsController.knockdown(seconds: number)
 	end)
 end
 
+-- One controlled hop for a combo aerial started on the ground (a single velocity change: no
+-- repeated acceleration, so no flying).
+function EffectsController.leap(upVelocity: number, direction: Vector3, distance: number)
+	local root = getRoot()
+	if not root then
+		return
+	end
+	local flat = Vector3.new(direction.X, 0, direction.Z)
+	local forward = if flat.Magnitude > 0.01 then flat.Unit * (distance / 0.6) else Vector3.zero
+	root.AssemblyLinearVelocity = Vector3.new(forward.X, math.min(upVelocity, 40), forward.Z)
+end
+
+-- The aerial descent: forward travel (stopping before walls) plus a fixed downward speed.
+function EffectsController.dive(direction: Vector3, distance: number, downVelocity: number)
+	local root = getRoot()
+	if not root then
+		return
+	end
+	local flat = Vector3.new(direction.X, 0, direction.Z)
+	local forward = Vector3.zero
+	if flat.Magnitude > 0.01 and distance > 0 then
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.FilterDescendantsInstances = { root.Parent :: Instance }
+		params.RespectCanCollide = true
+		local hit = Workspace:Raycast(root.Position, flat.Unit * distance, params)
+		local allowed = if hit then math.max(0, (hit.Position - root.Position).Magnitude - 2) else distance
+		forward = flat.Unit * (allowed / 0.35)
+	end
+	root.AssemblyLinearVelocity = Vector3.new(forward.X, -math.abs(downVelocity), forward.Z)
+end
+
 function EffectsController.knockback(velocity: Vector3)
 	local root = getRoot()
 	if root then

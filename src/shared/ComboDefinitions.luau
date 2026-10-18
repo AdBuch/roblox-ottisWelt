@@ -1,62 +1,105 @@
 --!strict
--- Weapon combos: input sequences that end in a normal action and boost it.
--- Inputs: "Basic" | "Special1" (Q) | "Special2" (E) | "Block" (raising the shield/parry).
--- Each input must arrive within CombatConfig.ComboWindowSeconds after the previous move ended.
--- The server records only accepted actions, so a client can't claim a combo it didn't perform.
--- A late or wrong sequence simply plays the last action normally.
+-- Combination moves: Attack (A), Block tap (B) and Jump (J) inputs, resolved with Execute (Enter /
+-- COMBO button / gamepad Y). The server records only inputs it accepted and validated (a J needs
+-- a real jump), checks the timing (InputDefinitions) and matches the most recent inputs against
+-- the equipped weapon's sequences. Basic attacks never need a combo.
+--
+-- Shared patterns work with every weapon (universal moves scale with the weapon's basic attack);
+-- each weapon replaces some of them with its own named, more spectacular move.
 
-export type ComboInput = "Basic" | "Special1" | "Special2" | "Block"
+export type ComboInput = "A" | "B" | "J"
 
 export type ComboDefinition = {
 	Name: string,
 	Sequence: { ComboInput },
-	DamageMultiplier: number,
-	BonusStagger: number?,
+	Move: string, -- SpecialMoveDefinitions id
+	Advanced: boolean, -- a named weapon combo (otherwise a universal pattern)
 }
 
-local function combo(name: string, sequence: { ComboInput }, multiplier: number, stagger: number?): ComboDefinition
-	return table.freeze({ Name = name, Sequence = table.freeze(sequence), DamageMultiplier = multiplier, BonusStagger = stagger }) :: any
+local function combo(name: string, sequence: { ComboInput }, moveId: string, advanced: boolean): ComboDefinition
+	return table.freeze({ Name = name, Sequence = table.freeze(sequence), Move = moveId, Advanced = advanced }) :: any
 end
 
-local ComboDefinitions: { [string]: { ComboDefinition } } = {
+-- The five shared patterns.
+local Universal: { [string]: ComboDefinition } = table.freeze({
+	Counter = combo("COUNTER COMBINATION", { "B", "A", "B", "A" }, "U_Counter", false),
+	JumpFinisher = combo("JUMP FINISHER", { "A", "A", "J", "A" }, "U_JumpFinisher", false),
+	GuardBreak = combo("GUARD BREAK", { "B", "B", "A" }, "U_GuardBreak", false),
+	ArenaSpin = combo("ARENA SPIN", { "A", "B", "A", "A" }, "U_ArenaSpin", false),
+	Rising = combo("RISING ATTACK", { "B", "J", "A" }, "U_Rising", false),
+}) :: any
+
+-- Weapon-specific moves (same sequence as a shared pattern replaces it).
+local Named: { [string]: { ComboDefinition } } = {
 	RustyGladius = {
-		combo("GLADIATOR'S POINT", { "Basic", "Basic", "Special1" }, 1.4),
-		combo("IRON REPLY", { "Block", "Special2" }, 1.5, 0.4),
-		combo("SAND STEP", { "Special1", "Basic" }, 1.25),
+		combo("REBELLION COMBO", { "B", "A", "B", "A" }, "RebellionCombo", true),
+		combo("SAND VIPER", { "A", "A", "J", "A" }, "SandViper", true),
 	},
 	LegionSword = {
-		combo("TESTUDO BREAKER", { "Basic", "Basic", "Special2" }, 1.4, 0.3),
-		combo("CENTURION'S ORDER", { "Special1", "Basic", "Special2" }, 1.6),
+		combo("LEGION'S FURY", { "A", "B", "A", "A" }, "LegionsFury", true),
+		combo("EAGLE OF ROME", { "B", "J", "A" }, "EagleOfRome", true),
 	},
 	HunterBow = {
-		combo("VOLLEY", { "Basic", "Basic", "Special1" }, 1.3),
-		combo("STEADY AIM", { "Block", "Special2" }, 1.4),
+		combo("ARROW RAIN", { "B", "A", "A" }, "ArrowRain", true),
+		combo("EAGLE SHOT", { "A", "J", "A" }, "EagleShot", true),
 	},
 	MorningStar = {
-		combo("MACE AND THUNDER", { "Basic", "Special1" }, 1.3, 0.3),
-		combo("IRON STORM", { "Basic", "Special2" }, 1.3),
+		combo("CHAIN TEMPEST", { "A", "B", "A", "A" }, "ChainTempest", true),
+		combo("FALLING METEOR", { "B", "J", "A" }, "FallingMeteor", true),
 	},
 	Trident = {
-		combo("SEA STORM", { "Basic", "Basic", "Special1" }, 1.3),
-		combo("CAUGHT IN THE NET", { "Special2", "Basic" }, 1.5),
+		combo("RETIARIUS FURY", { "B", "A", "B", "A" }, "RetiariusFury", true),
+		combo("SEA EAGLE DIVE", { "A", "A", "J", "A" }, "SeaEagleDive", true),
 	},
 	HopliteSpear = {
-		combo("SHIELD WALL", { "Block", "Special1" }, 1.4, 0.3),
-		combo("HOPLITE CIRCLE", { "Basic", "Basic", "Special2" }, 1.3),
+		combo("PHALANX BREAKER", { "B", "B", "A" }, "PhalanxBreaker", true),
+		combo("SPARTAN VAULT", { "A", "J", "A" }, "SpartanVault", true),
 	},
 	TwinDaggers = {
-		combo("VIPER'S NEST", { "Basic", "Basic", "Special1" }, 1.2),
-		combo("SHADOW COUNTER", { "Block", "Special2" }, 1.5),
-		combo("TWIN FANGS", { "Special2", "Basic", "Basic" }, 1.3),
+		combo("VIPER DANCE", { "A", "B", "A", "A" }, "ViperDance", true),
+		combo("RIVER SHADOW", { "B", "J", "A" }, "RiverShadow", true),
 	},
 	BattleAxe = {
-		combo("HEADSMAN", { "Basic", "Special1" }, 1.3),
-		combo("ARENA STORM", { "Basic", "Basic", "Special2" }, 1.3),
+		combo("COLOSSEUM BREAKER", { "B", "A", "B", "A" }, "ColosseumBreaker", true),
+		combo("THUNDER OF MARS", { "A", "A", "J", "A" }, "ThunderOfMars", true),
 	},
 }
 
-for id, list in ComboDefinitions do
-	ComboDefinitions[id] = table.freeze(list) :: any
+local function key(sequence: { ComboInput }): string
+	return table.concat(sequence, "")
+end
+
+local byWeapon: { [string]: { ComboDefinition } } = {}
+for weaponId, named in Named do
+	local list: { ComboDefinition } = {}
+	local taken: { [string]: boolean } = {}
+	for _, entry in named do
+		table.insert(list, entry)
+		taken[key(entry.Sequence)] = true
+	end
+	for _, entry in Universal do
+		if not taken[key(entry.Sequence)] then
+			table.insert(list, entry)
+		end
+	end
+	-- Longest sequences first, so a longer combo wins over a shorter one ending the same way
+	table.sort(list, function(a, b)
+		if #a.Sequence ~= #b.Sequence then
+			return #a.Sequence > #b.Sequence
+		end
+		return a.Advanced and not b.Advanced
+	end)
+	byWeapon[weaponId] = table.freeze(list) :: any
+end
+
+local ComboDefinitions = {
+	Universal = Universal,
+	ByWeapon = table.freeze(byWeapon) :: { [string]: { ComboDefinition } },
+}
+
+-- "B → A → B → A" style text for boards and the info panel.
+function ComboDefinitions.describe(sequence: { ComboInput }): string
+	return table.concat(sequence, " → ") .. " → ENTER"
 end
 
 return table.freeze(ComboDefinitions)

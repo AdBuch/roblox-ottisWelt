@@ -45,6 +45,9 @@ export type HitInfo = {
 	isSpecial: boolean?,
 	spin: boolean?,
 	hitPosition: Vector3?, -- projectiles: exact impact point
+	guardBreak: boolean?, -- combo: breaks a raised guard instead of being stopped by it
+	fromCombo: boolean?, -- combo / aerial move (PvP stagger lock)
+	pvpCap: number?, -- PvP: the most this hit may still deal (whole-move cap)
 }
 
 -- Handles damage to players (installed by PlayerCombatService: blocking, caps, deaths).
@@ -219,7 +222,11 @@ function CombatTargets.applyHit(attacker: Player, target: Target, info: HitInfo)
 		if not zombie then
 			return 0, false
 		end
-		if ZombieService.tryGuardBlock(zombie, info.fromPosition) then
+		if info.guardBreak and ZombieService.breakGuard(zombie) then
+			-- the raised guard is broken: the hit goes through and the zombie staggers
+			ZombieService.applyDamage(zombie, attacker, math.floor(info.damage * ZombieService.damageMultiplier(zombie) + 0.5), info.fromPosition, 1.2, info.knockback, { weaponId = info.weaponId, isSpecial = true })
+			dealt = math.floor(info.damage + 0.5)
+		elseif ZombieService.tryGuardBlock(zombie, info.fromPosition) then
 			blocked = true
 		else
 			local damage = info.damage
@@ -243,7 +250,7 @@ function CombatTargets.applyHit(attacker: Player, target: Target, info: HitInfo)
 			dealt, blocked = damagePlayer(victim, attacker, info.damage * info.pvpMultiplier, info)
 		end
 	elseif target.kind == "Boss" then
-		dealt, blocked = OttiBossService.applyPlayerHit(attacker, info.damage, info.fromPosition, info.isProjectile, info.stagger, info.hitPosition)
+		dealt, blocked = OttiBossService.applyPlayerHit(attacker, info.damage, info.fromPosition, info.isProjectile, info.stagger, info.hitPosition, info.guardBreak == true)
 	elseif target.kind == "Dummy" then
 		local dummy = target.dummy
 		if dummy then

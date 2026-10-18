@@ -458,8 +458,11 @@ local function buildTraining(folder: Folder): ({ CFrame }, CFrame, Vector3)
 	end
 	sign(yard, "TrainingSign", Vector3.new(12, 3, 0.4), facing(center.X, 8.5, HALF_Z - 1, NORTH), {
 		{ text = "TRAINING", color = GOLD, scale = 0.6 },
-		{ text = "Test attacks, specials and combos", color = WHITE, scale = 0.3 },
+		{ text = "Test attacks, jump attacks and combos", color = WHITE, scale = 0.3 },
 	}, RED)
+	-- COMBO TRAINING board: the client writes the equipped weapon's combinations onto it
+	local board = makePart("ComboTrainingBoard", Vector3.new(9, 7, 0.4), facing(center.X - 11.3, 4.5, center.Z - 1, EAST), Color3.fromRGB(60, 40, 26), Enum.Material.Wood, yard)
+	board.CanCollide = false
 	local slots = { facing(center.X - 5, 0.2, center.Z + 2, NORTH), facing(center.X + 5, 0.2, center.Z + 2, NORTH) }
 	yard.Parent = folder
 	return slots, CFrame.new(center + Vector3.new(0, 6, 0)), Vector3.new(26, 16, 22)

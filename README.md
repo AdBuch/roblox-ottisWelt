@@ -25,10 +25,12 @@ src/shared/   -> ReplicatedStorage.Shared
   CombatConfig                       player/crowd/shield/parry/combo tuning, rate limits, feedback kinds
   GameStates                         player + match states (LOBBY … CLEANUP)
   GameModeDefinitions                Solo / Co-op / Team Battle rules
-  WeaponDefinitions                  8 weapons (basic + 2 specials each)
+  WeaponDefinitions                  8 weapons (instant basic attack + aerial attack each)
   ShieldDefinitions                  8 shields (reduction, angle, speed, raise time, bash, arrows)
-  SpecialMoveDefinitions             every basic attack and special move as data
-  ComboDefinitions                   2-3 combos per weapon
+  SpecialMoveDefinitions             every basic, aerial and combination move as data (nothing charged)
+  ComboDefinitions                   5 shared A/B/J patterns + 2 named combos per weapon
+  InputDefinitions / PvPBalanceConfig   combo buffer timing, input mapping / PvP caps for combos and aerials
+  OttiEntranceConfig                 imperial box behaviour and the jump into the arena
   ZombieDefinitions                  6 zombie types (stats, Aura, availability, weights, looks)
   ZombieAIProfiles                   6 AI personalities + Wounded/Critical behaviour modifiers
   RoundDefinitions                   round sizes per mode, weighted variant picking, archer caps, Round 7
@@ -42,7 +44,8 @@ src/shared/   -> ReplicatedStorage.Shared
 src/server/   -> ServerScriptService.Server
   Main.server                        builds the world, starts services
   Arena / LobbyService               Colosseum + tribunes / underground complex
-  MatchService                       match state machine, Solo/Co-op flow, cleanup, combat rules, prompts
+  MatchService                       match state machine, Solo/Co-op/Team flow, cleanup by match id, combat rules, prompts
+  PlayerMatchStateService / MatchSpawnService   authoritative per-player match state / every (re)spawn by spawn zone
   PartyService / TeamBattleService   co-op party lobby / team lobby + PvP match runtime
   WaveService                        six zombie rounds (mode-aware, simultaneous + archer caps), then Round 7
   OttiBossService                    Round 7 encounter: intro, health, phases, guard/poise, defeat
@@ -58,7 +61,9 @@ src/server/   -> ServerScriptService.Server
   InventoryService / AuraService     Aura Points, items, purchases, migration / rewards
   EquipmentShopService / EquipmentModels   shop pedestals / procedural weapons, shields, arrows, nets
   PlayerCombatService                hands, blocking/parry, incoming damage, action requests
-  SpecialMoveService / ComboService  move execution / server-side combo recognition
+  SpecialMoveService                 move execution (melee steps, projectiles, aerials, arrow rain)
+  ComboValidationService / JumpAttackService   server combo buffer / server-side jump detection, one aerial per jump
+  OttiSpectatorService / OttiEntranceService   Otti in the imperial box / his jump into the arena
   CombatTargets / CombatRules        hittable targets (zombies, Otti, enemies, dummies) / who may hit whom
   ProjectileService / CombatEffects  server-simulated player + enemy arrows / sparkles, glows, rings, nets, markers
   ZombieService / ZombieFactory      shared zombie AI / zombie models
@@ -77,7 +82,10 @@ src/client/   -> StarterPlayer.StarterPlayerScripts.Client
   AuraDisplayController              lobby Aura counter, +n rewards in combat
   MobileControlsController           touch buttons around the jump button, desktop special cards
   InfoPanelController / SpectatorController   optional i panel / tribune watching bar
-  InputController                    mouse/keyboard, gamepad and touch input
+  InputController                    mouse/keyboard, gamepad and touch input (Attack, Block, Jump, Execute)
+  ComboFeedbackController            tiny input chips, COMBO TRAINING board
+  PlayerAnimator                     procedural whole-body attack motion (additive, replaceable)
+  OttiEntranceController             local camera for the entrance, landing shake, skip
   ShopController                     per-player shop plaques, prompt text, equipped outline
   EffectsController                  damage numbers, dash/lunge/knockback on your own character
   ZombieAnimator                     client walk cycle for arena zombies (limp, crawl)
@@ -110,13 +118,15 @@ For multiplayer tests: **Test → Clients and Servers → Local Server** with 2 
 |---|---|---|---|
 | Basic attack | Left click | R2 | ATK |
 | Block / parry (hold) | Right click | L2 | BLOCK |
-| Special 1 | Q | X | first special button |
-| Special 2 | E | Y | second special button |
+| Jump (also the combo input J) | Space | A | Roblox jump button |
+| Aerial attack | Space, then left click | A, then R2 | jump, then ATK |
+| Execute combo | Enter | Y | COMBO |
 | Interact (shop, doors, posts) | **F** | D-pad up | tap prompt |
 | HUD mode (Full / Minimal / Hidden) | **H** or eye button | eye button | eye button |
 | Info panel | i button | i button | i button |
 
-Interactions use **F** because Q and E are special attacks.
+A **block tap** (press and release) also counts as the combo input **B**; holding Block keeps defending. Nothing is
+charged: every attack starts when its input arrives. Interactions use **F**.
 
 ## HUD (responsive, mobile first)
 
@@ -180,46 +190,68 @@ corridor and storage corners. The lobby is a safe zone: no damage, no PvP. Attac
 **Team lobby:** hold F on the **RED** or **BLUE** pad (max 4 each), then **READY**. **AUTO BALANCE** evens the teams,
 **LEAVE TEAM** leaves. With at least one ready player per team, a 15 s countdown starts; it cancels if that stops being true.
 
+**Team Battle / one-versus-one start (one authoritative lifecycle, also for 1v1):** the ready players are taken out of
+the lobby lists atomically → one match id → `CurrentMatchId`, `CurrentGameMode`, `SelectedTeam`, `ExpectedSpawnZone`
+(`RED_TEAM` / `BLUE_TEAM`) → `COUNTDOWN` → everyone stands at their protected team spawn behind closed barriers → 5 s
+arena countdown → `MATCH_ACTIVE`, barriers open. A defeated player respawns after 4 s at their own team spawn
+(equipment restored, 2 s visible protection, no attacks meanwhile) and keeps match id, score and stats. Players only
+return to the lobby after the result, when leaving or on cancellation; a delayed cleanup only touches players who still
+belong to the match id that scheduled it.
+
 ## Weapons (8)
 
-| Weapon | Price | Basic | Special 1 (Q) | Special 2 (E) |
+| Weapon | Price | Basic (instant) | Aerial (Jump → Attack) | Combo moves |
 |---|---|---|---|---|
-| Rusty Gladius | free | 18 dmg, 0.55 s, 7 | QUICK THRUST (22, lunge, 4 s) | SHIELD COUNTER (16 + shield bash, 7 s) |
-| Legion Sword | 80 | 28, 0.65 s, 7.5 | LEGION COMBO (3 strikes, 6 s) | RISING SLASH (34, big stagger, 8 s) |
-| Hunter Bow | 130 | arrow 24, 0.9 s, 150 (145 studs/s) | TRIPLE SHOT (3 × 16, 7° spread, 110, 7 s) | PIERCING ARROW (34, long draw, through up to 2 zombies at 75 % / 55 %, 9 s) |
-| Gladiator Morning Star | 190 | 40, 1.15 s, 8, wide | HEAVY CRUSH (55, 9 s) | CHAIN SWEEP (30, up to 3, 11 s) |
-| Gladiator Trident | 260 | 24, 0.75 s, 10 | TRIDENT RUSH (2 thrusts, 2nd ×1.25, lunge, 6 s) | NET AND STRIKE (net slow + auto thrust 26, 11 s) |
-| Hoplite Spear | 300 | 27, 0.85 s, 12 | PHALANX THRUST (36, big knockback, 7 s) | SPEAR SWEEP (22, up to 3 / 2 PvP, 12 s) |
-| Twin Arena Daggers | 340 | 14, 0.35 s, 5.5 | VIPER FLURRY (4 strikes while a target stays near, 8 s) | SHADOW STEP (dash, never through walls, + 24, 10 s) |
-| Arena Battle Axe | 380 | 44, 1.3 s, 8 | EXECUTION ARC (50, ×2 vs zombies under 30 %, 9 s) | WHIRLWIND (32, up to 4 / 3 PvP at 40 %, 14 s) |
+| Rusty Gladius | free | 18 dmg, 0.55 s, 7 | FALLING SLASH (24, short recovery) | REBELLION COMBO · SAND VIPER |
+| Legion Sword | 80 | 28, 0.65 s, 7.5 | EAGLE DESCENT (34 + small shockwave) | LEGION'S FURY · EAGLE OF ROME |
+| Hunter Bow | 130 | arrow 24, 0.9 s, 150 (145 studs/s) | AIR SHOT (22, less accurate) | ARROW RAIN · EAGLE SHOT |
+| Gladiator Morning Star | 190 | 40, 1.15 s, 8, wide | FALLING COMET (48 + impact, long recovery) | CHAIN TEMPEST · FALLING METEOR |
+| Gladiator Trident | 260 | 24, 0.75 s, 10 | DIVING TRIDENT (30, reach 11) | RETIARIUS FURY · SEA EAGLE DIVE |
+| Hoplite Spear | 300 | 27, 0.85 s, 12 | SKY SPEAR (38, narrow) | PHALANX BREAKER · SPARTAN VAULT |
+| Twin Arena Daggers | 340 | 14, 0.35 s, 5.5 | OTTER DIVE (2 × 12) | VIPER DANCE · RIVER SHADOW |
+| Arena Battle Axe | 380 | 44, 1.3 s, 8 | ARENA CRASH (52 + shockwave, punishable) | COLOSSEUM BREAKER · THUNDER OF MARS |
+
+An aerial attack needs a real jump (the server checks the character, not the client), works once per jump, starts
+within 1.2 s of leaving the ground, descends at a fixed speed (no flying, no repeated acceleration) and ends with a
+landing recovery based on the weapon's weight. Attacks use the whole body (torso twist, shoulders, steps, follow-through,
+weapon trails, sand on strong landings) through a procedural animation layer that authored animations can replace later.
 
 **Twin Arena Daggers are two-handed:** no shield, a second dagger in the left hand and a built-in **parry**
 (block button: 0.4 s window, −70 % damage, 1.2 s cooldown). The shop plaque and HUD say so.
 
 **Hunter Bow:** arrows fly 145 studs/s up to 150 studs (server-simulated, never through walls); damage 100 % up to
-100 studs, 90 % to 125, 75 % to 150. A subtle crosshair shows while the bow is equipped (no aim assistance). TRIPLE SHOT
-hits each target once per volley (PvP ×0.5). PIERCING ARROW passes through up to two zombies (75 % / 55 % damage);
-walls, shields, players and Otti stop it, and in PvP it never passes through one player into another.
+100 studs, 90 % to 125, 75 % to 150. A short fixed draw, no holding, consistent arrow power; a subtle crosshair shows
+while the bow is equipped (no aim assistance). Its special shots come from combos (ARROW RAIN, EAGLE SHOT).
 
-**PvP balance:** every move has its own PvP multiplier (0.4-0.75) and target cap, and no single PvP hit removes more
-than 45 % of max health, so nothing one-shots a full-health player. Slow moves have long, glowing wind-ups.
+## Combos (Attack A · Block tap B · Jump J, then Execute)
 
-## Combos (input window 0.8 s after the previous move ends)
+Tap the inputs, then press **Enter** (gamepad **Y**, touch **COMBO**). Gaps of at most 0.65 s, the whole sequence within
+2.8 s, at most 6 inputs. No match: a tiny `NO COMBO`, nothing else happens. On cooldown: `NOT READY`. Basic attacks never
+need a combo.
 
-| Weapon | Combos |
-|---|---|
-| Rusty Gladius | Basic → Basic → Q **GLADIATOR'S POINT** ×1.4 · Block → E **IRON REPLY** ×1.5 · Q → Basic **SAND STEP** ×1.25 |
-| Legion Sword | Basic → Basic → E **TESTUDO BREAKER** ×1.4 · Q → Basic → E **CENTURION'S ORDER** ×1.6 |
-| Hunter Bow | Basic → Basic → Q **VOLLEY** ×1.3 · Block → E **STEADY AIM** ×1.4 |
-| Morning Star | Basic → Q **MACE AND THUNDER** ×1.3 · Basic → E **IRON STORM** ×1.3 |
-| Trident | Basic → Basic → Q **SEA STORM** ×1.3 · E → Basic **CAUGHT IN THE NET** ×1.5 |
-| Hoplite Spear | Block → Q **SHIELD WALL** ×1.4 · Basic → Basic → E **HOPLITE CIRCLE** ×1.3 |
-| Twin Daggers | Basic → Basic → Q **VIPER'S NEST** ×1.2 · Block → E **SHADOW COUNTER** ×1.5 · E → Basic → Basic **TWIN FANGS** ×1.3 |
-| Battle Axe | Basic → Q **HEADSMAN** ×1.3 · Basic → Basic → E **ARENA STORM** ×1.3 |
+| Pattern | Shared move (any weapon) | Weapon moves (replace the shared one) |
+|---|---|---|
+| B → A → B → A | COUNTER COMBINATION (0.35 s counter window, 3 strikes) | Gladius REBELLION COMBO · Trident RETIARIUS FURY · Axe COLOSSEUM BREAKER |
+| A → A → J → A | JUMP FINISHER (aerial finisher, small shockwave) | Gladius SAND VIPER · Trident SEA EAGLE DIVE · Axe THUNDER OF MARS |
+| B → B → A | GUARD BREAK (breaks a raised guard, heavy stagger) | Spear PHALANX BREAKER |
+| A → B → A → A | ARENA SPIN (two full spins, up to 4 zombies / 2 players) | Legion LEGION'S FURY · Morning Star CHAIN TEMPEST · Daggers VIPER DANCE |
+| B → J → A | RISING ATTACK (rising strike + landing) | Legion EAGLE OF ROME · Morning Star FALLING METEOR · Daggers RIVER SHADOW |
+| B → A → A | – | Bow ARROW RAIN (marked circle, arrows from above, roofs protect) |
+| A → J → A | – | Bow EAGLE SHOT (jump + fast accurate arrow) · Spear SPARTAN VAULT |
 
-The client only sends its input; the server records **accepted** actions with server time and recognizes combos itself.
-Inputs during a running move are rejected (macros can't skip attack timing), cooldowns still apply, and the history is
-cleared on death, stun, state changes or after a combo.
+**Server validation:** only accepted inputs are recorded with server time (A = attack request, B = block press,
+J = jump request that the server confirms as a real jump). Execute checks the timing, the equipped weapon, the cooldown
+(it starts when the move executes), alive / not knocked down / not spawn-protected; every hit phase checks a legal target
+(opponent team, never teammates, spectators or lobby players), range, arc and line of sight, once per target per phase.
+The buffer clears after Execute, on death, knockdown, leaving combat and weapon changes.
+
+**PvP balance** (`PvPBalanceConfig`): per-move PvP multipliers (0.35-0.75) and target caps, no single hit above 45 % and
+no whole combo or aerial move above 50 % of a player's max health, knockdowns capped, no repeated combo stagger within
+2.5 s, guard breaks drop the shield for 1.2 s (half protection) instead of ignoring it, counter windows only for the
+first 0.3-0.35 s.
+
+**Training:** the COMBO TRAINING board in the training yard lists the equipped weapon's moves; hits on the dummies show
+`COMBO SUCCESS · name`; no Aura there.
 
 ## Shields (8)
 
@@ -289,10 +321,23 @@ reach); **no shield arm** → no guard, no shield bash, no net; **lost leg** →
 
 After the last Round 6 zombie, corpses and projectiles are cleared and the dead co-op players return (a round was
 completed). About 6 s of silence follow: the arena darkens slightly, every portcullis drops and the crowd falls silent
-(`THE CROWD FALLS SILENT...`). The main gladiator gate (north, under the OTTI ARENA sign) opens: `OTTI` /
-`CHAMPION OF THE COLOSSEUM`. Otti walks in on all fours, pauses, rises onto his hind legs, draws his gladius, raises his
-shield and sweeps his tail across the sand. Once every participant has seen the intro in this server session, a
-**SKIP INTRO** button appears. Otti is a living otter, not a zombie: own tag `OttiBoss`, no zombie tags, damage states,
+(`THE CROWD FALLS SILENT...`). Then the **same model** that watched from the imperial box becomes the boss: Otti stands
+up, draws his gladius, climbs onto the railing, the crowd goes quiet, and he jumps into the arena on a deterministic
+bezier arc (anchored, server-driven, fixed landing point inside the arena): sand ring, warm light pulse, cheer, a short
+distance-based camera shake. No damage either way until his landing recovery ends; then the boss bar appears and the
+fight starts. Every client's camera looks up at the box and follows the leap; after seeing it once per session a small
+**SKIP** button returns the camera at once (the server entrance always plays). Otti remembers combos a player repeats and
+sometimes raises his shield against them, and takes extra damage while recovering from a missed grapple or a tail slam.
+
+**During the zombie rounds (`OTTI_SPECTATING`)** Otti sits in the **imperial box** above the north side (stone
+balustrade, columns with bronze capitals, red canopy with gold fringe, banners, cushioned stone throne; players can't
+enter it). He sits like an otter, tail beside the throne, gladius sheathed, follows the fighting with his head, leans in
+now and then and gets impatient in the late rounds. With a cooldown he reacts only to meaningful moments: combos (leans
+forward), named weapon combos (strikes the railing or raises a paw), big aerial finishers (stands up briefly), heavy hits
+on players (surprised), completed rounds (claps), player defeats (sits back). No AI, can't be targeted, never blocks
+projectiles, never a zombie.
+
+Otti is a living otter, not a zombie: own tag `OttiBoss`, no zombie tags, damage states,
 limb loss or archive logic, no blood (sparks and sand only).
 
 **Health:** 1,200 (solo) · 1,850 / 2,450 / 3,000 for 2-4 co-op players. His damage never scales with players.
@@ -367,7 +412,7 @@ solo 500 Aura; co-op 400 per survivor, 250 for defeated players who damaged him.
 ## Studio test steps
 
 **Solo**
-1. F5. You spawn in the arrival hall: the Aura orb top-right shows 0, Rusty Gladius + Wooden Buckler in your hands, small Q/E cards bottom right (touch: buttons around the jump button).
+1. F5. You spawn in the arrival hall: the Aura orb top-right shows 0, Rusty Gladius + Wooden Buckler in your hands, touch: ATK, BLOCK and COMBO around the jump button.
 2. Walk to the TRAINING yard (south-west), hit a dummy, then try Basic → Basic → Q: you should see a short `GLADIATOR'S POINT!` notification.
 3. Visit the ZOMBIE ARCHIVE (east): 6 caged zombies with plaques; the Undead Sagittarius draws its bow at you.
 4. Hold F at the SOLO ARENA gate (north-west). GET READY, then ROUND 1 / 7. Kill zombies: a short `+10` with the Aura orb (no permanent counter in combat).

@@ -106,6 +106,8 @@ export type Boss = {
 	frontalHits: { [Player]: { number } },
 	lastGrappled: Player?,
 	grabbed: Player?,
+	vulnerableUntil: number, -- takes more damage while recovering from a missed big move
+	comboHistory: { [Player]: { { name: string, time: number } } },
 }
 
 local OttiAnimationService = {}
@@ -156,6 +158,8 @@ function OttiAnimationService.new(rig: OttiModel.OttiRig): Boss
 		frontalHits = {},
 		lastGrappled = nil,
 		grabbed = nil,
+		vulnerableUntil = 0,
+		comboHistory = {},
 	}
 	OttiAnimationService.setLoco(boss, "QUADRUPED_IDLE")
 	OttiAnimationService.setPose(boss, "", 0.2)

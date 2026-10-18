@@ -443,6 +443,10 @@ function BossAttackService.execute(boss: Boss, ctx: BossContext, move: OttiMove,
 
 	boss.inActive = false
 	boss.cooldowns[move.Id] = os.clock() + move.Cooldown
+	if (move.Kind == "Grapple" and not result.landed) or move.Kind == "TailSlam" then
+		-- Recovering from a missed grapple or a tail slam: a window to punish him
+		boss.vulnerableUntil = os.clock() + move.Recovery + 0.6
+	end
 	if not boss.defeated then
 		OttiAnimationService.setPose(boss, "Recover", 0.2)
 		local recovery = move.Recovery + (if move.Kind == "Bite" and not result.landed then move.MissRecovery or 0 else 0)

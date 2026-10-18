@@ -61,6 +61,10 @@ Arena.Layout = {
 	-- Lower tribune walkway (top of the first seating tier) and its return door
 	TribuneWalkwayY = FLOOR_TOP + PODIUM_HEIGHT + SEAT_RISE,
 	ReturnDoor = nil :: BasePart?,
+	-- Imperial box (pulvinar) above the north side: Otti watches the zombie rounds from here
+	ImperialSeat = CFrame.identity, -- floor point in front of the throne, facing the arena
+	ImperialRail = CFrame.identity, -- top of the front railing (where Otti jumps from)
+	BossStart = CFrame.identity, -- where Otti lands on the sand
 	ZombieSpawns = {} :: { CFrame },
 	-- 12 symmetric shell spots; any prefix of 4, 6, 8, 10 or 12 stays point-symmetric
 	ShellPositions = {
@@ -308,8 +312,8 @@ local function buildTribune(folder: Folder)
 		stair.Parent = tribune
 	end
 
-	-- Viewing platforms on the middle walkway, north and south
-	for _, degrees in { 90, 270 } do
+	-- Viewing platform on the middle walkway, south (the north side holds the imperial box)
+	for _, degrees in { 90 } do
 		local theta = math.rad(degrees)
 		makePart("ViewingPlatform", Vector3.new(14, 1, 5), frameAt(theta, PODIUM_THICKNESS + 2 * SEAT_DEPTH + 2.5, middleY + 0.5), TRAVERTINE, Enum.Material.Marble, tribune)
 		makePart("PlatformRail", Vector3.new(14, 2.5, 0.6), frameAt(theta, PODIUM_THICKNESS + 2 * SEAT_DEPTH + 0.3, middleY + 2.25), SANDSTONE, Enum.Material.Limestone, tribune)
@@ -397,6 +401,8 @@ function Arena.build(): Folder
 	buildBanners(folder)
 	buildTribune(folder)
 	buildSign(folder)
+	Arena.buildImperialBox(folder)
+	Arena.buildSpawnBarriers(folder)
 
 	local zombies = Instance.new("Folder")
 	zombies.Name = Config.ZombiesFolderName
@@ -404,6 +410,109 @@ function Arena.build(): Folder
 
 	folder.Parent = Workspace
 	return folder
+end
+
+-- The imperial box (pulvinar): the most prestigious seat, centred above the north side with the
+-- best view of the sand. Roman-inspired: stone floor and balustrade, columns with bronze capitals,
+-- a red canopy with gold fringe, banners on the stand below and a cushioned stone throne.
+-- Invisible walls keep players out (Otti's scripted jump is not affected by them).
+function Arena.buildImperialBox(folder: Folder)
+	local box = Instance.new("Model")
+	box.Name = "ImperialBox"
+	local theta = math.rad(270)
+	local top = FLOOR_TOP + PODIUM_HEIGHT + 2 * SEAT_RISE
+	local base = frameAt(theta, PODIUM_THICKNESS + SEAT_DEPTH + 3, top)
+	local function at(x: number, y: number, z: number): CFrame
+		return base * CFrame.new(x, y, z)
+	end
+	local CRIMSON = Color3.fromRGB(140, 24, 32)
+	local CYL = Enum.PartType.Cylinder
+
+	makePart("BoxFloor", Vector3.new(16, 1, 6), at(0, 0.5, 0), TRAVERTINE, Enum.Material.Marble, box)
+	makePart("Carpet", Vector3.new(12, 0.06, 5), at(0, 1.03, 0.2), CRIMSON, Enum.Material.Fabric, box, DECOR)
+	-- Throne: stone seat, red cushion, carved back with gold trim
+	makePart("Throne", Vector3.new(3, 1.6, 2.4), at(0, 1.8, 1.6), SANDSTONE, Enum.Material.Limestone, box, DECOR)
+	makePart("Cushion", Vector3.new(2.8, 0.4, 2.2), at(0, 2.8, 1.6), CRIMSON, Enum.Material.Fabric, box, DECOR)
+	makePart("ThroneBack", Vector3.new(3.4, 3.2, 0.6), at(0, 3.6, 2.9), SANDSTONE, Enum.Material.Limestone, box, DECOR)
+	makePart("ThroneTrim", Vector3.new(3.5, 0.25, 0.7), at(0, 5.25, 2.9), GOLD, Enum.Material.Metal, box, DECOR)
+	for _, side in { -1, 1 } do
+		makePart("Armrest", Vector3.new(0.5, 0.8, 2.2), at(side * 1.6, 2.6, 1.6), SANDSTONE, Enum.Material.Limestone, box, DECOR)
+	end
+	-- Front balustrade with balusters and gold trim
+	makePart("RailBase", Vector3.new(16, 0.4, 0.7), at(0, 1.2, -2.7), TRAVERTINE, Enum.Material.Limestone, box, DECOR)
+	makePart("RailTop", Vector3.new(16, 0.4, 0.6), at(0, 2.7, -2.7), TRAVERTINE, Enum.Material.Limestone, box, DECOR)
+	makePart("RailTrim", Vector3.new(16, 0.15, 0.62), at(0, 2.95, -2.7), GOLD, Enum.Material.Metal, box, DECOR)
+	for x = -7.5, 7.5, 1 do
+		makePart("Baluster", Vector3.new(1.1, 0.35, 0.35), at(x, 1.95, -2.7) * CFrame.Angles(0, 0, math.rad(90)), TRAVERTINE, Enum.Material.Limestone, box, { shape = CYL, collide = false })
+	end
+	-- Columns with bronze capitals, red canopy with gold fringe and an eagle disc
+	for _, x in { -7.4, 7.4 } do
+		for _, z in { -2.6, 2.6 } do
+			makePart("BoxColumn", Vector3.new(8, 0.9, 0.9), at(x, 5, z) * CFrame.Angles(0, 0, math.rad(90)), TRAVERTINE, Enum.Material.Marble, box, { shape = CYL, collide = false })
+			makePart("Capital", Vector3.new(1.4, 0.5, 1.4), at(x, 9.1, z), BRONZE, Enum.Material.Metal, box, DECOR)
+		end
+	end
+	makePart("Canopy", Vector3.new(16.4, 0.5, 6.4), at(0, 9.6, 0), CRIMSON, Enum.Material.Fabric, box, DECOR)
+	makePart("Fringe", Vector3.new(16.4, 0.5, 0.2), at(0, 9.2, -3.2), GOLD, Enum.Material.Fabric, box, DECOR)
+	makePart("EagleDisc", Vector3.new(0.2, 2.2, 2.2), at(0, 10.2, -3.3) * CFrame.Angles(0, math.rad(90), 0), GOLD, Enum.Material.Metal, box, { shape = CYL, collide = false })
+	-- Banners on the stand below the box
+	for _, x in { -5, 0, 5 } do
+		makePart("ImperialBanner", Vector3.new(2.4, 4, 0.12), at(x, -1.8, -3.1), BANNER_RED, Enum.Material.Fabric, box, DECOR)
+		makePart("BannerStripe", Vector3.new(2.4, 0.35, 0.14), at(x, -3.5, -3.12), GOLD, Enum.Material.Fabric, box, DECOR)
+		makePart("BannerWreath", Vector3.new(0.14, 1.1, 1.1), at(x, -1.3, -3.13) * CFrame.Angles(0, math.rad(90), 0), GOLD, Enum.Material.Metal, box, { shape = CYL, collide = false })
+	end
+	-- Access restricted: invisible walls around the box (no queries: arrows and aim ignore them)
+	for _, wall in {
+		{ size = Vector3.new(16.6, 13, 0.4), position = Vector3.new(0, 7.5, -3.4) },
+		{ size = Vector3.new(16.6, 13, 0.4), position = Vector3.new(0, 7.5, 3.4) },
+		{ size = Vector3.new(0.4, 13, 7.2), position = Vector3.new(-8.3, 7.5, 0) },
+		{ size = Vector3.new(0.4, 13, 7.2), position = Vector3.new(8.3, 7.5, 0) },
+	} do
+		local part = makePart("BoxBarrier", wall.size, at(wall.position.X, wall.position.Y, wall.position.Z), TRAVERTINE, Enum.Material.SmoothPlastic, box, { transparency = 1 })
+		part.CanQuery = false
+		part.CanTouch = false
+	end
+	box.Parent = folder
+
+	Arena.Layout.ImperialSeat = at(0, 1, 1.0)
+	Arena.Layout.ImperialRail = at(0, 2.95, -2.7)
+	Arena.Layout.BossStart = frameAt(theta, -24, FLOOR_TOP)
+end
+
+-- Team spawn pens: translucent team-coloured barriers that hold both teams at their spawns during
+-- the Team Battle arena countdown. Open (hidden, non-colliding) otherwise.
+local spawnBarriers: { BasePart } = {}
+
+function Arena.buildSpawnBarriers(folder: Folder)
+	table.clear(spawnBarriers)
+	local model = Instance.new("Model")
+	model.Name = "SpawnBarriers"
+	for _, side in { -1, 1 } do
+		local color = if side < 0 then Color3.fromRGB(255, 90, 90) else Color3.fromRGB(110, 160, 255)
+		local inner = side * (A - 18)
+		local outer = side * (A - 3)
+		local walls = {
+			{ size = Vector3.new(0.6, 10, 20), position = Vector3.new(inner, FLOOR_TOP + 5, 0) },
+			{ size = Vector3.new(math.abs(outer - inner), 10, 0.6), position = Vector3.new((inner + outer) / 2, FLOOR_TOP + 5, -10) },
+			{ size = Vector3.new(math.abs(outer - inner), 10, 0.6), position = Vector3.new((inner + outer) / 2, FLOOR_TOP + 5, 10) },
+		}
+		for _, wall in walls do
+			local part = makePart("SpawnBarrier", wall.size, CFrame.new(wall.position), color, Enum.Material.ForceField, model, { transparency = 1 })
+			part.CanCollide = false
+			part.CanQuery = false
+			part.CanTouch = false
+			table.insert(spawnBarriers, part)
+		end
+	end
+	model.Parent = folder
+end
+
+-- Closes (true) or opens the Team Battle spawn pens.
+function Arena.setSpawnBarriers(closed: boolean)
+	for _, part in spawnBarriers do
+		part.CanCollide = closed
+		part.Transparency = if closed then 0.4 else 1
+	end
 end
 
 -- A CFrame on the arena oval at height y; LookVector points into the arena.

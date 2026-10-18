@@ -17,8 +17,11 @@ export type FeedbackKind =
 	| "Elimination"
 	| "DamageFx"
 	| "Knockdown"
+	| "Leap"
+	| "Dive"
+	| "ComboFail"
 
-export type ActionName = "Basic" | "Special1" | "Special2"
+export type ActionName = "Basic" | "Jump" | "Execute"
 
 local CombatConfig = {
 	-- Zombies (per-variant stats: ZombieDefinitions, personalities: ZombieAIProfiles)
@@ -95,6 +98,9 @@ local CombatConfig = {
 		Elimination = "Elimination" :: FeedbackKind, -- (text)
 		DamageFx = "DamageFx" :: FeedbackKind, -- (position, kind "Zombie"|"Player"|"Boss", scale, direction?) to everyone
 		Knockdown = "Knockdown" :: FeedbackKind, -- (seconds) short controlled knockdown on your own character
+		Leap = "Leap" :: FeedbackKind, -- (upVelocity, direction, distance) one controlled hop for a combo aerial
+		Dive = "Dive" :: FeedbackKind, -- (direction, distance, downVelocity) aerial descent
+		ComboFail = "ComboFail" :: FeedbackKind, -- (text) NO COMBO / NOT READY
 	}),
 }
 

@@ -3,7 +3,8 @@
 -- "OTTI", the phase in compact form (P1..P3, accent color per phase) and a thin health bar.
 -- Short attack warnings (JUMP!, DODGE!, TAIL SLAM!, GRAPPLE!) appear right below it and are
 -- never hidden by the HUD mode. A small SKIP button appears during the intro once you have seen
--- it this session. "CHAMPION OF THE COLOSSEUM" only shows in the intro banner (Main.client).
+-- it this session (camera only: the server entrance always plays). "CHAMPION OF THE COLOSSEUM"
+-- only shows in the intro banner (Main.client).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -23,7 +24,9 @@ type Layout = { device: string, viewport: Vector2, scale: number }
 
 local BossHudController = {}
 
-function BossHudController.start(group: (string, Vector2, UDim2, UDim2?) -> Frame, visibility: Visibility, onLayout: ((Layout) -> ()) -> (), arena: Instance, skipRemote: RemoteEvent?)
+type Entrance = { skip: () -> (), canSkip: () -> boolean }
+
+function BossHudController.start(group: (string, Vector2, UDim2, UDim2?) -> Frame, visibility: Visibility, onLayout: ((Layout) -> ()) -> (), arena: Instance, entrance: Entrance?)
 	local player = Players.LocalPlayer
 	local frame = group("BossBar", Vector2.new(0.5, 0), UDim2.new(0.5, 0, 0, 6), UDim2.fromOffset(480, 30))
 	local name = Instance.new("TextLabel")
@@ -96,8 +99,8 @@ function BossHudController.start(group: (string, Vector2, UDim2, UDim2?) -> Fram
 	skipCorner.CornerRadius = UDim.new(0, 8)
 	skipCorner.Parent = skip
 	skip.Activated:Connect(function()
-		if skipRemote then
-			skipRemote:FireServer("SkipIntro")
+		if entrance then
+			entrance.skip()
 		end
 	end)
 
@@ -151,10 +154,7 @@ function BossHudController.start(group: (string, Vector2, UDim2, UDim2?) -> Fram
 	visibility.register("Boss", skipFrame, function()
 		return false
 	end, function()
-		return tostring(arena:GetAttribute(Config.BossIntroAttribute) or "") ~= ""
-			and arena:GetAttribute("BossIntroSkippable") == true
-			and player:GetAttribute(Config.IntroSeenAttribute) == true
-			and player:GetAttribute(GameStates.LocationAttribute) == "Arena"
+		return entrance ~= nil and entrance.canSkip()
 	end)
 end
 

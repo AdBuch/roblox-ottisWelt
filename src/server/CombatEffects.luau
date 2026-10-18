@@ -138,6 +138,23 @@ function CombatEffects.sandBurst(position: Vector3, radius: number, amount: numb
 	CombatEffects.ring(position, radius, Color3.fromRGB(230, 210, 160))
 end
 
+-- ARROW RAIN visuals: a few arrows fall into the marked circle (damage is checked separately).
+function CombatEffects.arrowRain(center: Vector3, radius: number, seconds: number)
+	local rng = Random.new()
+	for i = 1, 7 do
+		task.delay(seconds * (0.35 + i * 0.08), function()
+			local offset = Vector3.new(rng:NextNumber(-radius, radius), 0, rng:NextNumber(-radius, radius)) * 0.8
+			local landing = center + offset
+			local arrow, shaft = EquipmentModels.buildArrow()
+			local from = landing + Vector3.new(0, 30, 0)
+			shaft.CFrame = CFrame.lookAt(from, landing)
+			arrow.Parent = getContainer()
+			TweenService:Create(shaft, TweenInfo.new(0.25, Enum.EasingStyle.Linear), { CFrame = CFrame.lookAt(landing + Vector3.new(0, 1, 0), landing - Vector3.new(0, 1, 0)) }):Play()
+			Debris:AddItem(arrow, 1.2)
+		end)
+	end
+end
+
 -- Removes every leftover effect (match cleanup).
 function CombatEffects.clear()
 	if container then

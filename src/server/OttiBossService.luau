@@ -30,8 +30,9 @@ local CrowdReactionService = require(script.Parent.CrowdReactionService)
 local DamageEffectsService = require(script.Parent.DamageEffectsService)
 local OttiAnimationService = require(script.Parent.OttiAnimationService)
 local OttiBossAI = require(script.Parent.OttiBossAI)
+local OttiEntranceService = require(script.Parent.OttiEntranceService)
 local OttiModel = require(script.Parent.OttiModel)
-local Remotes = require(script.Parent.Remotes)
+local OttiSpectatorService = require(script.Parent.OttiSpectatorService)
 
 type Boss = OttiAnimationService.Boss
 type BossContext = OttiAnimationService.BossContext
@@ -61,7 +62,6 @@ local handlers: Handlers? = nil
 local token = 0
 local boss: Boss? = nil
 local options: EncounterOptions? = nil
-local skipRequested = false
 local warningId = 0
 local pendingPhaseShow = false
 local phaseChanging = false
@@ -89,7 +89,6 @@ local function resetAttributes()
 	setAttr(Config.BossPhaseAttribute, 1)
 	setAttr(Config.BossWarningAttribute, "")
 	setAttr(Config.BossDefeatedAttribute, false)
-	setAttr("BossIntroSkippable", false)
 end
 
 local function warnPlayers(text: string, seconds: number)
@@ -151,67 +150,38 @@ end
 -- Intro
 ------------------------------------------------------------------------------------------
 
--- Waits unless the intro was skipped; false if the encounter was stopped meanwhile.
+-- Waits; false if the encounter was stopped meanwhile.
 local function introWait(myToken: number, seconds: number): boolean
 	local elapsed = 0
 	while elapsed < seconds do
 		if token ~= myToken then
 			return false
 		end
-		if skipRequested then
-			return true
-		end
 		elapsed += task.wait(0.05)
 	end
 	return token == myToken
 end
 
-local function allSeenIntro(): boolean
-	local current = options
-	if not current then
-		return false
+-- The boss model: the spectator Otti from the imperial box is transformed into the boss (same
+-- model, never two Ottis). If he isn't there (e.g. a test), he is seated first.
+local function takeOverSpectator(): Boss
+	local rig = OttiSpectatorService.handOff()
+	if not rig then
+		OttiSpectatorService.begin()
+		rig = OttiSpectatorService.handOff()
 	end
-	for _, player in current.participants() do
-		if player.Parent and not player:GetAttribute(Config.IntroSeenAttribute) then
-			return false
-		end
-	end
-	return true
-end
-
-local function gateFrame(offset: number): CFrame
-	return Arena.frameAt(Arena.Layout.MainGateAngle, offset, Arena.Layout.FloorTop)
-end
-
-local function spawnOtti(): Boss
-	local rig = OttiModel.build()
-	local start = gateFrame(-3)
-	local height = rig.humanoid.HipHeight + rig.root.Size.Y / 2
-	rig.model:PivotTo(start + Vector3.new(0, height, 0))
-	rig.model.Parent = arenaFolder
-	rig.root:SetNetworkOwner(nil) -- the server moves Otti; clients only animate him
-	CollectionService:AddTag(rig.model, Config.OttiTag)
-	local created = OttiAnimationService.new(rig)
-	OttiAnimationService.setSwordDrawn(created, false)
+	local spectator = rig :: OttiModel.OttiRig
+	CollectionService:AddTag(spectator.model, Config.OttiTag)
+	spectator.model:SetAttribute("OttiState", "BOSS")
+	local created = OttiAnimationService.new(spectator)
+	created.stance = "Biped"
+	spectator.model:SetAttribute("Stance", "Biped")
 	created.lastYaw = OttiAnimationService.getYaw(created)
 	return created
 end
 
--- Final intro pose (also used when the intro is skipped).
-local function finishIntroPose(current: Boss)
-	local stop = gateFrame(-OttiBossConfig.WalkInDistance)
-	local height = current.humanoid.HipHeight + current.root.Size.Y / 2
-	current.model:PivotTo(stop + Vector3.new(0, height, 0))
-	current.stance = "Biped"
-	current.model:SetAttribute("Stance", "Biped")
-	OttiAnimationService.setLoco(current, "BIPED_IDLE")
-	OttiAnimationService.setSwordDrawn(current, true)
-	OttiAnimationService.setPose(current, "", 0.2)
-	current.humanoid.WalkSpeed = OttiBossConfig.WalkSpeedBiped
-end
-
 local function runIntro(myToken: number): boolean
-	-- Quiet anticipation: darker arena, gates close, the crowd falls silent
+	-- Quiet anticipation: no more zombies, darker arena, gates close, the crowd falls silent
 	CrowdReactionService.react("Silent")
 	CrowdReactionService.setBaseLight(-0.45)
 	task.delay(0.8, function()
@@ -223,74 +193,29 @@ local function runIntro(myToken: number): boolean
 		return false
 	end
 	setAttr(Config.BossIntroAttribute, "Silence")
-	skipRequested = false -- skipping only applies to the walk-in itself
-	setAttr("BossIntroSkippable", allSeenIntro())
 	if not introWait(myToken, OttiBossConfig.PreIntroSeconds - OttiBossConfig.SilenceTextAt) then
 		return false
 	end
 
-	-- The main gladiator gate opens and Otti enters
-	Arena.setGates(false, true)
-	local current = spawnOtti()
+	-- Otti rises in the imperial box and jumps into the arena (exactly once per encounter)
+	local current = takeOverSpectator()
 	boss = current
-	setAttr(Config.BossIntroAttribute, "Reveal")
-	CrowdReactionService.react("Enter")
 	local current_options = options
 	if current_options then
 		for _, player in current_options.participants() do
-			player:SetAttribute(Config.IntroSeenAttribute, true) -- may skip it next time
+			player:SetAttribute(Config.IntroSeenAttribute, true) -- the camera part is skippable next time
 		end
 	end
-	local walkTo = gateFrame(-OttiBossConfig.WalkInDistance).Position
-	current.humanoid.WalkSpeed = OttiBossConfig.WalkInDistance / OttiBossConfig.WalkInSeconds
-	current.humanoid:MoveTo(Vector3.new(walkTo.X, current.root.Position.Y, walkTo.Z))
-	OttiAnimationService.setLoco(current, "QUADRUPED_WALK")
-	local steps: { { pose: string, seconds: number, loco: string?, action: (() -> ())? } } = {
-		{ pose = "", seconds = OttiBossConfig.WalkInSeconds },
-		{ pose = "", seconds = 0.6, loco = "QUADRUPED_IDLE" }, -- pauses, sniffs the air
-		{ pose = "", seconds = 0.55, loco = "RISE_TO_BIPED", action = function()
-			current.stance = "Biped"
-			current.model:SetAttribute("Stance", "Biped")
-		end },
-		{ pose = "DrawSword", seconds = 0.7, loco = "BIPED_IDLE", action = function()
-			task.delay(0.3, function()
-				if token == myToken then
-					OttiAnimationService.setSwordDrawn(current, true)
-				end
-			end)
-		end },
-		{ pose = "RaiseShield", seconds = 0.6 },
-		{ pose = "IntroSweep", seconds = 1.0, action = function()
-			local back = current.root.Position - CombatUtil.flat(current.root.CFrame.LookVector) * 4
-			CombatEffects.sandBurst(Vector3.new(back.X, Arena.Layout.FloorTop, back.Z), 7, 1)
-		end },
-		{ pose = "Roar", seconds = 0.8, action = function()
-			CrowdReactionService.react("Cheer")
-			playSound(AudioConfig.OttiBattleCry, current.root)
-		end },
-	}
-	for _, step in steps do
-		if skipRequested then
-			break
-		end
-		if step.loco then
-			OttiAnimationService.setLoco(current, step.loco :: any)
-		end
-		OttiAnimationService.setPose(current, step.pose, 0.2)
-		if step.action then
-			step.action()
-		end
-		if not introWait(myToken, step.seconds) then
-			return false
-		end
-	end
-	if token ~= myToken then
+	local folder = arenaFolder :: Instance
+	local ok = OttiEntranceService.play(current, folder, function()
+		return token == myToken
+	end)
+	if not ok or token ~= myToken then
 		return false
 	end
-	finishIntroPose(current)
-	Arena.setGates(true, true) -- the main gate closes behind him
+	current.stance = "Biped"
+	current.humanoid.WalkSpeed = OttiBossConfig.WalkSpeedBiped
 	setAttr(Config.BossIntroAttribute, "")
-	setAttr("BossIntroSkippable", false)
 	return true
 end
 
@@ -403,16 +328,6 @@ function OttiBossService.init(folder: Instance, newHandlers: Handlers)
 	handlers = newHandlers
 	resetAttributes()
 	setAttr(Config.BossWarningIdAttribute, 0)
-	-- Skipping the intro (only once every participant has already seen it this session)
-	Remotes.CombatAction.OnServerEvent:Connect(function(player: Player, action: unknown)
-		if action ~= "SkipIntro" or not player:GetAttribute(Config.IntroSeenAttribute) then
-			return
-		end
-		local current = options
-		if current and table.find(current.participants(), player) and allSeenIntro() then
-			skipRequested = true
-		end
-	end)
 	Players.PlayerRemoving:Connect(BossGrappleService.releasePlayer)
 end
 
@@ -422,7 +337,6 @@ function OttiBossService.startEncounter(newOptions: EncounterOptions)
 	token += 1
 	local myToken = token
 	options = newOptions
-	skipRequested = false
 	pendingPhaseShow = false
 	phaseChanging = false
 	resetAttributes()
@@ -457,7 +371,6 @@ function OttiBossService.stop()
 	local current = boss
 	boss = nil
 	options = nil
-	skipRequested = false
 	pendingPhaseShow = false
 	phaseChanging = false
 	warningId += 1
@@ -488,7 +401,7 @@ function OttiBossService.isActive(): boolean
 end
 
 -- A validated player hit on Otti. Returns damage dealt and whether his shield blocked it.
-function OttiBossService.applyPlayerHit(attacker: Player, damage: number, fromPosition: Vector3, isProjectile: boolean, stagger: number, hitPosition: Vector3?): (number, boolean)
+function OttiBossService.applyPlayerHit(attacker: Player, damage: number, fromPosition: Vector3, isProjectile: boolean, stagger: number, hitPosition: Vector3?, guardBreak: boolean?): (number, boolean)
 	local current = boss
 	if not current or not current.fighting or current.defeated or current.invulnerable then
 		return 0, false
@@ -499,6 +412,13 @@ function OttiBossService.applyPlayerHit(attacker: Player, damage: number, fromPo
 	local blocked = false
 	local amount = damage
 
+	-- GUARD BREAK combos break his raised shield instead of being stopped by it
+	if guardBreak and now < current.guardUntil then
+		current.guardUntil = 0
+		current.guardReadyAt = now + 4
+		OttiAnimationService.setGuard(current, false)
+		CombatEffects.burst(current.rig.shieldFace.Position, Color3.fromRGB(255, 150, 80), 1)
+	end
 	-- Raised shield: frontal hits are mostly stopped
 	if frontal and now < current.guardUntil then
 		blocked = true
@@ -529,6 +449,9 @@ function OttiBossService.applyPlayerHit(attacker: Player, damage: number, fromPo
 	end
 	if phaseChanging then
 		amount *= 0.5
+	end
+	if now < current.vulnerableUntil then
+		amount *= 1.3 -- recovering from his own missed grapple, tail slam or heavy attack
 	end
 	local dealt = math.max(0, math.floor(amount + 0.5))
 	if dealt <= 0 and not blocked then
@@ -576,6 +499,37 @@ function OttiBossService.applyPlayerHit(attacker: Player, damage: number, fromPo
 		print(PREFIX, ("Otti enters phase %d: %s"):format(newPhase, BossPhaseDefinitions.Phases[newPhase].Name))
 	end
 	return dealt, blocked
+end
+
+-- A player's combo landed. Otti remembers repeated patterns and sometimes (never always) raises
+-- his shield toward a player who keeps using the same combination.
+function OttiBossService.onPlayerCombo(player: Player, comboName: string)
+	local current = boss
+	if not current or not current.fighting or current.defeated then
+		return
+	end
+	local now = os.clock()
+	local history: { { name: string, time: number } } = current.comboHistory[player] or {}
+	table.insert(history, { name = comboName, time = now })
+	while #history > 0 and now - history[1].time > 20 do
+		table.remove(history, 1)
+	end
+	current.comboHistory[player] = history
+	local repeats = 0
+	for _, entry in history do
+		if entry.name == comboName then
+			repeats += 1
+		end
+	end
+	if repeats >= 2 and current.phase >= 2 and not current.busy and now >= current.guardReadyAt and current.rng:NextNumber() < 0.5 then
+		local _, _, root = CombatUtil.getLivingCharacter(player)
+		if root then
+			current.guardUntil = now + OttiBossConfig.GuardSeconds + 0.6 -- reads the pattern and prepares a counter
+			current.guardReadyAt = current.guardUntil + 4
+			OttiAnimationService.setGuard(current, true)
+			OttiAnimationService.faceTowards(current, root.Position, 0)
+		end
+	end
 end
 
 -- Healing near the fight draws Otti's attention.

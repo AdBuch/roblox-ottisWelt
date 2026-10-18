@@ -15,9 +15,7 @@ local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
 local Config = require(ReplicatedStorage.Shared.Config)
 local GameModeDefinitions = require(ReplicatedStorage.Shared.GameModeDefinitions)
 local GameStates = require(ReplicatedStorage.Shared.GameStates)
-local Arena = require(script.Parent.Arena)
 local InventoryService = require(script.Parent.InventoryService)
-local PlayerCombatService = require(script.Parent.PlayerCombatService)
 local Remotes = require(script.Parent.Remotes)
 
 export type TeamName = "Red" | "Blue"
@@ -39,6 +37,8 @@ type Match = {
 	damageLog: { [Player]: { [Player]: number } }, -- victim -> attacker -> last hit time
 	finished: boolean,
 	token: number,
+	matchId: number, -- MatchService match id (PlayerMatchStateService)
+	active: boolean, -- false during the arena countdown
 }
 
 local PREFIX = "[OttiArena][Server]"
@@ -88,15 +88,36 @@ end
 
 local updateCountdown: () -> ()
 
+-- True while the player is still choosing a team in the lobby (never for match participants).
+local function inLobbyFlow(player: Player): boolean
+	local state = player:GetAttribute(GameStates.StateAttribute)
+	return GameStates.isInLobby(state) or state == GameStates.Countdown
+end
+
+-- Takes the starting players out of the lobby lists WITHOUT touching their attributes: from this
+-- moment the match owns their state. (Root cause of the old Team Battle bug: players were removed
+-- one by one after the match had started, and every publish() reset the still-listed participants
+-- to READY_CHECK / TEAM_SELECTION and cleared their team, so the arena safety net sent them back
+-- to the lobby.)
+local function detachForMatch(players: { Player })
+	for _, player in players do
+		local team, index = findMember(player)
+		if team and index then
+			table.remove(lobbyTeams[team], index)
+		end
+	end
+end
+
 local function publish()
 	for _, team in TEAMS do
 		local parts, lines = {}, {}
 		for _, member in lobbyTeams[team] do
 			table.insert(parts, ("%s|%s"):format(member.player.DisplayName, if member.ready then "ready" else ""))
 			table.insert(lines, ("%s  %s"):format(member.player.DisplayName, if member.ready then "READY" else "…"))
+			-- Only lobby players are touched here: match participants are never in these lists
 			member.player:SetAttribute(Config.TeamAttribute, team)
 			member.player:SetAttribute(Config.ReadyAttribute, member.ready)
-			if not countdownRunning then
+			if not countdownRunning and inLobbyFlow(member.player) then
 				member.player:SetAttribute(GameStates.StateAttribute, if member.ready then GameStates.ReadyCheck else GameStates.TeamSelection)
 			end
 		end
@@ -202,7 +223,9 @@ updateCountdown = function()
 			end
 			for _, team in TEAMS do
 				for _, member in lobbyTeams[team] do
-					member.player:SetAttribute(GameStates.StateAttribute, if member.ready then GameStates.ReadyCheck else GameStates.TeamSelection)
+					if inLobbyFlow(member.player) then
+						member.player:SetAttribute(GameStates.StateAttribute, if member.ready then GameStates.ReadyCheck else GameStates.TeamSelection)
+					end
 				end
 			end
 		end
@@ -230,7 +253,9 @@ updateCountdown = function()
 			end
 			for _, team in TEAMS do
 				for _, member in lobbyTeams[team] do
-					member.player:SetAttribute(GameStates.StateAttribute, GameStates.Countdown)
+					if inLobbyFlow(member.player) then
+						member.player:SetAttribute(GameStates.StateAttribute, GameStates.Countdown)
+					end
 				end
 			end
 			task.wait(1)
@@ -254,12 +279,19 @@ updateCountdown = function()
 			end
 		end
 		local startHooks = hooks
-		if #red >= 1 and #blue >= 1 and startHooks and startHooks.start(red, blue) then
-			for _, player in red do
-				TeamBattleService.removeFromLobby(player)
-			end
-			for _, player in blue do
-				TeamBattleService.removeFromLobby(player)
+		if #red >= 1 and #blue >= 1 and startHooks then
+			-- Detach first, atomically, then hand the players to the match
+			local all = table.clone(red)
+			table.move(blue, 1, #blue, #all + 1, all)
+			detachForMatch(all)
+			if not startHooks.start(red, blue) then
+				-- The arena was taken meanwhile: put them back into their lobby teams
+				for _, player in red do
+					table.insert(lobbyTeams.Red, { player = player, ready = true })
+				end
+				for _, player in blue do
+					table.insert(lobbyTeams.Blue, { player = player, ready = true })
+				end
 			end
 		end
 		publish()
@@ -351,35 +383,27 @@ local function onParticipantDied(victim: Player)
 	end
 end
 
-local function hookCharacter(player: Player, character: Model)
-	local humanoid = character:WaitForChild("Humanoid", 5)
+-- Listens for this participant character's death (called for every (re)spawned character by
+-- MatchSpawnService, which also places it at the team spawn).
+function TeamBattleService.hookCharacter(player: Player, character: Model)
+	local current = match
+	if not current or current.finished or not current.teamOf[player] then
+		return
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid", 10)
 	if humanoid and humanoid:IsA("Humanoid") then
 		humanoid.Died:Connect(function()
-			onParticipantDied(player)
+			if match == current then
+				onParticipantDied(player)
+			end
 		end)
 	end
 end
 
--- Respawn handling during a match: team spawn + spawn protection. Returns true if handled.
-function TeamBattleService.onCharacterAdded(player: Player, character: Model): boolean
+-- True once the arena countdown is over for this match id.
+function TeamBattleService.isActive(matchId: number): boolean
 	local current = match
-	if not current or current.finished or not current.teamOf[player] then
-		return false
-	end
-	local team = current.teamOf[player]
-	task.spawn(function()
-		local root = character:WaitForChild("HumanoidRootPart", 5)
-		if not root or match ~= current then
-			return
-		end
-		task.wait(0.2) -- let the character settle at the lobby spawn first
-		character:PivotTo(Arena.getTeamSpawnCFrame(team, math.random(1, 4)))
-		PlayerCombatService.setSpawnProtection(player, CombatConfig.SpawnProtectionSeconds)
-		player:SetAttribute(GameStates.StateAttribute, GameStates.MatchActive)
-		player:SetAttribute(GameStates.LocationAttribute, "Arena")
-		hookCharacter(player, character)
-	end)
-	return true
+	return current ~= nil and current.matchId == matchId and current.active and not current.finished
 end
 
 function TeamBattleService.recordDamage(victim: Player, attacker: Player?, _amount: number)
@@ -409,8 +433,8 @@ function TeamBattleService.isEnemy(a: Player, b: Player): boolean
 	return ta ~= nil and tb ~= nil and ta ~= tb
 end
 
--- Starts the match runtime for already-teleported players.
-function TeamBattleService.beginMatch(red: { Player }, blue: { Player })
+-- Registers the teams for an already-teleported match (the arena countdown runs next).
+function TeamBattleService.beginMatch(red: { Player }, blue: { Player }, matchId: number)
 	matchCounter += 1
 	local current: Match = {
 		teamOf = {},
@@ -420,6 +444,8 @@ function TeamBattleService.beginMatch(red: { Player }, blue: { Player })
 		damageLog = {},
 		finished = false,
 		token = matchCounter,
+		matchId = matchId,
+		active = false,
 	}
 	for _, player in red do
 		current.teamOf[player] = "Red"
@@ -432,12 +458,23 @@ function TeamBattleService.beginMatch(red: { Player }, blue: { Player })
 		player:SetAttribute(Config.EliminationsAttribute, 0)
 		player:SetAttribute(Config.DeathsAttribute, 0)
 		player:SetAttribute(Config.AssistsAttribute, 0)
-		if player.Character then
-			task.spawn(hookCharacter, player, player.Character)
-		end
 	end
 	match = current
+	for player in current.teamOf do
+		if player.Character then
+			task.spawn(TeamBattleService.hookCharacter, player, player.Character)
+		end
+	end
 	publishMatch()
+end
+
+-- The arena countdown is over: the clock starts and combat counts.
+function TeamBattleService.activate(matchId: number)
+	local current = match
+	if not current or current.matchId ~= matchId or current.active or current.finished then
+		return
+	end
+	current.active = true
 	local myToken = current.token
 	task.spawn(function()
 		while match == current and current.token == myToken and not current.finished do

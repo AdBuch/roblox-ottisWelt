@@ -57,16 +57,13 @@ local UiConfig = {
 	TouchLayoutPhone = table.freeze({
 		Attack = Vector2.new(60, 160),
 		Block = Vector2.new(140, 60),
-		Special1 = Vector2.new(140, 140),
-		Special2 = Vector2.new(60, 235),
+		Combo = Vector2.new(140, 140), -- Execute; Roblox's jump button is the Jump input
 	}),
 	TouchLayoutTablet = table.freeze({
 		Attack = Vector2.new(110, 290),
 		Block = Vector2.new(235, 150),
-		Special1 = Vector2.new(235, 255),
-		Special2 = Vector2.new(110, 375),
+		Combo = Vector2.new(235, 255),
 	}),
-	DesktopSpecialSize = 64,
 
 	-- Colors
 	Gold = Color3.fromRGB(255, 205, 70),

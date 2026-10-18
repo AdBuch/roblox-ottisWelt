@@ -67,12 +67,16 @@ local OttiAnimator = load(script.Parent, "OttiAnimator")
 local DamageEffectsController = load(script.Parent, "DamageEffectsController")
 local CrowdEffectsController = load(script.Parent, "CrowdEffectsController")
 local BowController = load(script.Parent, "BowController")
+local ComboFeedbackController = load(script.Parent, "ComboFeedbackController")
+local PlayerAnimator = load(script.Parent, "PlayerAnimator")
+local OttiEntranceController = load(script.Parent, "OttiEntranceController")
 for _, module in {
 	Config, CombatConfig, GameStates, GameModeDefinitions, WeaponDefinitions, ShieldDefinitions, SpecialMoveDefinitions, ComboDefinitions,
 	ResponsiveHudController, HudVisibilityController, HudStateController, NotificationController, ContextHealthController,
 	TeamStatusController, BossHudController, AuraDisplayController, MobileControlsController, InfoPanelController,
 	SpectatorController, InputController, ShopController, EffectsController, ZombieAnimator, OttiAnimator,
-	DamageEffectsController, CrowdEffectsController, BowController,
+	DamageEffectsController, CrowdEffectsController, BowController, ComboFeedbackController, PlayerAnimator,
+	OttiEntranceController,
 } do
 	if not module then
 		return
@@ -131,27 +135,20 @@ local controls = MobileControlsController.start(hud.group, visibility, hud.onLay
 end)
 
 local CONTROL_HINTS = {
-	["Keyboard & Mouse"] = "LMB Attack   RMB Block   Q / E Specials   F Interact   H HUD",
-	["Gamepad"] = "R2 Attack   L2 Block   X / Y Specials   D-pad up Interact",
+	["Keyboard & Mouse"] = "LMB Attack   RMB Block   Space Jump   Enter Combo   F Interact",
+	["Gamepad"] = "R2 Attack   L2 Block   A Jump   Y Combo   D-pad up Interact",
 	["Touch"] = "",
-}
-local SPECIAL_KEYS = {
-	["Keyboard & Mouse"] = { "Q", "E" },
-	["Gamepad"] = { "X", "Y" },
-	["Touch"] = { "", "" },
 }
 
 local function equippedWeapon(): any
 	return WeaponDefinitions.ById[tostring(player:GetAttribute(Config.EquippedWeaponAttribute))] or WeaponDefinitions.ById[WeaponDefinitions.Starter]
 end
 
+-- The COMBO TRAINING board shows the equipped weapon's combinations
+local lobbyFolder = Workspace:WaitForChild(Config.LobbyFolderName, WAIT_TIMEOUT)
+local comboFeedback = ComboFeedbackController.start(hud.group, visibility, hud.onLayout, lobbyFolder)
 local function refreshSpecials()
-	local weapon = equippedWeapon()
-	local keys = SPECIAL_KEYS[scheme] or SPECIAL_KEYS["Keyboard & Mouse"]
-	local q = SpecialMoveDefinitions[weapon.Special1]
-	local e = SpecialMoveDefinitions[weapon.Special2]
-	controls.special1.setMove(keys[1], if q then q.Name else "-")
-	controls.special2.setMove(keys[2], if e then e.Name else "-")
+	comboFeedback.showBoard(equippedWeapon())
 end
 
 ------------------------------------------------------------------ remotes, input and feedback
@@ -172,8 +169,8 @@ if combatAction and shieldBlock and shieldBlock:IsA("RemoteEvent") then
 		end,
 		attackButton = controls.attackButton,
 		blockButton = controls.blockButton,
-		special1Button = controls.special1Button,
-		special2Button = controls.special2Button,
+		comboButton = controls.comboButton,
+		onInput = comboFeedback.input,
 		onSchemeChanged = function(newScheme: string)
 			scheme = newScheme
 			hud.setHint(CONTROL_HINTS[newScheme] or "")
@@ -188,13 +185,9 @@ if feedback and feedback:IsA("RemoteEvent") then
 	local F = CombatConfig.Feedback
 	feedback.OnClientEvent:Connect(function(kind: string, a: any, b: any, c: any, d: any)
 		if kind == F.Action then
-			if a == "Special1" then
-				controls.special1.startCooldown(tonumber(c) or 0)
-			elseif a == "Special2" then
-				controls.special2.startCooldown(tonumber(c) or 0)
-			end
-			if typeof(d) == "string" then
-				notify("Info", d .. "!") -- combo
+			if a == "Combo" and typeof(d) == "string" then
+				-- In the training yard: explicit success feedback; in combat just the move name
+				notify("Info", if visibility.getState() == "Lobby" then "COMBO SUCCESS · " .. d else d .. "!")
 			end
 			hud.fadeHint() -- the control hint fades once you start fighting
 		elseif kind == F.Hit then
@@ -243,6 +236,17 @@ if feedback and feedback:IsA("RemoteEvent") then
 			end
 		elseif kind == F.Knockdown then
 			EffectsController.knockdown(tonumber(a) or 1)
+		elseif kind == F.Leap then
+			if typeof(b) == "Vector3" then
+				EffectsController.leap(tonumber(a) or 30, b, tonumber(c) or 0)
+			end
+		elseif kind == F.Dive then
+			if typeof(a) == "Vector3" then
+				EffectsController.dive(a, tonumber(b) or 0, tonumber(c) or 50)
+			end
+		elseif kind == F.ComboFail then
+			comboFeedback.clear()
+			notify("Info", tostring(a)) -- tiny NO COMBO / NOT READY / TOO SLOW
 		end
 	end)
 else
@@ -295,6 +299,7 @@ local lastPhase = ""
 local lastIntro = ""
 local resultShown = false
 local defeatShown = false
+local teamCountdownShown = false
 
 local function refreshMatch()
 	local uiState = visibility.getState()
@@ -367,6 +372,16 @@ local function refreshMatch()
 			notifier.banner(nil, nil, nil)
 		end
 	end
+	if mode == "TeamBattle" and uiState == "TeamBattle" then
+		-- Arena countdown at the protected team spawns, then FIGHT!
+		if countdown > 0 then
+			teamCountdownShown = true
+			notifier.banner(tostring(countdown), "GET READY", nil, 1.1)
+		elseif teamCountdownShown then
+			teamCountdownShown = false
+			notifier.banner("FIGHT!", nil, nil, 1)
+		end
+	end
 	if zombieMode and phase == "Starting" and countdown > 0 then
 		notifier.banner(tostring(countdown), "GET READY", nil, 1.1) -- countdown: only the number and a short label
 	elseif zombieMode and phase == "Fighting" and round ~= shownRound then
@@ -403,7 +418,8 @@ task.spawn(function()
 	local teamStatus = TeamStatusController.start(hud.group, visibility, arenaFolder, lobby, function()
 		return hud.layout.device == "Phone"
 	end, notify)
-	BossHudController.start(hud.group, visibility, hud.onLayout, arenaFolder, combatAction)
+	local entrance = OttiEntranceController.start(arenaFolder)
+	BossHudController.start(hud.group, visibility, hud.onLayout, arenaFolder, entrance)
 	CrowdEffectsController.start(arenaFolder, notify)
 	local spectator = SpectatorController.start(hud.group, visibility, combatAction)
 	context = ContextHealthController.start(playerGui, {
@@ -433,12 +449,13 @@ task.spawn(function()
 		end
 		table.insert(lines, "")
 		table.insert(lines, "<b>CONTROLS</b>")
-		table.insert(lines, "Keyboard: LMB attack · RMB hold to block · Q / E specials · F interact · H HUD mode")
-		table.insert(lines, "Gamepad: R2 attack · L2 block · X / Y specials · D-pad up interact")
-		table.insert(lines, "Touch: ATK · hold BLOCK · special buttons · tap prompts · 👁 HUD mode")
+		table.insert(lines, "Keyboard: LMB attack · RMB block (tap = B, hold = guard) · Space jump · Enter combo · F interact · H HUD mode")
+		table.insert(lines, "Gamepad: R2 attack · L2 block · A jump · Y combo · D-pad up interact")
+		table.insert(lines, "Touch: ATK · BLOCK · jump button · COMBO · tap prompts · eye button = HUD mode")
+		table.insert(lines, "Combos: tap the inputs (A attack, B block, J jump), then EXECUTE. Attack while airborne = aerial attack.")
 		table.insert(lines, "")
 		table.insert(lines, ("<b>WEAPON</b>  %s"):format(weapon.DisplayName))
-		for _, moveId in { weapon.Basic, weapon.Special1, weapon.Special2 } do
+		for _, moveId in { weapon.Basic, weapon.Aerial } do
 			local move = SpecialMoveDefinitions[moveId]
 			if move then
 				table.insert(lines, ("  %s · %d dmg · range %d · %.1f s cooldown"):format(move.Name, move.Damage, move.Range, move.Cooldown))
@@ -446,12 +463,13 @@ task.spawn(function()
 		end
 		local shieldText = if weapon.TwoHanded then "none (two-handed: parry with block)" elseif shield then shield.DisplayName else "–"
 		table.insert(lines, ("<b>SHIELD</b>  %s"):format(shieldText))
-		local combos = ComboDefinitions[weapon.Id]
+		local combos = ComboDefinitions.ByWeapon[weapon.Id]
 		if combos then
 			table.insert(lines, "")
 			table.insert(lines, "<b>COMBOS</b>")
 			for _, combo in combos do
-				table.insert(lines, ("  %s: %s (×%.2g)"):format(combo.Name, table.concat(combo.Sequence, " → "), combo.DamageMultiplier))
+				local move = SpecialMoveDefinitions[combo.Move]
+				table.insert(lines, ("  %s%s: %s (%.0f s)"):format(if combo.Advanced then "★ " else "", combo.Name, ComboDefinitions.describe(combo.Sequence), if move then move.Cooldown else 0))
 			end
 		end
 		table.insert(lines, "")
@@ -479,6 +497,8 @@ end)
 
 ZombieAnimator.start(CombatConfig.ZombieTag)
 OttiAnimator.start(Config.OttiTag)
+OttiAnimator.start(Config.OttiSpectatorTag)
+PlayerAnimator.start()
 BowController.start(hud.gui, Config.EquippedWeaponAttribute, function()
 	local state = gameState()
 	return GameStates.isFighter(state) or GameStates.isInLobby(state)

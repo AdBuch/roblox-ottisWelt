@@ -1,6 +1,7 @@
 --!strict
 -- The eight player weapons. Exactly one is equipped (right hand). Each weapon names its basic
--- attack and two specials in SpecialMoveDefinitions; combos live in ComboDefinitions.
+-- attack and its aerial attack (Jump -> Attack) in SpecialMoveDefinitions; combination moves live
+-- in ComboDefinitions (Attack / Block / Jump inputs + Execute).
 -- Shop stats (Damage/Cooldown/Range) are read from the basic move, so there is one source of truth.
 
 local SpecialMoveDefinitions = require(script.Parent.SpecialMoveDefinitions)
@@ -15,8 +16,7 @@ export type WeaponDefinition = {
 	Price: number,
 	TwoHanded: boolean, -- uses both hands: no shield, built-in parry instead
 	Basic: string,
-	Special1: string,
-	Special2: string,
+	Aerial: string,
 	Description: string,
 	-- derived from the basic move (display only)
 	Damage: number,
@@ -31,27 +31,26 @@ type WeaponSpec = {
 	Price: number,
 	TwoHanded: boolean,
 	Basic: string,
-	Special1: string,
-	Special2: string,
+	Aerial: string,
 	Description: string,
 }
 
 local specs: { WeaponSpec } = {
-	{ Id = "RustyGladius", DisplayName = "Rusty Gladius", Kind = "Melee", Price = 0, TwoHanded = false, Basic = "Gladius_Basic", Special1 = "QuickThrust", Special2 = "ShieldCounter", Description = "Starter sword" },
-	{ Id = "LegionSword", DisplayName = "Legion Sword", Kind = "Melee", Price = 80, TwoHanded = false, Basic = "Legion_Basic", Special1 = "LegionCombo", Special2 = "RisingSlash", Description = "Polished bronze and steel" },
-	{ Id = "HunterBow", DisplayName = "Hunter Bow", Kind = "Bow", Price = 130, TwoHanded = false, Basic = "Bow_Basic", Special1 = "TripleShot", Special2 = "PiercingArrow", Description = "Ranged, blocked by walls" },
-	{ Id = "MorningStar", DisplayName = "Gladiator Morning Star", Kind = "Melee", Price = 190, TwoHanded = false, Basic = "MorningStar_Basic", Special1 = "HeavyCrush", Special2 = "ChainSweep", Description = "Wide, heavy swings" },
-	{ Id = "Trident", DisplayName = "Gladiator Trident", Kind = "Melee", Price = 260, TwoHanded = false, Basic = "Trident_Basic", Special1 = "TridentRush", Special2 = "NetAndStrike", Description = "Long thrusts and a net" },
-	{ Id = "HopliteSpear", DisplayName = "Hoplite Spear", Kind = "Melee", Price = 300, TwoHanded = false, Basic = "Hoplite_Basic", Special1 = "PhalanxThrust", Special2 = "SpearSweep", Description = "Longest reach" },
-	{ Id = "TwinDaggers", DisplayName = "Twin Arena Daggers", Kind = "Melee", Price = 340, TwoHanded = true, Basic = "Daggers_Basic", Special1 = "ViperFlurry", Special2 = "ShadowStep", Description = "Two-handed: no shield, built-in parry" },
-	{ Id = "BattleAxe", DisplayName = "Arena Battle Axe", Kind = "Melee", Price = 380, TwoHanded = false, Basic = "Axe_Basic", Special1 = "ExecutionArc", Special2 = "Whirlwind", Description = "Slow, heavy, devastating" },
+	{ Id = "RustyGladius", DisplayName = "Rusty Gladius", Kind = "Melee", Price = 0, TwoHanded = false, Basic = "Gladius_Basic", Aerial = "Gladius_Aerial", Description = "Starter sword" },
+	{ Id = "LegionSword", DisplayName = "Legion Sword", Kind = "Melee", Price = 80, TwoHanded = false, Basic = "Legion_Basic", Aerial = "Legion_Aerial", Description = "Polished bronze and steel" },
+	{ Id = "HunterBow", DisplayName = "Hunter Bow", Kind = "Bow", Price = 130, TwoHanded = false, Basic = "Bow_Basic", Aerial = "Bow_Aerial", Description = "Ranged, blocked by walls" },
+	{ Id = "MorningStar", DisplayName = "Gladiator Morning Star", Kind = "Melee", Price = 190, TwoHanded = false, Basic = "MorningStar_Basic", Aerial = "MorningStar_Aerial", Description = "Wide, heavy swings" },
+	{ Id = "Trident", DisplayName = "Gladiator Trident", Kind = "Melee", Price = 260, TwoHanded = false, Basic = "Trident_Basic", Aerial = "Trident_Aerial", Description = "Long thrusts and a net" },
+	{ Id = "HopliteSpear", DisplayName = "Hoplite Spear", Kind = "Melee", Price = 300, TwoHanded = false, Basic = "Hoplite_Basic", Aerial = "Hoplite_Aerial", Description = "Longest reach" },
+	{ Id = "TwinDaggers", DisplayName = "Twin Arena Daggers", Kind = "Melee", Price = 340, TwoHanded = true, Basic = "Daggers_Basic", Aerial = "Daggers_Aerial", Description = "Two-handed: no shield, built-in parry" },
+	{ Id = "BattleAxe", DisplayName = "Arena Battle Axe", Kind = "Melee", Price = 380, TwoHanded = false, Basic = "Axe_Basic", Aerial = "Axe_Aerial", Description = "Slow, heavy, devastating" },
 }
 
 local byId: { [string]: WeaponDefinition } = {}
 local ordered: { WeaponDefinition } = {}
 for order, spec in specs do
 	local basic = SpecialMoveDefinitions[spec.Basic]
-	assert(basic and SpecialMoveDefinitions[spec.Special1] and SpecialMoveDefinitions[spec.Special2], "missing move for " .. spec.Id)
+	assert(basic and SpecialMoveDefinitions[spec.Aerial], "missing move for " .. spec.Id)
 	local def: WeaponDefinition = {
 		Id = spec.Id,
 		DisplayName = spec.DisplayName,
@@ -60,8 +59,7 @@ for order, spec in specs do
 		Price = spec.Price,
 		TwoHanded = spec.TwoHanded,
 		Basic = spec.Basic,
-		Special1 = spec.Special1,
-		Special2 = spec.Special2,
+		Aerial = spec.Aerial,
 		Description = spec.Description,
 		Damage = basic.Damage,
 		Cooldown = basic.Cooldown,
@@ -78,14 +76,12 @@ local WeaponDefinitions = {
 	Ordered = table.freeze(ordered),
 }
 
--- The move id for an action ("Basic" | "Special1" | "Special2") of a weapon.
+-- The move id for "Basic" or "Aerial" of a weapon (combination moves: ComboDefinitions).
 function WeaponDefinitions.moveFor(weapon: WeaponDefinition, action: string): string?
 	if action == "Basic" then
 		return weapon.Basic
-	elseif action == "Special1" then
-		return weapon.Special1
-	elseif action == "Special2" then
-		return weapon.Special2
+	elseif action == "Aerial" then
+		return weapon.Aerial
 	end
 	return nil
 end

@@ -13,6 +13,7 @@ local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
 local Config = require(ReplicatedStorage.Shared.Config)
 local GameStates = require(ReplicatedStorage.Shared.GameStates)
 local ShieldDefinitions = require(ReplicatedStorage.Shared.ShieldDefinitions)
+local ComboDefinitions = require(ReplicatedStorage.Shared.ComboDefinitions)
 local SpecialMoveDefinitions = require(ReplicatedStorage.Shared.SpecialMoveDefinitions)
 local WeaponDefinitions = require(ReplicatedStorage.Shared.WeaponDefinitions)
 local EquipmentModels = require(script.Parent.EquipmentModels)
@@ -160,10 +161,16 @@ function EquipmentShopService.build(parent: Instance, weaponSlots: { CFrame }, s
 			local stat = if weapon.Kind == "Bow"
 				then ("DMG %d · range %d · %.2fs"):format(weapon.Damage, weapon.Range, weapon.Cooldown)
 				else ("DMG %d · range %g · %.2fs"):format(weapon.Damage, weapon.Range, weapon.Cooldown)
-			local q, e = SpecialMoveDefinitions[weapon.Special1], SpecialMoveDefinitions[weapon.Special2]
-			local note = if weapon.TwoHanded
-				then "TWO-HANDED: no shield, built-in parry"
-				else ("Q %s · E %s"):format(q.Name, e.Name)
+			local names = {}
+			local combos: { any } = ComboDefinitions.ByWeapon[weapon.Id] or {}
+			for _, entry in combos do
+				if entry.Advanced then
+					table.insert(names, entry.Name)
+				end
+			end
+			local aerial = SpecialMoveDefinitions[weapon.Aerial]
+			local note = (if weapon.TwoHanded then "TWO-HANDED, built-in parry · " else "")
+				.. ("Air: %s · %s"):format(if aerial then aerial.Name else "-", table.concat(names, " · "))
 			buildItem(shop, slot, "Weapon", weapon.Id, weapon.DisplayName, stat, weapon.Price, note)
 		end
 	end

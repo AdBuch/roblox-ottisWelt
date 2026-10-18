@@ -63,6 +63,43 @@ local function build(name: string, body: (add: AddFn) -> ()): (Model, BasePart)
 	return model, core
 end
 
+-- A weapon trail from the grip to the farthest point of the weapon (enabled only while a strike
+-- travels; PlayerCombatService toggles it). Returns nil for tiny models.
+function EquipmentModels.addTrail(model: Model, core: BasePart): Trail?
+	local tip = Vector3.zero
+	for _, child in model:GetDescendants() do
+		if child:IsA("Weld") and child.Part0 == core then
+			local far = child.C0.Position
+			if far.Magnitude > tip.Magnitude then
+				tip = far
+			end
+		end
+	end
+	if tip.Magnitude < 1 then
+		return nil
+	end
+	local a0 = Instance.new("Attachment")
+	a0.Name = "TrailBase"
+	a0.Position = tip * 0.35
+	a0.Parent = core
+	local a1 = Instance.new("Attachment")
+	a1.Name = "TrailTip"
+	a1.Position = tip
+	a1.Parent = core
+	local trail = Instance.new("Trail")
+	trail.Attachment0 = a0
+	trail.Attachment1 = a1
+	trail.Lifetime = 0.18
+	trail.MinLength = 0.05
+	trail.FaceCamera = true
+	trail.LightEmission = 0.6
+	trail.Color = ColorSequence.new(Color3.fromRGB(255, 240, 200))
+	trail.Transparency = NumberSequence.new(0.35, 1)
+	trail.Enabled = false
+	trail.Parent = core
+	return trail
+end
+
 -- Connects two points with a thin part (for bow limbs, chains, ...).
 local function segment(add: AddFn, name: string, a: Vector3, b: Vector3, thickness: number, color: Color3, material: Enum.Material)
 	local length = (b - a).Magnitude
