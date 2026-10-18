@@ -34,6 +34,7 @@ src/shared/   -> ReplicatedStorage.Shared
   RoundDefinitions                   round sizes per mode, weighted variant picking, archer caps, Round 7
   DamageEffectsConfig                stylized blood/sparks switches, condition thresholds, limb-loss chances
   ProjectileDefinitions              player bow range + falloff, enemy arrows, arrow pool limit
+  UiConfig / UiStateDefinitions / NotificationDefinitions   HUD sizes, breakpoints, limits / per-state and per-mode groups / notification priorities
   AudioConfig                        optional crowd/boss sound IDs (empty = visual fallback)
   OttiBossConfig                     Otti: health per player count, rewards, intro, speeds, safety values
   OttiMoveDefinitions                Otti's 11 attacks as data (wind-up, active, recovery, ranges, warnings)
@@ -65,17 +66,23 @@ src/server/   -> ServerScriptService.Server
   ZombieDisplayService               ZOMBIE ARCHIVE cages
   TrainingService                    training dummies
   ShellService / VictoryService      healing shells / fireworks
-  ArenaSafetyService / PlayerTagService   out-of-bounds safety / overhead name + health tags
+  ArenaSafetyService                 out-of-bounds safety (players, zombies, Otti)
 src/client/   -> StarterPlayer.StarterPlayerScripts.Client
-  Main.client                        wiring, header/banners, feedback, target bar
-  CombatHudController                HUD (AURA bar, specials with cooldowns, combo popup, kill feed)
-  InputController                    mouse/keyboard, gamepad and touch input (incl. mobile buttons)
-  PartyController                    co-op / team roster panel, Team Battle scoreboard
+  Main.client                        wiring: feedback, attributes, input -> HUD
+  ResponsiveHudController            the one HUD: layout/scale, compact health, round line, hints, hit flash
+  HudVisibilityController / HudStateController   Full/Minimal/Hidden modes / UI state per situation
+  NotificationController             single notification queue + short banners (pooled)
+  ContextHealthController            contextual world-space health bars (pooled BillboardGuis)
+  TeamStatusController               team score + time, co-op teammate strip, lobby rosters
+  AuraDisplayController              lobby Aura counter, +n rewards in combat
+  MobileControlsController           touch buttons around the jump button, desktop special cards
+  InfoPanelController / SpectatorController   optional i panel / tribune watching bar
+  InputController                    mouse/keyboard, gamepad and touch input
   ShopController                     per-player shop plaques, prompt text, equipped outline
   EffectsController                  damage numbers, dash/lunge/knockback on your own character
   ZombieAnimator                     client walk cycle for arena zombies (limp, crawl)
   OttiAnimator                       procedural Otti animation (gaits, stance changes, tail, attack poses)
-  BossHudController / BossWarningController   boss bar, phase, skip intro / major attack warnings
+  BossHudController                  slim Otti bar, phase, short warnings, skip intro
   DamageEffectsController            stylized hit particles, directional hit indicator
   CrowdEffectsController             spectator animation, crowd texts, arena light
   BowController                      subtle crosshair while the Hunter Bow is equipped
@@ -101,13 +108,56 @@ For multiplayer tests: **Test → Clients and Servers → Local Server** with 2 
 
 | | Keyboard & mouse | Gamepad | Touch |
 |---|---|---|---|
-| Basic attack | Left click | R2 | ATTACK |
+| Basic attack | Left click | R2 | ATK |
 | Block / parry (hold) | Right click | L2 | BLOCK |
-| Special 1 | Q | X | SPECIAL 1 card |
-| Special 2 | E | Y | SPECIAL 2 card |
+| Special 1 | Q | X | first special button |
+| Special 2 | E | Y | second special button |
 | Interact (shop, doors, posts) | **F** | D-pad up | tap prompt |
+| HUD mode (Full / Minimal / Hidden) | **H** or eye button | eye button | eye button |
+| Info panel | i button | i button | i button |
 
-The HUD shows the detected control scheme. Interactions use **F** because Q and E are special attacks.
+Interactions use **F** because Q and E are special attacks.
+
+## HUD (responsive, mobile first)
+
+One HUD (`ResponsiveHudController`) replaces the old desktop panels. The upper-left corner and the
+centre of the screen stay free; everything is small, anchored to an edge and scaled per device
+(`UiConfig`, `ScreenInsets = CoreUISafeInsets` keeps it below Roblox's top bar and notches).
+
+| Device class | Rule | Scale |
+|---|---|---|
+| Phone | touch and the shortest side < 500 px | 0.80 portrait / 0.85 landscape |
+| Tablet | touch and larger | 1.0 |
+| Desktop | mouse/keyboard | 1.0 × viewport height / 900 (0.85-1.25) |
+| Console | ten-foot interface / gamepad | 1.15 |
+
+- **Health:** heart + slim bar bottom-left (phones: above the thumbstick, 25 % of the width; the
+  `82 / 120` number disappears below 400 px width); green → amber → red, pulse on damage, glow on heal.
+  Below 25 % it stays visible in every HUD mode.
+- **Enemy health:** world-space bars only when relevant (you hit it, it hit you, you aim at it, or a zombie
+  is very close); gone ~3 s after the last interaction and immediately on death; never through walls; at most
+  4 bars on phones and 8 on desktop, nearest relevant first; zombie names are omitted on phones.
+- **Team Battle:** `RED 8 — 6 BLUE   04:12` capsule at the top; teammates get a bar with a team-coloured
+  outline and short name; opponents only after a hit either way or while aimed at.
+- **Co-op:** collapsible teammate strip on the left edge (initial, tiny bar, ✕ when down, red pulse below 25 %).
+- **Round line:** one slim line at the top (`ROUND 4 / 7   •   7 LEFT`), shown for a few seconds on every
+  change; short `ROUND 4` / `ROUND COMPLETE` / countdown banners in the upper third.
+- **Otti:** slim bar at the top (~60 % width on phones, 45 % on desktop): `OTTI` and `P1`-`P3`; short
+  warnings `JUMP!`, `TAIL SLAM!`, `GRAPPLE!` right below it; `CHAMPION OF THE COLOSSEUM` only in the intro.
+- **Aura:** orb + number top-right in the lobby (and so while shopping); in combat only short `+10`
+  notifications with the orb (rapid rewards merged); the results banner shows the match total.
+- **Notifications:** one queue, at most 3 small messages; priorities Critical > Result > Round > Heal > Aura > Info.
+- **Controls:** touch ATK / BLOCK / two specials in an arc around Roblox's jump button (50-56 px, cooldown
+  overlay); desktop special cards bottom-right; a one-line control hint in the lobby that fades once you fight.
+- **HUD modes** (👁 button on the right edge, **H** on keyboard, remembered for the session):
+  **Full** everything relevant · **Minimal** health, controls, boss bar, team score, critical warnings ·
+  **Hidden** only touch combat buttons, critical/low-health warnings, results, respawn info and prompts.
+- **Info panel** (`i` button): mode, full controls, weapon, shield, specials, combos, round details, rosters,
+  Aura rewards; scrolls; closes with ✕ or a tap outside; closes itself when a phone enters combat.
+- **States:** Lobby (Aura, hints, rosters) · Solo / Co-op (health, round line, context bars, strip) ·
+  Team Battle (score + time, context bars) · Boss (Otti bar, warnings) · Spectator (watched player, ◀ ▶, EXIT) ·
+  Results (summary banner).
+
 
 ## The basement (lobby)
 
@@ -317,10 +367,10 @@ solo 500 Aura; co-op 400 per survivor, 250 for defeated players who damaged him.
 ## Studio test steps
 
 **Solo**
-1. F5. You spawn in the arrival hall: `AURA: 0`, Rusty Gladius + Wooden Buckler in your hands, Q/E cards bottom right.
-2. Walk to the TRAINING yard (south-west), hit a dummy, then try Basic → Basic → Q: you should see a `GLADIATOR'S POINT!` popup.
+1. F5. You spawn in the arrival hall: the Aura orb top-right shows 0, Rusty Gladius + Wooden Buckler in your hands, small Q/E cards bottom right (touch: buttons around the jump button).
+2. Walk to the TRAINING yard (south-west), hit a dummy, then try Basic → Basic → Q: you should see a short `GLADIATOR'S POINT!` notification.
 3. Visit the ZOMBIE ARCHIVE (east): 6 caged zombies with plaques; the Undead Sagittarius draws its bow at you.
-4. Hold F at the SOLO ARENA gate (north-west). GET READY, then ROUND 1 / 7. Kill zombies: `+10 AURA`.
+4. Hold F at the SOLO ARENA gate (north-west). GET READY, then ROUND 1 / 7. Kill zombies: a short `+10` with the Aura orb (no permanent counter in combat).
 5. Die or win: you return to the lobby and keep your Aura. Buy something with F at a pedestal (e.g. Legion Sword for 80).
 
 **Zombie damage, limbs, archers** (buy the Battle Axe or Morning Star for quick results)
@@ -339,12 +389,12 @@ solo 500 Aura; co-op 400 per survivor, 250 for defeated players who damaged him.
 3. Fight: on `TAIL SWEEP — JUMP!` jump over the tail; on `TAIL SLAM — MOVE!` leave the red/orange circle; block a bite
    with your shield facing him; on `GRAPPLE — DODGE!` sidestep. If caught, you land inside the arena and can move again.
 4. Watch the bar turn blue (70 %) and red (35 %) with a shield strike and a sand burst.
-5. Win: Otti drops his sword and raises a paw, fireworks, `+500 AURA (CHAMPION)`, back to the lobby after 12 s.
+5. Win: Otti drops his sword and raises a paw, fireworks, `+500`, back to the lobby after 12 s.
    Start again: the intro now has a SKIP INTRO button, and no boss state is left over.
 
 **Two-player co-op** (Test → Local Server, 2 players)
 1. Both hold F at JOIN / LEAVE PARTY, then READY. The leader (★) holds F at START.
-2. Round 1 has 2 zombies (2 × 100 %). Both players are targeted, damage gives assist Aura (`+3 AURA (ASSIST)`).
+2. Round 1 has 2 zombies (2 × 100 %). Both players are targeted, damage gives assist Aura (`+3`).
 3. Let one player die: they wait on the tribune and return with 72 HP after the round. If both die, the run ends.
 4. Round 7: Otti has 1,850 HP and switches targets; he never grapples the same player twice in a row.
 

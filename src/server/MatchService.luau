@@ -741,6 +741,12 @@ function MatchService.init(layout: LobbyService.LobbyLayout, folder: Instance)
 	if Arena.Layout.ReturnDoor then
 		addPrompt(Arena.Layout.ReturnDoor, "Return to Lobby", "RETURN TO LOBBY", 0.5, leaveTribune)
 	end
+	-- The spectator HUD's EXIT button does the same as the RETURN TO LOBBY door
+	Remotes.CombatAction.OnServerEvent:Connect(function(player: Player, action: unknown)
+		if action == "LeaveTribune" and not debounced(player) then
+			leaveTribune(player)
+		end
+	end)
 
 	local function setup(player: Player)
 		setState(player, GameStates.Lobby, "Lobby")

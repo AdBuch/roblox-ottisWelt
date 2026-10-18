@@ -126,7 +126,7 @@ function BossGrappleService.execute(boss: Boss, ctx: BossContext, target: Player
 	end
 
 	-- Telegraph: weapon arm aside, both paws open, growl, warning indicator
-	ctx.warn(move.Warning or "GRAPPLE — DODGE!", move.WindUp + move.Active)
+	ctx.warn(move.Warning or "GRAPPLE!", move.WindUp + move.Active)
 	OttiAnimationService.setPose(boss, "GrabOpen", move.WindUp * 0.6)
 	CombatEffects.glow(boss.model, Color3.fromRGB(255, 140, 80), move.WindUp)
 	local elapsed = 0

@@ -52,8 +52,6 @@ export type ZombieRig = {
 	leftShoulderRest: CFrame,
 	hitSparks: ParticleEmitter,
 	deathPuff: ParticleEmitter,
-	healthFill: Frame,
-	nameTag: BillboardGui,
 	guardGlow: PointLight?, -- champion shield telegraph
 	visibleParts: { BasePart },
 }
@@ -519,39 +517,6 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 	puff.Enabled = false
 	puff.Parent = torso
 
-	-- Overhead name + health bar
-	local tag = Instance.new("BillboardGui")
-	tag.Name = "HealthBar"
-	tag.Adornee = head
-	tag.Size = UDim2.fromOffset(130, 30)
-	tag.StudsOffset = Vector3.new(0, H.Y * S * 0.6 + 1.6 * S, 0)
-	tag.MaxDistance = 110 -- archers keep 55-85 studs away
-	tag.Parent = model
-
-	local nameLabel = Instance.new("TextLabel")
-	nameLabel.Size = UDim2.new(1, 0, 0, 16)
-	nameLabel.BackgroundTransparency = 1
-	nameLabel.Font = Enum.Font.GothamBold
-	nameLabel.TextSize = 12
-	nameLabel.TextColor3 = if def.Special == "Guard" then GOLD else Color3.new(1, 1, 1)
-	nameLabel.TextStrokeTransparency = 0.4
-	nameLabel.Text = def.DisplayName
-	nameLabel.Parent = tag
-
-	local barBack = Instance.new("Frame")
-	barBack.Position = UDim2.fromOffset(10, 19)
-	barBack.Size = UDim2.new(1, -20, 0, 7)
-	barBack.BackgroundColor3 = Color3.fromRGB(40, 20, 20)
-	barBack.BorderSizePixel = 0
-	barBack.Parent = tag
-
-	local fill = Instance.new("Frame")
-	fill.Name = "Fill"
-	fill.Size = UDim2.fromScale(1, 1)
-	fill.BackgroundColor3 = Color3.fromRGB(220, 60, 50)
-	fill.BorderSizePixel = 0
-	fill.Parent = barBack
-
 	return {
 		model = model,
 		humanoid = humanoid,
@@ -570,8 +535,6 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 		leftShoulderRest = leftShoulder.C0,
 		hitSparks = sparks,
 		deathPuff = puff,
-		healthFill = fill,
-		nameTag = tag,
 		guardGlow = guardGlow,
 		visibleParts = visibleParts,
 	}

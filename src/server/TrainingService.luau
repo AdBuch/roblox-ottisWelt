@@ -16,7 +16,6 @@ export type Dummy = {
 	root: BasePart,
 	health: number,
 	lastHit: number,
-	label: TextLabel,
 }
 
 local TrainingService = {}
@@ -25,8 +24,8 @@ local dummies: { [Model]: Dummy } = {}
 local zoneCFrame = CFrame.identity
 local zoneSize = Vector3.zero
 
+-- The client shows a contextual health bar from these attributes (ContextHealthController).
 local function updateLabel(dummy: Dummy)
-	dummy.label.Text = ("TRAINING DUMMY  %d / %d"):format(math.ceil(dummy.health), DUMMY_HEALTH)
 	dummy.model:SetAttribute("Health", dummy.health)
 end
 
@@ -58,24 +57,9 @@ local function buildDummy(parent: Instance, base: CFrame, index: number): Dummy
 	model:SetAttribute("ZombieType", "Training Dummy")
 	model:SetAttribute("MaxHealth", DUMMY_HEALTH)
 
-	local tag = Instance.new("BillboardGui")
-	tag.Size = UDim2.fromOffset(180, 24)
-	tag.StudsOffset = Vector3.new(0, 4, 0)
-	tag.Adornee = root
-	tag.MaxDistance = 50
-	tag.Parent = model
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.GothamBold
-	label.TextSize = 13
-	label.TextColor3 = Color3.new(1, 1, 1)
-	label.TextStrokeTransparency = 0.4
-	label.Parent = tag
-
 	model.Parent = parent
 	CollectionService:AddTag(model, Config.TrainingDummyTag)
-	local dummy: Dummy = { model = model, root = root, health = DUMMY_HEALTH, lastHit = 0, label = label }
+	local dummy: Dummy = { model = model, root = root, health = DUMMY_HEALTH, lastHit = 0 }
 	dummies[model] = dummy
 	updateLabel(dummy)
 	return dummy

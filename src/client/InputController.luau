@@ -3,7 +3,7 @@
 -- validates everything (state, ownership, cooldowns, combos, targets, damage).
 --   Keyboard/mouse : LMB attack · RMB hold to block · Q Special 1 · E Special 2
 --   Gamepad        : R2 attack · L2 hold to block · X Special 1 · Y Special 2
---   Touch          : ATTACK · hold BLOCK · the two special cards (SPECIAL 1 / SPECIAL 2)
+--   Touch          : ATK · hold BLOCK · the two special buttons (MobileControlsController)
 -- For intuitive aiming the character turns toward the cursor before an action and keeps
 -- facing the camera direction while blocking. Interaction prompts use F (gamepad D-pad up).
 
@@ -22,6 +22,8 @@ export type Scheme = "Keyboard & Mouse" | "Gamepad" | "Touch"
 export type Options = {
 	remotes: Remotes,
 	canAct: () -> boolean,
+	attackButton: TextButton, -- touch buttons come from MobileControlsController
+	blockButton: TextButton,
 	special1Button: TextButton,
 	special2Button: TextButton,
 	onSchemeChanged: (scheme: Scheme) -> (),
@@ -145,46 +147,20 @@ function InputController.init(options: Options): { isBlockHeld: () -> boolean }
 		act("Special2")
 	end)
 
-	-- Touch: ATTACK and hold-BLOCK buttons
-	if UserInputService.TouchEnabled then
-		local gui = Instance.new("ScreenGui")
-		gui.Name = "OttiArenaTouchControls"
-		gui.ResetOnSpawn = false
-		local function makeButton(name: string, text: string, position: UDim2, color: Color3): TextButton
-			local button = Instance.new("TextButton")
-			button.Name = name
-			button.Text = text
-			button.AnchorPoint = Vector2.new(1, 1)
-			button.Position = position
-			button.Size = UDim2.fromOffset(96, 96)
-			button.BackgroundColor3 = color
-			button.BackgroundTransparency = 0.2
-			button.Font = Enum.Font.GothamBold
-			button.TextSize = 16
-			button.TextColor3 = Color3.new(1, 1, 1)
-			local corner = Instance.new("UICorner")
-			corner.CornerRadius = UDim.new(1, 0)
-			corner.Parent = button
-			button.Parent = gui
-			return button
+	-- Touch: ATTACK and hold-BLOCK buttons (drawn by MobileControlsController)
+	options.attackButton.Activated:Connect(function()
+		act("Basic")
+	end)
+	options.blockButton.InputBegan:Connect(function(input: InputObject)
+		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			setBlock(true)
 		end
-		local attackButton = makeButton("Attack", "ATTACK", UDim2.new(1, -140, 1, -110), Color3.fromRGB(170, 60, 40))
-		local blockButton = makeButton("Block", "BLOCK", UDim2.new(1, -250, 1, -110), Color3.fromRGB(40, 90, 160))
-		attackButton.Activated:Connect(function()
-			act("Basic")
-		end)
-		blockButton.InputBegan:Connect(function(input: InputObject)
-			if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-				setBlock(true)
-			end
-		end)
-		blockButton.InputEnded:Connect(function(input: InputObject)
-			if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-				setBlock(false)
-			end
-		end)
-		gui.Parent = player:WaitForChild("PlayerGui")
-	end
+	end)
+	options.blockButton.InputEnded:Connect(function(input: InputObject)
+		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			setBlock(false)
+		end
+	end)
 
 	-- Detected control scheme for the HUD
 	local function schemeFor(inputType: Enum.UserInputType): Scheme?

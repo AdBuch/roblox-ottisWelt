@@ -159,7 +159,6 @@ function ZombieDisplayService.build(parent: Instance, slots: { CFrame }, plaqueS
 		rig.root.Anchored = true -- can never walk or be pushed out of its cage
 		rig.humanoid:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
 		rig.humanoid.WalkSpeed = 0
-		rig.nameTag.MaxDistance = 40
 		local height = rig.humanoid.HipHeight + rig.root.Size.Y / 2
 		local home = slot + Vector3.new(0, height, 0)
 		model:PivotTo(home)

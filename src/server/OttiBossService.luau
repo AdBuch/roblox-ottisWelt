@@ -316,7 +316,7 @@ local function phaseShow(current: Boss, ctx: BossContext)
 	playSound(AudioConfig.ShieldStrike, current.root)
 	CombatEffects.sandBurst(Vector3.new(current.root.Position.X, Arena.Layout.FloorTop, current.root.Position.Z), 14, 1.6)
 	CrowdReactionService.react(if current.phase >= 3 then "Cheer" else "Gasp")
-	warnPlayers(("PHASE %d — %s"):format(current.phase, BossPhaseDefinitions.Phases[current.phase].Name), 1.8)
+	warnPlayers(("PHASE %d"):format(current.phase), 1.8)
 	task.wait(OttiBossConfig.PhaseChangeSeconds - 0.45)
 	OttiAnimationService.setPose(current, "", 0.2)
 	phaseChanging = false

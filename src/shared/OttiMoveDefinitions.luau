@@ -56,7 +56,7 @@ export type OttiMove = {
 	Lunge: number?,
 	MissRecovery: number?,
 	MultiTarget: boolean?,
-	Warning: string?, -- major attacks show a HUD warning
+	Warning: string?, -- major attacks show a short HUD warning next to the boss bar
 	Steps: { MoveStep }?,
 	FollowUp: FollowUp?,
 }
@@ -94,21 +94,21 @@ local Moves: { [string]: OttiMove } = {
 		WindUp = 0.9, Active = 0.5, Recovery = 0.7, Cooldown = 7, StartRange = 9,
 		Damage = 12, Range = 0, ArcDot = -1, Radius = 10.5, SweepDegrees = 360,
 		Knockback = 34, KnockbackIfBlocked = true, Blockable = true, Jumpable = true, MultiTarget = true,
-		Warning = "TAIL SWEEP — JUMP!",
+		Warning = "JUMP!",
 	}),
 	TailTrip = move({
 		Id = "TailTrip", Name = "TAIL TRIP", Kind = "TailSweep", Stance = "Quad",
 		WindUp = 0.6, Active = 0.35, Recovery = 0.6, Cooldown = 8, StartRange = 8.5,
 		Damage = 6, Range = 0, ArcDot = -1, Radius = 9.5, SweepDegrees = 220,
 		Knockback = 8, KnockdownSeconds = 1.0, Blockable = false, Jumpable = true, MultiTarget = true,
-		Warning = "TAIL TRIP — JUMP!",
+		Warning = "JUMP!",
 	}),
 	TailSlam = move({
 		Id = "TailSlam", Name = "TAIL SLAM", Kind = "TailSlam", Stance = "Biped",
 		WindUp = 1.0, Active = 0.12, Recovery = 0.8, Cooldown = 9, StartRange = 11,
 		Damage = 10, Range = 7, ArcDot = -1, Radius = 10, DirectRadius = 3.5, DirectDamage = 20,
 		Knockback = 20, Blockable = true, MultiTarget = true,
-		Warning = "TAIL SLAM — MOVE!",
+		Warning = "TAIL SLAM!",
 	}),
 	OtterBite = move({
 		Id = "OtterBite", Name = "OTTER BITE", Kind = "Bite", Stance = "Quad",
@@ -121,7 +121,7 @@ local Moves: { [string]: OttiMove } = {
 		Id = "GrappleThrow", Name = "GRAPPLE AND ARENA THROW", Kind = "Grapple", Stance = "Biped",
 		WindUp = 0.7, Active = 0.25, Recovery = 0.8, Cooldown = 14, StartRange = 5.5,
 		Damage = 18, Range = 5.5, ArcDot = 0.5, Knockback = 0, Blockable = false,
-		Warning = "GRAPPLE — DODGE!",
+		Warning = "GRAPPLE!",
 	}),
 	RiverDash = move({
 		Id = "RiverDash", Name = "RIVER DASH", Kind = "RiverDash", Stance = "Quad",

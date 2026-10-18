@@ -152,7 +152,6 @@ end
 
 local function updateHealth(z: Zombie, health: number)
 	z.model:SetAttribute("Health", math.max(0, math.ceil(health)))
-	z.rig.healthFill.Size = UDim2.fromScale(math.clamp(health / z.definition.Health, 0, 1), 1)
 	if not z.alive or health <= 0 then
 		return
 	end
@@ -844,7 +843,6 @@ local function onDied(z: Zombie)
 	cleanup(z)
 	updateHealth(z, 0)
 	endGuard(z)
-	z.rig.nameTag.Enabled = false
 	z.rig.hitSparks.Enabled = false
 	z.rig.deathPuff.Enabled = true
 	z.root.Anchored = true -- the corpse no longer blocks anything

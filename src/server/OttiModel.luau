@@ -335,24 +335,6 @@ function OttiModel.build(): OttiRig
 	end
 	model:SetAttribute("BossName", OttiBossConfig.DisplayName)
 
-	-- Overhead name tag (the big health bar is on the HUD)
-	local tag = Instance.new("BillboardGui")
-	tag.Name = "NameTag"
-	tag.Adornee = head
-	tag.Size = UDim2.fromOffset(200, 22)
-	tag.StudsOffset = Vector3.new(0, 2.4 * S, 0)
-	tag.MaxDistance = 120
-	tag.Parent = model
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.GothamBlack
-	label.TextSize = 16
-	label.TextColor3 = Color3.fromRGB(255, 215, 90)
-	label.TextStrokeTransparency = 0.3
-	label.Text = OttiBossConfig.DisplayName .. " · " .. OttiBossConfig.Title
-	label.Parent = tag
-
 	return {
 		model = model,
 		humanoid = humanoid,

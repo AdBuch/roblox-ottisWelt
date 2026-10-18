@@ -1,7 +1,7 @@
 --!strict
 -- Visual crowd and arena light, driven by server attributes (CrowdReactionService):
 --   * animal spectators bounce, lean in or recoil depending on the crowd mood
---   * "WHAT A THROW!" after a successful Otti throw
+--   * "WHAT A THROW!" after a successful Otti throw (through the HUD notification queue)
 --   * arena light: slightly darker before/during the boss, a brief boost after a throw, bright
 --     celebration after Otti's defeat (local ColorCorrection, only while in the arena or tribunes)
 -- Works without any crowd audio. Updates ~30x per second, only near the arena.
@@ -19,25 +19,11 @@ local CrowdEffectsController = {}
 
 local MOOD_SECONDS: { [string]: number } = { Cheer = 3, Roar = 3.5, Gasp = 1.2, Celebrate = 10, Silent = 12 }
 
-function CrowdEffectsController.start(gui: ScreenGui, arena: Instance)
+function CrowdEffectsController.start(arena: Instance, notify: (kind: string, text: string) -> ())
 	local player = Players.LocalPlayer
 	local correction = Instance.new("ColorCorrectionEffect")
 	correction.Name = "OttiArenaLight"
 	correction.Parent = Lighting
-
-	local shout = Instance.new("TextLabel")
-	shout.Name = "CrowdShout"
-	shout.AnchorPoint = Vector2.new(0.5, 0.5)
-	shout.Position = UDim2.fromScale(0.5, 0.3)
-	shout.Size = UDim2.fromOffset(600, 60)
-	shout.BackgroundTransparency = 1
-	shout.Font = Enum.Font.GothamBlack
-	shout.TextSize = 46
-	shout.TextColor3 = Color3.fromRGB(255, 215, 90)
-	shout.TextStrokeTransparency = 0.2
-	shout.TextTransparency = 1
-	shout.TextStrokeTransparency = 1
-	shout.Parent = gui
 
 	local mood = "Idle"
 	local moodStart = 0
@@ -62,12 +48,7 @@ function CrowdEffectsController.start(gui: ScreenGui, arena: Instance)
 		mood = tostring(arena:GetAttribute(Config.CrowdMoodAttribute) or "Idle")
 		moodStart = os.clock()
 		if mood == "Roar" and inArena() then
-			shout.Text = "WHAT A THROW!"
-			shout.TextTransparency = 0
-			shout.TextStrokeTransparency = 0.2
-			task.delay(1.4, function()
-				TweenService:Create(shout, TweenInfo.new(0.5), { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
-			end)
+			notify("Round", "WHAT A THROW!")
 		end
 	end
 	arena:GetAttributeChangedSignal(Config.CrowdPulseAttribute):Connect(onPulse)

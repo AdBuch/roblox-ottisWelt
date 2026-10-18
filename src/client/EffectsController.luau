@@ -10,38 +10,57 @@ local Workspace = game:GetService("Workspace")
 local EffectsController = {}
 
 local MAX_NUMBERS = 14
-local active = 0
 
+type Number = { gui: BillboardGui, label: TextLabel, token: number }
+local free: { Number } = {}
+local created = 0
+
+-- A pooled floating number above a hit target (no GUI objects created per hit once warm).
 function EffectsController.damageNumber(model: Instance, damage: number, blocked: boolean)
-	if active >= MAX_NUMBERS then
-		return
-	end
 	local adornee = model:FindFirstChild("Head") or model:FindFirstChild("HumanoidRootPart")
 	if not adornee or not adornee:IsA("BasePart") then
 		return
 	end
-	active += 1
-	local gui = Instance.new("BillboardGui")
-	gui.Size = UDim2.fromOffset(90, 34)
-	gui.StudsOffset = Vector3.new(math.random(-10, 10) / 10, 2.5, 0)
-	gui.AlwaysOnTop = true
+	local entry = table.remove(free)
+	if not entry then
+		if created >= MAX_NUMBERS then
+			return
+		end
+		created += 1
+		local gui = Instance.new("BillboardGui")
+		gui.Name = "DamageNumber"
+		gui.Size = UDim2.fromOffset(90, 34)
+		gui.AlwaysOnTop = true
+		gui.ResetOnSpawn = false
+		gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.fromScale(1, 1)
+		label.BackgroundTransparency = 1
+		label.Font = Enum.Font.GothamBlack
+		label.Parent = gui
+		entry = { gui = gui, label = label, token = 0 }
+	end
+	local number = entry :: Number
+	number.token += 1
+	local myToken = number.token
+	local gui, label = number.gui, number.label
 	gui.Adornee = adornee
-	gui.Parent = adornee
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.GothamBlack
+	gui.StudsOffset = Vector3.new(math.random(-10, 10) / 10, 2.5, 0)
+	gui.Enabled = true
 	label.TextSize = if blocked then 18 else 24
 	label.Text = if blocked then "BLOCKED" elseif damage <= 0 then "MISS" else tostring(math.round(damage))
 	label.TextColor3 = if blocked then Color3.fromRGB(255, 220, 120) else Color3.new(1, 1, 1)
+	label.TextTransparency = 0
 	label.TextStrokeTransparency = 0.2
-	label.Parent = gui
 	TweenService:Create(gui, TweenInfo.new(0.7), { StudsOffset = gui.StudsOffset + Vector3.new(0, 2, 0) }):Play()
 	local fade = TweenService:Create(label, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { TextTransparency = 1, TextStrokeTransparency = 1 })
 	fade:Play()
 	fade.Completed:Connect(function()
-		gui:Destroy()
-		active -= 1
+		if number.token == myToken then
+			gui.Enabled = false
+			(gui :: any).Adornee = nil
+			table.insert(free, number)
+		end
 	end)
 end
 
