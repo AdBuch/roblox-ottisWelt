@@ -1,6 +1,6 @@
 --!strict
--- One interface for everything a player can hit: arena zombies, enemy players (Team Battle)
--- and training dummies. Which targets are valid depends on the attacker's CombatContext
+-- One interface for everything a player can hit: arena zombies, Otti (the Round 7 boss), enemy
+-- players (Team Battle) and training dummies. Which targets are valid depends on the attacker's CombatContext
 -- (CombatRules). All damage goes through applyHit(), which also sends the Hit feedback.
 
 local CollectionService = game:GetService("CollectionService")
@@ -13,13 +13,14 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local CombatEffects = require(script.Parent.CombatEffects)
 local CombatRules = require(script.Parent.CombatRules)
 local CombatUtil = require(script.Parent.CombatUtil)
+local OttiBossService = require(script.Parent.OttiBossService)
 local Remotes = require(script.Parent.Remotes)
 local TrainingService = require(script.Parent.TrainingService)
 local ZombieService = require(script.Parent.ZombieService)
 
 type CombatContext = CombatRules.CombatContext
 
-export type TargetKind = "Zombie" | "Player" | "Dummy"
+export type TargetKind = "Zombie" | "Player" | "Dummy" | "Boss"
 
 export type Target = {
 	kind: TargetKind,
@@ -40,6 +41,10 @@ export type HitInfo = {
 	isProjectile: boolean,
 	executeThreshold: number?,
 	executeMultiplier: number?,
+	weaponId: string?, -- zombie limb-loss chances depend on the weapon
+	isSpecial: boolean?,
+	spin: boolean?,
+	hitPosition: Vector3?, -- projectiles: exact impact point
 }
 
 -- Handles damage to players (installed by PlayerCombatService: blocking, caps, deaths).
@@ -66,6 +71,14 @@ local function zombieTarget(model: Instance): Target?
 	return nil
 end
 
+local function bossTarget(): Target?
+	local model, root = OttiBossService.getHittable()
+	if model and root then
+		return { kind = "Boss", model = model, root = root, radius = 2.2 }
+	end
+	return nil
+end
+
 local function playerTarget(attacker: Player, victim: Player): Target?
 	if not CombatRules.isEnemy(attacker, victim) then
 		return nil
@@ -86,6 +99,10 @@ function CombatTargets.list(attacker: Player, context: CombatContext): { Target 
 			if target then
 				table.insert(targets, target)
 			end
+		end
+		local boss = bossTarget()
+		if boss then
+			table.insert(targets, boss)
 		end
 	elseif context == "PvP" then
 		for _, other in Players:GetPlayers() do
@@ -108,6 +125,8 @@ function CombatTargets.resolve(attacker: Player, context: CombatContext, instanc
 	while model do
 		if context == "Zombies" and CollectionService:HasTag(model, CombatConfig.ZombieTag) then
 			return zombieTarget(model)
+		elseif context == "Zombies" and CollectionService:HasTag(model, Config.OttiTag) then
+			return bossTarget()
 		elseif context == "PvP" then
 			local victim = Players:GetPlayerFromCharacter(model)
 			if victim then
@@ -131,6 +150,9 @@ function CombatTargets.losIgnoreList(attackerCharacter: Model): { Instance }
 	local zombies = arena and arena:FindFirstChild(Config.ZombiesFolderName)
 	if zombies then
 		table.insert(list, zombies)
+	end
+	for _, boss in CollectionService:GetTagged(Config.OttiTag) do
+		table.insert(list, boss)
 	end
 	for _, other in Players:GetPlayers() do
 		if other.Character and other.Character ~= attackerCharacter then
@@ -183,6 +205,8 @@ function CombatTargets.isAlive(target: Target): boolean
 	elseif target.kind == "Player" then
 		local player = target.player
 		return player ~= nil and CombatUtil.getLivingCharacter(player) ~= nil
+	elseif target.kind == "Boss" then
+		return OttiBossService.getHittable() ~= nil
 	end
 	return target.model.Parent ~= nil
 end
@@ -202,8 +226,14 @@ function CombatTargets.applyHit(attacker: Player, target: Target, info: HitInfo)
 			if info.executeThreshold and info.executeMultiplier and ZombieService.healthFraction(zombie) < info.executeThreshold then
 				damage *= info.executeMultiplier -- bonus vs weakened zombies only
 			end
+			damage *= ZombieService.damageMultiplier(zombie) -- lost armor
 			damage = math.floor(damage + 0.5)
-			if ZombieService.applyDamage(zombie, attacker, damage, info.fromPosition, info.stagger, info.knockback) then
+			if ZombieService.applyDamage(zombie, attacker, damage, info.fromPosition, info.stagger, info.knockback, {
+				weaponId = info.weaponId,
+				isSpecial = info.isSpecial,
+				spin = info.spin,
+				hitPosition = info.hitPosition,
+			}) then
 				dealt = damage
 			end
 		end
@@ -212,6 +242,8 @@ function CombatTargets.applyHit(attacker: Player, target: Target, info: HitInfo)
 		if victim then
 			dealt, blocked = damagePlayer(victim, attacker, info.damage * info.pvpMultiplier, info)
 		end
+	elseif target.kind == "Boss" then
+		dealt, blocked = OttiBossService.applyPlayerHit(attacker, info.damage, info.fromPosition, info.isProjectile, info.stagger, info.hitPosition)
 	elseif target.kind == "Dummy" then
 		local dummy = target.dummy
 		if dummy then

@@ -15,6 +15,8 @@ export type FeedbackKind =
 	| "Dash"
 	| "Knockback"
 	| "Elimination"
+	| "DamageFx"
+	| "Knockdown"
 
 export type ActionName = "Basic" | "Special1" | "Special2"
 
@@ -23,7 +25,8 @@ local CombatConfig = {
 	ZombieTag = "EnemyZombie", -- CollectionService tag on every LIVING arena zombie
 	ZombieCollisionGroup = "Zombies",
 	ZombieDamageMultiplier = 1, -- global difficulty knob for zombie hits
-	ZombieDetectRadius = 160, -- covers the whole Colosseum floor
+	ZombieDetectRadius = 90, -- general melee target detection (per-profile MaxChaseDistance)
+	ArcherDetectRadius = 140, -- Undead Sagittarius target detection
 	ZombieRetargetInterval = 1.2,
 	ZombieThinkInterval = 0.15,
 	ZombiePathInterval = 1.0,
@@ -36,9 +39,10 @@ local CombatConfig = {
 	MaxSimultaneousAttackers = 4,
 	AttackStartSpacing = 0.25,
 	CrowdSlotCount = 10,
-	CrowdSlotRadius = 4.4,
-	CrowdWaitRadius = 11,
-	CrowdApproachRadius = 16,
+	CrowdSlotRadius = 4.4, -- minimum; long weapons stand farther out (AttackRange - 2.5)
+	CrowdSlotMaxRadius = 8,
+	CrowdWaitRadius = 13,
+	CrowdApproachRadius = 22,
 	SeparationRadius = 3.8,
 
 	-- Player
@@ -81,7 +85,7 @@ local CombatConfig = {
 		Hit = "Hit" :: FeedbackKind, -- (targetModel, damage, blocked)
 		Block = "Block" :: FeedbackKind, -- (isBlocking)
 		Parry = "Parry" :: FeedbackKind, -- ()
-		PlayerHit = "PlayerHit" :: FeedbackKind, -- (damage, wasBlocked)
+		PlayerHit = "PlayerHit" :: FeedbackKind, -- (damage, wasBlocked, fromPosition?)
 		Heal = "Heal" :: FeedbackKind, -- (amount)
 		Aura = "Aura" :: FeedbackKind, -- (amount, reason)
 		Shop = "Shop" :: FeedbackKind, -- (message, success)
@@ -89,6 +93,8 @@ local CombatConfig = {
 		Dash = "Dash" :: FeedbackKind, -- (direction, distance) client moves its own character
 		Knockback = "Knockback" :: FeedbackKind, -- (velocity)
 		Elimination = "Elimination" :: FeedbackKind, -- (text)
+		DamageFx = "DamageFx" :: FeedbackKind, -- (position, kind "Zombie"|"Player"|"Boss", scale, direction?) to everyone
+		Knockdown = "Knockdown" :: FeedbackKind, -- (seconds) short controlled knockdown on your own character
 	}),
 }
 

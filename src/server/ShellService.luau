@@ -15,6 +15,7 @@ local CombatEffects = require(script.Parent.CombatEffects)
 local CombatRules = require(script.Parent.CombatRules)
 local CombatUtil = require(script.Parent.CombatUtil)
 local Remotes = require(script.Parent.Remotes)
+local OttiBossService = require(script.Parent.OttiBossService)
 local ZombieService = require(script.Parent.ZombieService)
 
 local PREFIX = "[OttiArena][Server]"
@@ -106,6 +107,7 @@ local function tryCollect(shell: Shell, player: Player)
 	CombatEffects.burst(shell.part.Position, Color3.fromRGB(140, 255, 140), 1)
 	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Heal, healed)
 	ZombieService.onPlayerHealed(player, healed)
+	OttiBossService.onPlayerHealed(player)
 	print(PREFIX, ("%s collected shell %d: +%d health (%d/%d)"):format(player.Name, shell.id, math.round(healed), math.round(humanoid.Health), humanoid.MaxHealth))
 	scheduleRespawn(shell, Config.ShellRespawnSeconds)
 end

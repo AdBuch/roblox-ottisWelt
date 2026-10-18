@@ -4,7 +4,9 @@
 --
 -- Kinds:
 --   Melee       wind-up, then hits the best target(s) in Range/ArcDot (Hits = multi-strike)
---   Projectile  arrows (ProjectileCount, Spread, Pierce) stopped by solid geometry
+--   Projectile  arrows (ProjectileCount, Spread, Pierce) stopped by solid geometry; damage falls
+--               off beyond 100 studs (ProjectileDefinitions). Pierce only passes through zombies:
+--               walls, shields, players and Otti always stop an arrow.
 --   Net         short net projectile that slows, then an automatic follow-up thrust
 --   Dash        short dash toward the aim direction (never through walls), then a strike
 -- PvP: damage x PvPMultiplier, at most PvPMaxTargets players, and never more than
@@ -90,21 +92,21 @@ local Moves: { [string]: MoveDefinition } = {
 	------------------------------------------------------------------ Hunter Bow
 	Bow_Basic = move({
 		Id = "Bow_Basic", Name = "Arrow", Kind = "Projectile", Anim = "Draw",
-		Cooldown = 0.9, Duration = 0.6, WindUp = 0.15, Damage = 24, Range = 90, ArcDot = -1,
+		Cooldown = 0.9, Duration = 0.6, WindUp = 0.15, Damage = 24, Range = 150, ArcDot = -1,
 		MaxTargets = 1, PvPMaxTargets = 1, PvPMultiplier = 0.7, Stagger = 0.1, Knockback = 6,
-		ProjectileCount = 1, ProjectileSpeed = 110, Pierce = 1,
+		ProjectileCount = 1, ProjectileSpeed = 145, Pierce = 1,
 	}),
 	TripleShot = move({
 		Id = "TripleShot", Name = "TRIPLE SHOT", Kind = "Projectile", Anim = "Draw",
-		Cooldown = 7, Duration = 0.7, WindUp = 0.25, Damage = 16, Range = 80, ArcDot = -1,
-		MaxTargets = 3, PvPMaxTargets = 2, PvPMultiplier = 0.6, Stagger = 0.1, Knockback = 6,
-		ProjectileCount = 3, Spread = 9, ProjectileSpeed = 110, Pierce = 1,
+		Cooldown = 7, Duration = 0.7, WindUp = 0.25, Damage = 16, Range = 110, ArcDot = -1,
+		MaxTargets = 3, PvPMaxTargets = 2, PvPMultiplier = 0.5, Stagger = 0.1, Knockback = 6,
+		ProjectileCount = 3, Spread = 7, ProjectileSpeed = 135, Pierce = 1,
 	}),
 	PiercingArrow = move({
 		Id = "PiercingArrow", Name = "PIERCING ARROW", Kind = "Projectile", Anim = "Draw",
-		Cooldown = 9, Duration = 0.8, WindUp = 0.4, Damage = 34, Range = 100, ArcDot = -1,
-		MaxTargets = 3, PvPMaxTargets = 2, PvPMultiplier = 0.6, Stagger = 0.3, Knockback = 10,
-		ProjectileCount = 1, ProjectileSpeed = 160, Pierce = 3,
+		Cooldown = 9, Duration = 1.0, WindUp = 0.6, Damage = 34, Range = 150, ArcDot = -1,
+		MaxTargets = 3, PvPMaxTargets = 1, PvPMultiplier = 0.6, Stagger = 0.3, Knockback = 10,
+		ProjectileCount = 1, ProjectileSpeed = 190, Pierce = 3,
 	}),
 
 	------------------------------------------------------------------ Gladiator Morning Star

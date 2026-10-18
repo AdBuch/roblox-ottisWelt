@@ -47,8 +47,15 @@ local ShopController = load(script.Parent, "ShopController")
 local PartyController = load(script.Parent, "PartyController")
 local EffectsController = load(script.Parent, "EffectsController")
 local ZombieAnimator = load(script.Parent, "ZombieAnimator")
+local OttiAnimator = load(script.Parent, "OttiAnimator")
+local BossHudController = load(script.Parent, "BossHudController")
+local BossWarningController = load(script.Parent, "BossWarningController")
+local DamageEffectsController = load(script.Parent, "DamageEffectsController")
+local CrowdEffectsController = load(script.Parent, "CrowdEffectsController")
+local BowController = load(script.Parent, "BowController")
 if not (Config and CombatConfig and GameStates and GameModeDefinitions and WeaponDefinitions and ShieldDefinitions and SpecialMoveDefinitions
-	and CombatHudController and InputController and ShopController and PartyController and EffectsController and ZombieAnimator) then
+	and CombatHudController and InputController and ShopController and PartyController and EffectsController and ZombieAnimator
+	and OttiAnimator and BossHudController and BossWarningController and DamageEffectsController and CrowdEffectsController and BowController) then
 	return
 end
 
@@ -167,11 +174,16 @@ local function refreshMatch()
 	local timeLeft = tonumber(arenaAttr(Config.TimeLeftAttribute)) or 0
 	local suddenDeath = arenaAttr(Config.SuddenDeathAttribute) == true
 	local inArena = location() == "Arena" or state == GameStates.PlayerDefeated and location() == "Tribune" and hasMode
+	local bossRound = phase == "BossIntro" or phase == "Boss"
+	local bossIntro = tostring(arenaAttr(Config.BossIntroAttribute) or "")
+	local bossPhase = tonumber(arenaAttr(Config.BossPhaseAttribute)) or 1
 
 	local teamHeader = ("RED %d — %d BLUE"):format(red, blue)
 	local timeText = if suddenDeath then "SUDDEN DEATH" else ("TIME %02d:%02d"):format(timeLeft // 60, timeLeft % 60)
-	local zombieHeader = ("%s · ROUND %d / %d"):format(modeName(mode), math.max(round, 1), roundMax)
-	local zombieSub = ("ZOMBIES %d / %d · PLAYERS %d / %d"):format(alive, total, playersAlive, playersTotal)
+	local zombieHeader = if bossRound then "ROUND 7 — FINAL BOSS" else ("%s · ROUND %d / %d"):format(modeName(mode), math.max(round, 1), roundMax)
+	local zombieSub = if bossRound
+		then ("OTTI · PHASE %d · PLAYERS %d / %d"):format(bossPhase, playersAlive, playersTotal)
+		else ("ZOMBIES %d / %d · PLAYERS %d / %d"):format(alive, total, playersAlive, playersTotal)
 
 	if inArena and isTeamMode then
 		hud.setHeader(teamHeader, timeText)
@@ -200,9 +212,29 @@ local function refreshMatch()
 				earned
 			)
 			else ("Kills %d · Aura earned %d · returning to the lobby…"):format(kills, earned)
-		hud.setBanner(if result ~= "" then result elseif state == GameStates.Victory then "VICTORY" else "MATCH COMPLETE", if state == GameStates.Victory then "GAME COMPLETE" else "Better luck next time", stats)
+		local subtitle = if result == "OTTI DEFEATED" then "CHAMPION OF THE COLOSSEUM" elseif state == GameStates.Victory then "GAME COMPLETE" else "Better luck next time"
+		hud.setBanner(if result ~= "" then result elseif state == GameStates.Victory then "VICTORY" else "MATCH COMPLETE", subtitle, stats)
 	elseif state == GameStates.PlayerDefeated then
 		hud.setBanner("DEFEATED", if isCoop then "You return after this round" elseif isTeamMode then "Respawning…" else "You will respawn in the lobby", ("Kills %d · Aura earned %d · Aura and items are kept"):format(kills, earned))
+	elseif (inArena or state == GameStates.Spectating) and hasMode and mode ~= "TeamBattle" and bossRound then
+		-- Round 7 intro and fight
+		if bossIntro == "Silence" then
+			hud.setBanner("THE CROWD FALLS SILENT...", nil, nil)
+		elseif bossIntro == "Reveal" then
+			hud.setBanner("OTTI", "CHAMPION OF THE COLOSSEUM", nil)
+		elseif phase == "Boss" and shownRound ~= 7 then
+			shownRound = 7
+			bannerToken += 1
+			local myToken = bannerToken
+			hud.setBanner("ROUND 7 — FINAL BOSS", "OTTI", "CHAMPION OF THE COLOSSEUM")
+			task.delay(ROUND_BANNER_SECONDS + 0.5, function()
+				if bannerToken == myToken then
+					hud.setBanner(nil, nil, nil)
+				end
+			end)
+		elseif phase == "BossIntro" then
+			hud.setBanner(nil, nil, nil)
+		end
 	elseif inArena and hasMode and mode ~= "TeamBattle" then
 		if phase == "Starting" then
 			hud.setBanner("GET READY", if countdown > 0 then ("Round 1 in %d"):format(countdown) else nil, modeName(mode))
@@ -279,13 +311,14 @@ if feedback and feedback:IsA("RemoteEvent") then
 		elseif kind == F.PlayerHit then
 			hitUntil = os.clock() + HIT_DISPLAY_SECONDS
 			hud.flashHit(b == true)
+			DamageEffectsController.hitIndicator(hud.gui, if typeof(c) == "Vector3" then c else nil, b == true)
 			if b == true then
 				hud.popup(("BLOCKED · -%d"):format(tonumber(a) or 0), Color3.fromRGB(150, 200, 255))
 			end
 		elseif kind == F.Heal then
 			hud.popup(("+%d HEALTH"):format(math.round(tonumber(a) or 0)), Color3.fromRGB(120, 255, 120))
 		elseif kind == F.Aura then
-			hud.popup(("+%d AURA%s"):format(tonumber(a) or 0, if b == "assist" then " (ASSIST)" else ""), Color3.fromRGB(255, 210, 80))
+			hud.popup(("+%d AURA%s"):format(tonumber(a) or 0, if b == "assist" then " (ASSIST)" elseif b == "boss" then " (CHAMPION)" else ""), Color3.fromRGB(255, 210, 80))
 		elseif kind == F.Shop then
 			hud.toast(tostring(a), b == true)
 		elseif kind == F.Slowed then
@@ -300,6 +333,13 @@ if feedback and feedback:IsA("RemoteEvent") then
 			end
 		elseif kind == F.Elimination then
 			hud.feed(tostring(a))
+		elseif kind == F.DamageFx then
+			if typeof(a) == "Vector3" then
+				DamageEffectsController.burst(a, tostring(b), tonumber(c) or 1, if typeof(d) == "Vector3" then d else nil)
+			end
+			return -- purely visual, no HUD state change
+		elseif kind == F.Knockdown then
+			EffectsController.knockdown(tonumber(a) or 1)
 		end
 		refreshState()
 	end)
@@ -366,10 +406,14 @@ task.spawn(function()
 		Config.ZombiesAliveAttribute, Config.ZombiesTotalAttribute, Config.PlayersAliveAttribute, Config.PlayersTotalAttribute,
 		Config.CountdownAttribute, Config.WavePhaseAttribute, Config.ArenaBusyAttribute, Config.ResultAttribute,
 		Config.RedScoreAttribute, Config.BlueScoreAttribute, Config.TimeLeftAttribute, Config.SuddenDeathAttribute,
+		Config.BossIntroAttribute, Config.BossActiveAttribute, Config.BossPhaseAttribute, Config.BossDefeatedAttribute,
 	} do
 		arena:GetAttributeChangedSignal(name):Connect(refreshMatch)
 	end
 	refreshMatch()
+	BossHudController.start(hud.gui, arena, if combatAction and combatAction:IsA("RemoteEvent") then combatAction else nil)
+	BossWarningController.start(hud.gui, arena)
+	CrowdEffectsController.start(hud.gui, arena)
 	if lobby then
 		PartyController.start(hud.gui, {
 			lobbyFolder = lobby,
@@ -445,5 +489,9 @@ task.spawn(function()
 end)
 
 ZombieAnimator.start(CombatConfig.ZombieTag)
+OttiAnimator.start(Config.OttiTag)
+BowController.start(hud.gui, Config.EquippedWeaponAttribute, function()
+	return GameStates.isFighter(gameState()) or GameStates.isInLobby(gameState())
+end)
 
 print(PREFIX, "Ready: HUD, LMB/RMB/Q/E (gamepad + touch), shop displays, group panel")

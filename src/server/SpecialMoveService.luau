@@ -8,6 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
+local ProjectileDefinitions = require(ReplicatedStorage.Shared.ProjectileDefinitions)
 local SpecialMoveDefinitions = require(ReplicatedStorage.Shared.SpecialMoveDefinitions)
 local CombatEffects = require(script.Parent.CombatEffects)
 local CombatRules = require(script.Parent.CombatRules)
@@ -24,6 +25,7 @@ type CombatContext = CombatRules.CombatContext
 export type Attacker = {
 	player: Player,
 	context: CombatContext,
+	weaponId: string,
 	character: Model,
 	root: BasePart,
 	aimPoint: Vector3,
@@ -53,6 +55,9 @@ local function hitInfo(move: MoveDefinition, attacker: Attacker, damage: number)
 		isProjectile = move.Kind == "Projectile",
 		executeThreshold = move.ExecuteThreshold,
 		executeMultiplier = move.ExecuteMultiplier,
+		weaponId = attacker.weaponId,
+		isSpecial = string.sub(move.Id, -6) ~= "_Basic",
+		spin = move.Anim == "Spin",
 	}
 end
 
@@ -126,7 +131,9 @@ local function executeProjectile(move: MoveDefinition, attacker: Attacker)
 	local count = move.ProjectileCount or 1
 	local spread = math.rad(move.Spread or 0)
 	local hitTargets: { [Model]: boolean } = {}
+	local pierceSteps = ProjectileDefinitions.PlayerArrow.PierceDamageSteps
 	for i = 1, count do
+		local pierced = 0
 		local angle = (i - (count + 1) / 2) * spread
 		local rotated = CFrame.fromAxisAngle(Vector3.yAxis, angle):VectorToWorldSpace(direction)
 		ProjectileService.fireArrow({
@@ -137,13 +144,20 @@ local function executeProjectile(move: MoveDefinition, attacker: Attacker)
 			speed = move.ProjectileSpeed or 110,
 			range = move.Range,
 			pierce = move.Pierce or 1,
-			onHit = function(target: Target)
+			onHit = function(target: Target, position: Vector3, distance: number): boolean?
 				-- One arrow volley may hit each target only once (no triple-shot stacking on one body)
 				if hitTargets[target.model] or not CombatTargets.isAlive(target) then
-					return
+					return target.kind == "Zombie" -- a dead/already hit zombie doesn't stop a piercing arrow
 				end
 				hitTargets[target.model] = true
-				CombatTargets.applyHit(attacker.player, target, hitInfo(move, attacker, move.Damage))
+				pierced += 1
+				-- Falloff beyond 100 studs; each penetration weakens a piercing arrow
+				local multiplier = ProjectileDefinitions.falloff(distance) * (pierceSteps[pierced] or pierceSteps[#pierceSteps])
+				local info = hitInfo(move, attacker, move.Damage * multiplier)
+				info.hitPosition = position
+				local _, blocked = CombatTargets.applyHit(attacker.player, target, info)
+				-- Only zombies can be pierced: shields, players (PvP) and Otti stop the arrow
+				return target.kind == "Zombie" and not blocked
 			end,
 		})
 	end

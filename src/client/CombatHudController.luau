@@ -145,11 +145,26 @@ function CombatHudController.create(playerGui: Instance): HudApi
 	gui.Name = "OttiArenaHud"
 	gui.ResetOnSpawn = false
 
-	local hitFlash = Instance.new("Frame")
-	hitFlash.Size = UDim2.fromScale(1, 1)
-	hitFlash.BackgroundTransparency = 1
-	hitFlash.BorderSizePixel = 0
-	hitFlash.Parent = gui
+	-- Hit flash: a red (blocked: blue) glow on the screen EDGES only, never covering the view
+	local hitEdges: { Frame } = {}
+	for _, edge in {
+		{ size = UDim2.new(1, 0, 0.14, 0), position = UDim2.fromScale(0, 0), rotation = 90 },
+		{ size = UDim2.new(1, 0, 0.14, 0), position = UDim2.fromScale(0, 0.86), rotation = -90 },
+		{ size = UDim2.new(0.1, 0, 1, 0), position = UDim2.fromScale(0, 0), rotation = 0 },
+		{ size = UDim2.new(0.1, 0, 1, 0), position = UDim2.fromScale(0.9, 0), rotation = 180 },
+	} do
+		local frame = Instance.new("Frame")
+		frame.Size = edge.size
+		frame.Position = edge.position
+		frame.BackgroundTransparency = 1
+		frame.BorderSizePixel = 0
+		frame.Parent = gui
+		local gradient = Instance.new("UIGradient")
+		gradient.Rotation = edge.rotation
+		gradient.Transparency = NumberSequence.new(0, 1)
+		gradient.Parent = frame
+		table.insert(hitEdges, frame)
+	end
 
 	-- Top: AURA (always), then the header
 	local aura = label(gui, "Aura", "AURA: 0", UDim2.fromOffset(240, 30), UDim2.new(0.5, -120, 0, 6), 22, Enum.Font.GothamBlack)
@@ -372,9 +387,11 @@ function CombatHudController.create(playerGui: Instance): HudApi
 			end)
 		end,
 		flashHit = function(blocked: boolean)
-			hitFlash.BackgroundColor3 = if blocked then Color3.fromRGB(150, 200, 255) else Color3.fromRGB(255, 40, 30)
-			hitFlash.BackgroundTransparency = 0.6
-			TweenService:Create(hitFlash, TweenInfo.new(0.35), { BackgroundTransparency = 1 }):Play()
+			for _, edge in hitEdges do
+				edge.BackgroundColor3 = if blocked then Color3.fromRGB(150, 200, 255) else Color3.fromRGB(255, 40, 30)
+				edge.BackgroundTransparency = 0.35
+				TweenService:Create(edge, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
+			end
 		end,
 	}
 end

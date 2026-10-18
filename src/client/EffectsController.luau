@@ -77,6 +77,36 @@ function EffectsController.dash(direction: Vector3, distance: number)
 	end
 end
 
+-- A short, controlled knockdown (Otti's tail trip / throw landing): the character lies back for at
+-- most 1.2 s and then stands up again; the server grants protection meanwhile. No ragdoll.
+local knockdownToken = 0
+function EffectsController.knockdown(seconds: number)
+	local root = getRoot()
+	local character = root and root.Parent
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not root or not humanoid or humanoid.Health <= 0 then
+		return
+	end
+	knockdownToken += 1
+	local myToken = knockdownToken
+	local duration = math.clamp(seconds, 0.2, 1.2)
+	humanoid.PlatformStand = true
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+	local upright = root.CFrame
+	root.CFrame = upright * CFrame.new(0, -1.2, 0) * CFrame.Angles(math.rad(70), 0, 0)
+	task.delay(duration, function()
+		if knockdownToken ~= myToken or not root.Parent then
+			return
+		end
+		humanoid.PlatformStand = false
+		root.AssemblyAngularVelocity = Vector3.zero
+		local position = root.Position
+		root.CFrame = CFrame.new(position.X, upright.Position.Y, position.Z) * upright.Rotation
+		humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+	end)
+end
+
 function EffectsController.knockback(velocity: Vector3)
 	local root = getRoot()
 	if root then

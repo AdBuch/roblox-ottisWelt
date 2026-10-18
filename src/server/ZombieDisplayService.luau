@@ -1,5 +1,5 @@
 --!strict
--- ZOMBIE ARCHIVE: one display zombie per type inside an iron-barred cage in the lobby.
+-- ZOMBIE ARCHIVE: one display zombie per type (six) inside an iron-barred cage in the lobby.
 -- Display zombies use the same ZombieFactory model as the arena, but they are anchored (they
 -- can't escape even if physics misbehave), tagged ZombieDisplay (never the enemy tag), have no
 -- AI or pathfinding, can't be damaged or deal damage, give no Aura and never count for waves.
@@ -119,6 +119,10 @@ local function idle(display: Display, rng: Random)
 				end
 			elseif id == "Controller" then
 				pose(rig.leftShoulder, rig.leftShoulderRest, 160, 0.3)
+			elseif id == "Marksman" then
+				-- Draws its bow at the visitor (never shoots in the archive)
+				pose(rig.leftShoulder, rig.leftShoulderRest, 90, 0.3)
+				pose(rig.rightShoulder, rig.rightShoulderRest, 95, 0.5)
 			else
 				TweenService:Create(root, TweenInfo.new(0.3), { CFrame = display.home * CFrame.Angles(0, math.rad(rng:NextNumber(-40, 40)), 0) }):Play()
 			end

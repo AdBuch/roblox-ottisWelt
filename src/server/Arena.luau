@@ -49,6 +49,13 @@ Arena.Layout = {
 	FloorTop = FLOOR_TOP,
 	BarrierTop = BARRIER_TOP,
 	OuterOffset = OUTER_OFFSET,
+	PodiumThickness = PODIUM_THICKNESS,
+	PodiumHeight = PODIUM_HEIGHT,
+	SeatTiers = SEAT_TIERS,
+	SeatDepth = SEAT_DEPTH,
+	SeatRise = SEAT_RISE,
+	-- The main gladiator gate (north, under the OTTI ARENA sign): Otti enters here
+	MainGateAngle = math.rad(270),
 	-- Where the fighter enters the arena floor (south, facing the center)
 	StartPosition = Vector3.new(0, FLOOR_TOP + 3.5, B - 10),
 	-- Lower tribune walkway (top of the first seating tier) and its return door
@@ -191,7 +198,10 @@ local function buildArcades(folder: Folder)
 	arcades.Parent = folder
 end
 
--- A barred gate in the podium wall (decoration only; the wall behind it is solid).
+local portcullises: { { model: Model, open: CFrame, closed: CFrame, main: boolean } } = {}
+
+-- A barred gate in the podium wall (decoration only; the wall behind it is solid). Each gate has a
+-- portcullis that drops for the boss round (Arena.setGates).
 local function buildGate(parent: Instance, theta: number, name: string)
 	local gate = Instance.new("Model")
 	gate.Name = name
@@ -212,6 +222,29 @@ local function buildGate(parent: Instance, theta: number, name: string)
 		makePart("Column", Vector3.new(PODIUM_HEIGHT, 1.4, 1.4), at(x, PODIUM_HEIGHT / 2, -0.3) * CFrame.Angles(0, 0, math.rad(90)), TRAVERTINE, Enum.Material.Limestone, gate, { shape = Enum.PartType.Cylinder, collide = false })
 	end
 	makePart("Keystone", Vector3.new(1, 1.4, 0.6), at(0, 9.9, -0.35), SANDSTONE, Enum.Material.Sandstone, gate, DECOR)
+
+	-- Portcullis: a dark grid that drops in front of the opening (raised = hidden in the arch)
+	local portcullis = Instance.new("Model")
+	portcullis.Name = "Portcullis"
+	local closed = at(0, 3.4, -1.0)
+	local core = makePart("PortcullisFrame", Vector3.new(7.2, 0.4, 0.4), closed * CFrame.new(0, 3.4, 0), Color3.fromRGB(60, 50, 44), Enum.Material.Metal, portcullis, DECOR)
+	for x = -3, 3.01, 1 do
+		makePart("PortcullisBar", Vector3.new(0.35, 7, 0.35), closed * CFrame.new(x, 0, 0), Color3.fromRGB(60, 50, 44), Enum.Material.Metal, portcullis, DECOR)
+	end
+	for _, y in { -2.4, 0, 2.4 } do
+		makePart("PortcullisBand", Vector3.new(7, 0.3, 0.3), closed * CFrame.new(0, y, 0), Color3.fromRGB(70, 58, 50), Enum.Material.Metal, portcullis, DECOR)
+	end
+	portcullis.PrimaryPart = core
+	portcullis.Parent = gate
+	local open = portcullis:GetPivot() + Vector3.new(0, 7.5, 0)
+	local closedPivot = portcullis:GetPivot()
+	portcullis:PivotTo(open)
+	for _, part in portcullis:GetChildren() do
+		if part:IsA("BasePart") then
+			part.Transparency = 1
+		end
+	end
+	table.insert(portcullises, { model = portcullis, open = open, closed = closedPivot, main = math.abs(theta - Arena.Layout.MainGateAngle) < 0.01 })
 
 	gate.Parent = parent
 end
@@ -353,6 +386,7 @@ function Arena.build(): Folder
 	end
 	disableOtherSpawns()
 	table.clear(Arena.Layout.ZombieSpawns)
+	table.clear(portcullises)
 
 	local folder = Instance.new("Folder")
 	folder.Name = Config.ArenaFolderName
@@ -370,6 +404,43 @@ function Arena.build(): Folder
 
 	folder.Parent = Workspace
 	return folder
+end
+
+-- A CFrame on the arena oval at height y; LookVector points into the arena.
+function Arena.frameAt(theta: number, offset: number, y: number): CFrame
+	return frameAt(theta, offset, y)
+end
+
+-- Drops (closed = true) or raises the portcullises. `main`: nil = every gate, true = only the
+-- main gladiator gate, false = every gate except the main one.
+function Arena.setGates(closed: boolean, main: boolean?)
+	local TweenService = game:GetService("TweenService")
+	for _, gate in portcullises do
+		if main == nil or gate.main == main then
+			local model = gate.model
+			local value = Instance.new("CFrameValue")
+			value.Value = model:GetPivot()
+			value.Changed:Connect(function(cframe: CFrame)
+				if model.Parent then
+					model:PivotTo(cframe)
+				end
+			end)
+			local goal = if closed then gate.closed else gate.open
+			TweenService:Create(value, TweenInfo.new(1.1, Enum.EasingStyle.Quad, if closed then Enum.EasingDirection.In else Enum.EasingDirection.Out), { Value = goal }):Play()
+			for _, part in model:GetChildren() do
+				if part:IsA("BasePart") then
+					if closed then
+						part.Transparency = 0
+					else
+						TweenService:Create(part, TweenInfo.new(1.1), { Transparency = 1 }):Play()
+					end
+				end
+			end
+			task.delay(1.3, function()
+				value:Destroy()
+			end)
+		end
+	end
 end
 
 -- True if a position is on the playable floor (margin > 0 is more forgiving).

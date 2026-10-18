@@ -401,7 +401,7 @@ local function buildModeArea(folder: Folder): ModeArea
 	}
 end
 
--- East annex: the ZOMBIE ARCHIVE with five iron-barred cages along its far wall.
+-- East annex: the ZOMBIE ARCHIVE with six iron-barred cages along its far wall.
 local function buildArchive(folder: Folder): ({ CFrame }, { CFrame })
 	local archive = Instance.new("Model")
 	archive.Name = "ArchiveGallery"
@@ -420,7 +420,7 @@ local function buildArchive(folder: Folder): ({ CFrame }, { CFrame })
 
 	local slots, plaques = {}, {}
 	local cageFront = x1 - 8
-	for i, z in { -16, -8, 0, 8, 16 } do
+	for i, z in { -18, -10.8, -3.6, 3.6, 10.8, 18 } do
 		-- Cage: solid stone sides/back/top + iron bars in front (zombies can never leave)
 		for _, side in { -1, 1 } do
 			makePart("CageSide", Vector3.new(8, 13, 0.8), at(cageFront + 4, 6.5, z + side * 3.6), STONE, Enum.Material.Cobblestone, archive)

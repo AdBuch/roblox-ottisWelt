@@ -13,6 +13,11 @@
 --            (Champion)
 --   move     direct MoveTo with line of sight, otherwise budgeted pathfinding; separation
 --            steering; stuck detection
+--   damage   condition states (ZombieDamageStateService) change looks and behaviour at 65 % / 30 %;
+--            strong hits may remove limbs or armor (ZombieDismembermentService): no weapon arm ->
+--            weak unarmed bites, no shield arm -> no blocking, lost leg -> slow crawl, lost armor
+--            -> takes a little more damage
+--   archer   the Undead Sagittarius uses its own ranged AI (ZombieArcherAI) on the same helpers
 
 local CollectionService = game:GetService("CollectionService")
 local PathfindingService = game:GetService("PathfindingService")
@@ -21,18 +26,24 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
 local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
+local DamageEffectsConfig = require(ReplicatedStorage.Shared.DamageEffectsConfig)
 local ZombieAIProfiles = require(ReplicatedStorage.Shared.ZombieAIProfiles)
 local ZombieDefinitions = require(ReplicatedStorage.Shared.ZombieDefinitions)
 local Arena = require(script.Parent.Arena)
 local CombatEffects = require(script.Parent.CombatEffects)
 local CombatRules = require(script.Parent.CombatRules)
 local CombatUtil = require(script.Parent.CombatUtil)
+local DamageEffectsService = require(script.Parent.DamageEffectsService)
+local ZombieArcherAI = require(script.Parent.ZombieArcherAI)
 local ZombieCrowdService = require(script.Parent.ZombieCrowdService)
+local ZombieDamageStateService = require(script.Parent.ZombieDamageStateService)
+local ZombieDismembermentService = require(script.Parent.ZombieDismembermentService)
 local ZombieFactory = require(script.Parent.ZombieFactory)
 local ZombieThreatService = require(script.Parent.ZombieThreatService)
 
 type ZombieDefinition = ZombieDefinitions.ZombieDefinition
 type ZombieAIProfile = ZombieAIProfiles.ZombieAIProfile
+type ConditionMods = ZombieAIProfiles.ConditionMods
 
 export type Zombie = {
 	definition: ZombieDefinition,
@@ -72,6 +83,31 @@ export type Zombie = {
 	connections: { RBXScriptConnection },
 	onDied: ((Zombie, Player?, { Player }) -> ())?,
 	flashToken: number,
+	condition: ZombieDamageStateService.Condition,
+	mods: ConditionMods,
+	limbs: ZombieDismembermentService.LimbState,
+	unarmed: boolean, -- weapon arm lost: weak bites/kicks
+	canBlock: boolean, -- shield arm lost: no guard, no bash, no net
+	crawling: boolean, -- leg lost: slow, shorter reach
+	burstUntil: number,
+	restUntil: number,
+	archer: any, -- ZombieArcherAI state (Undead Sagittarius only)
+}
+
+export type DamageExtra = {
+	weaponId: string?,
+	isSpecial: boolean?,
+	spin: boolean?,
+	hitPosition: Vector3?,
+}
+
+export type EnemyArrow = {
+	origin: Vector3,
+	direction: Vector3,
+	speed: number,
+	range: number,
+	damage: number,
+	isShooterAlive: () -> boolean,
 }
 
 export type Handlers = {
@@ -80,6 +116,7 @@ export type Handlers = {
 	isHeavyBlocking: (player: Player) -> boolean,
 	slowPlayer: (player: Player, factor: number, seconds: number) -> (),
 	gearValue: (player: Player) -> number,
+	fireArrow: (arrow: EnemyArrow) -> (),
 }
 
 local PREFIX = "[OttiArena][Server]"
@@ -116,6 +153,57 @@ end
 local function updateHealth(z: Zombie, health: number)
 	z.model:SetAttribute("Health", math.max(0, math.ceil(health)))
 	z.rig.healthFill.Size = UDim2.fromScale(math.clamp(health / z.definition.Health, 0, 1), 1)
+	if not z.alive or health <= 0 then
+		return
+	end
+	-- Condition states only get worse (no healing for zombies)
+	local condition: ZombieDamageStateService.Condition = ZombieDamageStateService.conditionFor(health / z.definition.Health)
+	local rank = function(c: string): number
+		return if c == "Critical" then 2 elseif c == "Wounded" then 1 else 0
+	end
+	if rank(condition) > rank(z.condition) then
+		z.condition = condition
+		z.mods = ZombieDamageStateService.modsFor(z.profile, condition)
+		ZombieDamageStateService.apply(z.model, condition, if z.crawling then nil else z.rig.rootJoint, z.rig.rootJointRest)
+	end
+end
+
+-- Effective combat values after condition modifiers and lost limbs.
+local function attackRange(z: Zombie): number
+	local range = z.definition.AttackRange
+	if z.unarmed then
+		range = math.min(range, 4.5)
+	end
+	return if z.crawling then math.max(3.5, range - 1.5) else range
+end
+
+local function attackReach(z: Zombie): number
+	local reach = z.definition.AttackReach
+	if z.unarmed then
+		reach = math.min(reach, 5.5)
+	end
+	return if z.crawling then math.max(4.5, reach - 1.5) else reach
+end
+
+local function walkSpeed(z: Zombie, now: number): number
+	local speed = z.definition.WalkSpeed * z.mods.SpeedMultiplier
+	if z.crawling then
+		speed *= 0.45
+	end
+	if z.mods.BurstSeconds > 0 then
+		-- Short bursts followed by longer rests (critical skirmishers)
+		if now >= z.restUntil and now >= z.burstUntil then
+			z.burstUntil = now + z.mods.BurstSeconds
+			z.restUntil = z.burstUntil + z.mods.RestSeconds
+		end
+		if now >= z.burstUntil then
+			speed *= 0.35
+		end
+	end
+	if now < z.slowUntil then
+		speed *= 0.6
+	end
+	return speed
 end
 
 local function flash(z: Zombie, color: Color3)
@@ -170,7 +258,7 @@ end
 local function scoreTarget(z: Zombie, player: Player, root: BasePart, fairShare: number): number
 	local weights = z.profile.TargetWeights
 	local distance = (root.Position - z.root.Position).Magnitude
-	if distance > z.profile.MaxChaseDistance then
+	if distance > (z.definition.DetectRange or z.profile.MaxChaseDistance) then
 		return -math.huge
 	end
 	local _, humanoid = CombatUtil.getLivingCharacter(player)
@@ -376,6 +464,14 @@ local function startGuard(z: Zombie, now: number, seconds: number, cooldown: num
 	CombatEffects.glow(z.model, Color3.fromRGB(255, 220, 120), math.min(seconds, 0.4))
 end
 
+-- RootJoint rest pose for the zombie's current condition (crawl pose after losing a leg).
+local function restPose(z: Zombie): CFrame
+	if z.crawling then
+		return z.rig.rootJointRest * CFrame.new(0, -0.7, 0) * CFrame.Angles(math.rad(-38), 0, math.rad(6))
+	end
+	return z.rig.rootJointRest * ZombieDamageStateService.postureOffset(z.condition)
+end
+
 local function pushBack(z: Zombie, fromPosition: Vector3, speed: number, stagger: number)
 	local away = CombatUtil.flat(z.root.Position - fromPosition)
 	if away.Magnitude < 0.01 then
@@ -391,52 +487,69 @@ type AttackStyle = "Normal" | "Bash"
 local function performAttack(z: Zombie, player: Player, style: AttackStyle)
 	local def = z.definition
 	local profile = z.profile
+	local mods = z.mods
 	z.busy = true
 	z.lastAttack = os.clock()
 	endGuard(z)
 
-	-- Optional roar (Brute): an extra, very visible telegraph
-	if style == "Normal" and profile.RoarChance > 0 and z.rng:NextNumber() < profile.RoarChance then
+	local finish = function()
+		z.busy = false
+		ZombieCrowdService.endAttack(z)
+	end
+
+	-- Optional roar (Brute) or a critical brute's last heavy swing: extra, very visible telegraphs
+	local heavy = style == "Normal" and not z.unarmed and mods.HeavySwingChance > 0 and z.rng:NextNumber() < mods.HeavySwingChance
+	if style == "Normal" and not z.unarmed and (heavy or (profile.RoarChance > 0 and z.rng:NextNumber() < profile.RoarChance)) then
 		setPose(z.rig.rightShoulder, z.rig.rightShoulderRest, 120, 0.2)
-		setPose(z.rig.leftShoulder, z.rig.leftShoulderRest, 120, 0.2)
-		CombatEffects.ring(z.root.Position - Vector3.new(0, z.humanoid.HipHeight, 0), 6, Color3.fromRGB(255, 120, 80))
-		task.wait(0.5)
+		if z.canBlock then
+			setPose(z.rig.leftShoulder, z.rig.leftShoulderRest, 120, 0.2)
+		end
+		CombatEffects.ring(z.root.Position - Vector3.new(0, z.humanoid.HipHeight, 0), if heavy then 8 else 6, Color3.fromRGB(255, 120, 80))
+		if heavy then
+			CombatEffects.glow(z.model, Color3.fromRGB(255, 120, 80), 0.9)
+		end
+		task.wait(if heavy then 0.8 else 0.5)
 		setPose(z.rig.leftShoulder, z.rig.leftShoulderRest, 0, 0.2)
 		if not z.alive then
-			ZombieCrowdService.endAttack(z)
+			finish()
 			return
 		end
 	end
 
-	-- Telegraph: weapon raised (or shield pulled back for a bash)
-	if style == "Bash" then
-		setPose(z.rig.leftShoulder, z.rig.leftShoulderRest, 40, def.WindUpSeconds * 0.8)
+	-- Telegraph: weapon raised, shield pulled back for a bash, or head drawn back for a bite
+	local windUp = def.WindUpSeconds * (if z.unarmed then 1.2 else 1)
+	if z.unarmed then
+		TweenService:Create(z.rig.rootJoint, TweenInfo.new(windUp * 0.8, Enum.EasingStyle.Quad), { C0 = z.rig.rootJointRest * CFrame.Angles(math.rad(15), 0, 0) }):Play()
+	elseif style == "Bash" then
+		setPose(z.rig.leftShoulder, z.rig.leftShoulderRest, 40, windUp * 0.8)
 	else
-		setPose(z.rig.rightShoulder, z.rig.rightShoulderRest, 150, def.WindUpSeconds * 0.85)
+		setPose(z.rig.rightShoulder, z.rig.rightShoulderRest, 150, windUp * 0.85)
 	end
-	task.wait(def.WindUpSeconds)
+	task.wait(windUp)
 	if not z.alive then
-		ZombieCrowdService.endAttack(z)
+		finish()
 		return
 	end
-	if style == "Bash" then
+	if z.unarmed then
+		TweenService:Create(z.rig.rootJoint, TweenInfo.new(0.1, Enum.EasingStyle.Quad), { C0 = z.rig.rootJointRest * CFrame.Angles(math.rad(-35), 0, 0) }):Play()
+	elseif style == "Bash" then
 		setPose(z.rig.leftShoulder, z.rig.leftShoulderRest, 95, 0.1)
 	else
 		setPose(z.rig.rightShoulder, z.rig.rightShoulderRest, 25, 0.1)
 	end
 
-	-- Re-validate everything at the moment the blow lands
+	-- Re-validate everything at the moment the blow lands (a dead zombie never deals damage)
 	local landed = false
 	local character, _, targetRoot = CombatUtil.getLivingCharacter(player)
-	if character and targetRoot and isValidTarget(player) then
-		local inReach = CombatUtil.flatDistance(z.root.Position, targetRoot.Position) <= def.AttackReach
+	if z.alive and character and targetRoot and isValidTarget(player) then
+		local inReach = CombatUtil.flatDistance(z.root.Position, targetRoot.Position) <= attackReach(z)
 			and math.abs(z.root.Position.Y - targetRoot.Position.Y) <= 6
 		local eye = z.root.Position + Vector3.new(0, 1.5, 0)
 		if inReach and CombatUtil.hasLineOfSight(eye, targetRoot.Position, ignoreList(character)) then
-			local multiplier = if style == "Bash" then 0.6 else 1
+			local multiplier = if style == "Bash" then 0.6 elseif z.unarmed then 0.55 elseif heavy then 1.4 else 1
 			local damage = math.max(1, math.floor(def.Damage * multiplier * CombatConfig.ZombieDamageMultiplier + 0.5))
-			local pierce = if style == "Bash" then 0.8 else profile.BlockPierce
-			local knockback = if style == "Bash" then 25 else 0
+			local pierce = if style == "Bash" then 0.8 elseif heavy then math.max(profile.BlockPierce, 0.6) else profile.BlockPierce
+			local knockback = if style == "Bash" then 25 elseif heavy then 20 else 0
 			local hit, blocked, staggerMultiplier = getHandlers().hitPlayer(player, z.root.Position, damage, pierce, knockback)
 			landed = hit
 			if hit and blocked then
@@ -452,28 +565,37 @@ local function performAttack(z: Zombie, player: Player, style: AttackStyle)
 	if z.alive then
 		setPose(z.rig.rightShoulder, z.rig.rightShoulderRest, 0, 0.3)
 		setPose(z.rig.leftShoulder, z.rig.leftShoulderRest, 0, 0.3)
+		if z.unarmed then
+			TweenService:Create(z.rig.rootJoint, TweenInfo.new(0.3), { C0 = restPose(z) }):Play()
+		end
 		local now = os.clock()
 		if not landed and profile.ExposedAfterMiss > 0 then
 			-- Champion: a failed heavy attack leaves it open
 			z.stunnedUntil = math.max(z.stunnedUntil, now + profile.ExposedAfterMiss)
 			z.guardReadyAt = math.max(z.guardReadyAt, now + profile.ExposedAfterMiss + 1)
 		end
+		if heavy then
+			z.stunnedUntil = math.max(z.stunnedUntil, now + 0.8) -- a big swing leaves it slow to recover
+		end
 		if def.Special == "Guard" then
 			z.guardReadyAt = math.max(z.guardReadyAt, now + 2)
 		end
-		if profile.RetreatAfterAttack > 0 then
-			z.retreatUntil = now + profile.RetreatAfterAttack
+		local retreat = profile.RetreatAfterAttack + mods.RetreatAdd
+		if retreat > 0 then
+			z.retreatUntil = now + retreat
 			ZombieCrowdService.releaseSlot(z)
+		elseif mods.ComboChance > 0 and z.rng:NextNumber() < mods.ComboChance then
+			-- Desperate short combination: the next strike may follow almost immediately
+			z.lastAttack = now - def.AttackCooldown * mods.CooldownMultiplier + 0.3
 		end
 	end
-	z.busy = false
-	ZombieCrowdService.endAttack(z)
+	finish()
 end
 
 local function throwNet(z: Zombie, player: Player)
 	local def = z.definition
 	z.busy = true
-	z.netReadyAt = os.clock() + (def.NetCooldown or 7)
+	z.netReadyAt = os.clock() + (def.NetCooldown or 7) * z.mods.NetCooldownMultiplier
 	setPose(z.rig.leftShoulder, z.rig.leftShoulderRest, 160, (def.NetWindUp or 0.7) * 0.8)
 	task.wait(def.NetWindUp or 0.7)
 	if not z.alive then
@@ -502,6 +624,45 @@ end
 -- Think
 ------------------------------------------------------------------------------------------
 
+-- Long weapons stand farther out on the crowd ring, so the stopping distance matches the reach.
+local function slotRadius(z: Zombie): number
+	return math.clamp(attackRange(z) - 2.5, CombatConfig.CrowdSlotRadius, CombatConfig.CrowdSlotMaxRadius)
+end
+
+-- Shared helpers for ZombieArcherAI (passed in, so the archer module never requires this one).
+local toolkit = {
+	moveTowards = moveTowards,
+	faceTowards = faceTowards,
+	checkStuck = checkStuck,
+	isValidTarget = isValidTarget,
+	ignoreList = ignoreList,
+	separation = separation,
+	setPose = setPose,
+	handlers = function(): Handlers
+		return getHandlers()
+	end,
+	zombiesNear = function(position: Vector3, radius: number, except: any): number
+		local count = 0
+		for _, other in registry do
+			if other ~= except and other.alive and CombatUtil.flatDistance(other.root.Position, position) <= radius then
+				count += 1
+			end
+		end
+		return count
+	end,
+	-- Weak close-range strike (cornered archer); false if the attack token isn't available
+	melee = function(z: Zombie, player: Player): boolean
+		if ZombieCrowdService.tryStartAttack(z, player) then
+			z.humanoid:MoveTo(z.root.Position)
+			task.spawn(function()
+				performAttack(z, player, "Normal")
+			end)
+			return true
+		end
+		return false
+	end,
+}
+
 local function think(z: Zombie)
 	local now = os.clock()
 	local def = z.definition
@@ -509,7 +670,8 @@ local function think(z: Zombie)
 	if z.guarding and now >= z.guardUntil then
 		endGuard(z)
 	end
-	z.humanoid.WalkSpeed = if now < z.slowUntil then def.WalkSpeed * 0.6 else def.WalkSpeed
+	local mods = z.mods
+	z.humanoid.WalkSpeed = walkSpeed(z, now)
 	if z.busy or now < z.stunnedUntil then
 		return
 	end
@@ -522,6 +684,10 @@ local function think(z: Zombie)
 		if z.rng:NextNumber() < profile.CircleTendency then
 			z.drift = -z.drift
 		end
+	end
+	if def.Special == "Archer" and not z.unarmed then
+		ZombieArcherAI.think(z, toolkit, now) -- ranged AI on the shared movement helpers
+		return
 	end
 
 	local player, targetRoot = pickTarget(z, now)
@@ -544,7 +710,7 @@ local function think(z: Zombie)
 	local distance = CombatUtil.flatDistance(position, targetPosition)
 	local eye = position + Vector3.new(0, 1.5, 0)
 	local canSee = CombatUtil.hasLineOfSight(eye, targetPosition, ignoreList(character))
-	local netReady = def.Special == "Net" and now >= z.netReadyAt
+	local netReady = def.Special == "Net" and z.canBlock and now >= z.netReadyAt
 
 	-- Abilities
 	if netReady and distance >= 5 and distance <= (def.NetRange or 13) and canSee and ZombieCrowdService.tryStartAttack(z, player) then
@@ -553,12 +719,12 @@ local function think(z: Zombie)
 		task.spawn(throwNet, z, player)
 		return
 	end
-	if not z.guarding and now >= z.guardReadyAt and distance <= 14 then
+	if z.canBlock and mods.BlockMultiplier > 0 and not z.guarding and now >= z.guardReadyAt and distance <= 14 then
 		if def.Special == "Guard" then
-			startGuard(z, now, def.GuardSeconds or profile.GuardSeconds, def.GuardCooldown or 4)
+			startGuard(z, now, def.GuardSeconds or profile.GuardSeconds, (def.GuardCooldown or 4) / mods.BlockMultiplier)
 		elseif profile.BlockChance > 0 then
 			z.guardReadyAt = now + 3 -- roll again in a few seconds
-			if z.rng:NextNumber() < profile.BlockChance then
+			if z.rng:NextNumber() < profile.BlockChance * mods.BlockMultiplier then
 				startGuard(z, now, profile.GuardSeconds, 2)
 			end
 		end
@@ -566,7 +732,8 @@ local function think(z: Zombie)
 
 	-- Crowd slot (some personalities stay out of melee for a while)
 	local retreating = now < z.retreatUntil
-	local keepDistance = profile.AvoidSlotsUntilAbilityUsed and netReady
+	local cornered = distance <= 4.5
+	local keepDistance = (profile.AvoidSlotsUntilAbilityUsed and netReady) or (mods.AvoidMelee and not cornered)
 	local avoidShield = profile.AvoidHeavyShields and getHandlers().isHeavyBlocking(player) and getHandlers().isBlockingToward(player, position)
 	local slot: number? = nil
 	if distance <= CombatConfig.CrowdApproachRadius and not retreating and not keepDistance then
@@ -576,13 +743,14 @@ local function think(z: Zombie)
 	end
 
 	-- Attack from a slot
-	if slot and distance <= def.AttackRange and canSee and not avoidShield then
+	if slot and distance <= attackRange(z) and canSee and not avoidShield then
 		faceTowards(z, targetPosition)
-		if not z.guarding and now - z.lastAttack >= def.AttackCooldown and now >= z.attackDelayUntil then
-			if z.rng:NextNumber() > profile.Aggression then
+		if not z.guarding and now - z.lastAttack >= def.AttackCooldown * mods.CooldownMultiplier and now >= z.attackDelayUntil then
+			if z.rng:NextNumber() > profile.Aggression + mods.AggressionAdd then
 				z.attackDelayUntil = now + 0.4 -- hesitates
 			elseif getHandlers().isBlockingToward(player, position) then
-				if profile.ShieldBashChance > 0 and z.rng:NextNumber() < profile.ShieldBashChance then
+				local bashChance = if z.canBlock and not z.unarmed then profile.ShieldBashChance + mods.BashChanceAdd else 0
+				if bashChance > 0 and z.rng:NextNumber() < bashChance then
 					if ZombieCrowdService.tryStartAttack(z, player) then
 						z.humanoid:MoveTo(position)
 						task.spawn(function()
@@ -621,9 +789,9 @@ local function think(z: Zombie)
 	elseif keepDistance and profile.PreferredDistance > 0 then
 		local away = CombatUtil.flat(position - targetPosition)
 		local direction = if away.Magnitude > 0.1 then away.Unit else Vector3.xAxis
-		goal = targetPosition + CFrame.fromAxisAngle(Vector3.yAxis, z.drift * 0.6):VectorToWorldSpace(direction) * profile.PreferredDistance
+		goal = targetPosition + CFrame.fromAxisAngle(Vector3.yAxis, z.drift * 0.6):VectorToWorldSpace(direction) * (profile.PreferredDistance + mods.PreferredDistanceAdd)
 	elseif slot then
-		goal = ZombieCrowdService.slotPosition(targetRoot, slot)
+		goal = ZombieCrowdService.slotPosition(targetRoot, slot, slotRadius(z))
 	elseif retreating or distance <= CombatConfig.CrowdApproachRadius + 2 then
 		local drift = z.drift * (0.15 + 0.5 * profile.CircleTendency)
 		goal = ZombieCrowdService.waitPosition(targetRoot, position, drift)
@@ -661,6 +829,7 @@ local function cleanup(z: Zombie)
 	table.clear(z.connections)
 	ZombieCrowdService.release(z)
 	ZombieThreatService.release(z)
+	ZombieArcherAI.release(z)
 	registry[z.model] = nil
 end
 
@@ -771,6 +940,15 @@ function ZombieService.spawn(def: ZombieDefinition, cframe: CFrame, onDiedCallba
 		connections = {},
 		onDied = onDiedCallback,
 		flashToken = 0,
+		condition = "Healthy",
+		mods = ZombieDamageStateService.NeutralMods,
+		limbs = { lost = {}, limbCount = 0, armorLost = 0 },
+		unarmed = false,
+		canBlock = true,
+		crawling = false,
+		burstUntil = 0,
+		restUntil = 0,
+		archer = nil,
 	}
 	rig.root.CollisionGroup = CombatConfig.ZombieCollisionGroup
 	local height = rig.humanoid.HipHeight + rig.root.Size.Y / 2
@@ -811,7 +989,7 @@ end
 
 -- Guard (Legion occasionally, Champion regularly): blocks hits from the front.
 function ZombieService.tryGuardBlock(z: Zombie, attackerPosition: Vector3): boolean
-	if not z.alive or not z.guarding or os.clock() >= z.guardUntil then
+	if not z.alive or not z.canBlock or not z.guarding or os.clock() >= z.guardUntil then
 		return false
 	end
 	if not CombatUtil.isFacing(z.root.CFrame, attackerPosition, 0.35) then
@@ -822,7 +1000,31 @@ function ZombieService.tryGuardBlock(z: Zombie, attackerPosition: Vector3): bool
 end
 
 -- Applies server-validated damage plus a short stagger and controlled knockback.
-function ZombieService.applyDamage(z: Zombie, attacker: Player, amount: number, fromPosition: Vector3, stagger: number, knockback: number): boolean
+-- Lost armor makes a zombie a little easier to hurt.
+function ZombieService.damageMultiplier(z: Zombie): number
+	return 1 + math.min(DamageEffectsConfig.MaxArmorDamageBonus, z.limbs.armorLost * DamageEffectsConfig.ArmorLostDamageBonus)
+end
+
+-- Gameplay consequences of a lost limb (ZombieDismembermentService handles the visuals).
+local function onLimbLost(z: Zombie, key: string)
+	local weaponArm = if z.definition.Special == "Archer" then (key == "LeftArm" or key == "RightArm") else key == "RightArm"
+	if weaponArm then
+		z.unarmed = true -- weak bites and kicks from now on
+	end
+	if key == "LeftArm" and z.definition.Special ~= "Archer" then
+		z.canBlock = false -- no guard, no shield bash, no net
+		endGuard(z)
+	end
+	if key == "RightLeg" or key == "LeftLeg" then
+		z.crawling = true
+		z.model:SetAttribute("Crawl", true) -- the client animator drags the remaining leg
+		TweenService:Create(z.rig.rootJoint, TweenInfo.new(0.35, Enum.EasingStyle.Quad), { C0 = restPose(z) }):Play()
+		z.waypoints = nil
+	end
+	z.stunnedUntil = math.max(z.stunnedUntil, os.clock() + 0.5)
+end
+
+function ZombieService.applyDamage(z: Zombie, attacker: Player, amount: number, fromPosition: Vector3, stagger: number, knockback: number, extra: DamageExtra?): boolean
 	if not z.alive or z.humanoid.Health <= 0 then
 		return false
 	end
@@ -830,7 +1032,24 @@ function ZombieService.applyDamage(z: Zombie, attacker: Player, amount: number, 
 	z.damagers[attacker] = true
 	ZombieThreatService.add(z, attacker, amount)
 	flash(z, Color3.new(1, 1, 1))
+	local hitPosition = if extra and extra.hitPosition then extra.hitPosition else z.root.Position + Vector3.new(0, 1, 0)
+	DamageEffectsService.hit("Zombie", hitPosition, math.clamp(amount / 30, 0.4, 1.5), CombatUtil.flat(z.root.Position - fromPosition))
 	z.humanoid:TakeDamage(amount)
+	if z.alive and z.humanoid.Health > 0 then
+		local lost = ZombieDismembermentService.tryDismember(z.rig, z.limbs, {
+			damage = amount,
+			fractionAfter = z.humanoid.Health / math.max(1, z.humanoid.MaxHealth),
+			weaponId = extra and extra.weaponId,
+			isSpecial = extra ~= nil and extra.isSpecial == true,
+			spin = extra ~= nil and extra.spin == true,
+			hitPosition = extra and extra.hitPosition,
+			fromPosition = fromPosition,
+			rng = z.rng,
+		})
+		if lost then
+			onLimbLost(z, lost)
+		end
+	end
 	if z.alive and z.humanoid.Health > 0 and (stagger > 0 or knockback > 0) then
 		local away = CombatUtil.flat(z.root.Position - fromPosition)
 		if away.Magnitude > 0.01 then
@@ -876,6 +1095,16 @@ function ZombieService.despawnAll()
 	end
 	ZombieCrowdService.reset()
 	ZombieThreatService.reset()
+end
+
+function ZombieService.countAliveOf(definitionId: string): number
+	local count = 0
+	for _, z in registry do
+		if z.alive and z.definition.Id == definitionId then
+			count += 1
+		end
+	end
+	return count
 end
 
 function ZombieService.countAlive(): number

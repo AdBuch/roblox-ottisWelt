@@ -3,11 +3,12 @@
 --
 --   Match:  idle (LOBBY) -> COUNTDOWN -> MATCH_ACTIVE <-> ROUND_COMPLETE -> VICTORY | MATCH_COMPLETE
 --           -> CLEANUP -> idle            (published as "MatchState" on the arena folder)
---   Solo    : one fighter, rounds 1-2-4-8-16-32, death ends the run.
+--   Solo    : one fighter, rounds 1-2-4-8-16-32, then Round 7 (Otti), death ends the run.
 --   Co-op   : 1-4 ready party members, scaled rounds, shared progression; the dead wait on the
 --             tribune and return with 60 % health after a completed round; a full wipe ends it.
+--             Round 7 is the Otti boss (OttiBossService); his defeat pays the boss reward once.
 --   Team    : Red vs Blue via TeamBattleService; rewards 80 / 25 Aura.
--- Cleanup always removes zombies, projectiles, effects, shells and match attributes, returns
+-- Cleanup always removes zombies, Otti, projectiles, limbs, effects, shells and match attributes, returns
 -- everybody to the lobby and frees the arena for the next match.
 -- Also installs CombatRules (who may hit whom) and wires the lobby prompts.
 
@@ -25,6 +26,8 @@ local CombatRules = require(script.Parent.CombatRules)
 local CombatUtil = require(script.Parent.CombatUtil)
 local InventoryService = require(script.Parent.InventoryService)
 local LobbyService = require(script.Parent.LobbyService)
+local OttiBossConfig = require(ReplicatedStorage.Shared.OttiBossConfig)
+local OttiBossService = require(script.Parent.OttiBossService)
 local PartyService = require(script.Parent.PartyService)
 local PlayerCombatService = require(script.Parent.PlayerCombatService)
 local ProjectileService = require(script.Parent.ProjectileService)
@@ -49,6 +52,7 @@ type Match = {
 	participants: { Player },
 	alive: { [Player]: boolean }, -- zombie modes: currently fighting (not waiting to revive)
 	ended: boolean,
+	bossRewarded: boolean, -- the Otti reward is paid at most once per match
 }
 
 local MatchService = {}
@@ -180,6 +184,7 @@ local function cleanupMatch(reason: string)
 	print(PREFIX, ("Match %d (%s) cleanup: %s"):format(current.id, current.mode, reason))
 
 	WaveService.abort()
+	OttiBossService.stop()
 	ZombieService.despawnAll()
 	ProjectileService.clear()
 	CombatEffects.clear()
@@ -222,7 +227,7 @@ local function livingParticipants(current: Match): { Player }
 	return list
 end
 
-local function endZombieMatch(current: Match, victory: boolean)
+local function endZombieMatch(current: Match, victory: boolean, resultText: string?)
 	if match ~= current or current.ended then
 		return
 	end
@@ -237,7 +242,7 @@ local function endZombieMatch(current: Match, victory: boolean)
 		end
 	end
 	if victory then
-		showResult("COLOSSEUM CONQUERED")
+		showResult(resultText or "COLOSSEUM CONQUERED")
 		if arenaFolder then
 			VictoryService.play(arenaFolder)
 		end
@@ -287,6 +292,74 @@ local function onZombieParticipantDied(current: Match, player: Player)
 	end
 end
 
+-- Otti defeated: boss reward exactly once, then the victory screen and the return to the lobby.
+local function onBossDefeated(current: Match, damageBy: { [Player]: number })
+	if match ~= current or current.ended or current.bossRewarded then
+		return
+	end
+	current.bossRewarded = true
+	local rewards: { { player: Player, amount: number } } = {}
+	for _, player in current.participants do
+		if player.Parent then
+			if current.mode == "Solo" then
+				table.insert(rewards, { player = player, amount = OttiBossConfig.SoloReward })
+			elseif current.alive[player] then
+				table.insert(rewards, { player = player, amount = OttiBossConfig.CoopSurvivorReward })
+			elseif (damageBy[player] or 0) > 0 then
+				table.insert(rewards, { player = player, amount = OttiBossConfig.CoopContributorReward })
+			end
+		end
+	end
+	AuraService.awardBossVictory(rewards)
+	endZombieMatch(current, true, "OTTI DEFEATED")
+end
+
+-- Round 7: after the last Round 6 zombie, clean the arena and start the Otti encounter.
+local function startBossRound(current: Match)
+	if match ~= current or current.ended then
+		return
+	end
+	WaveService.setBossPhase("BossIntro")
+	ZombieService.despawnAll()
+	local zombies = arenaFolder and arenaFolder:FindFirstChild(Config.ZombiesFolderName)
+	if zombies then
+		zombies:ClearAllChildren() -- remaining corpses
+	end
+	ProjectileService.clear()
+	CombatEffects.clear() -- detached limbs, markers
+	OttiBossService.startEncounter({
+		playerCount = math.max(1, #livingParticipants(current)),
+		participants = function()
+			return current.participants
+		end,
+		fighters = function()
+			if match ~= current or current.ended then
+				return {}
+			end
+			local list = {}
+			for _, player in livingParticipants(current) do
+				if CombatRules.canZombiesTarget(player) then
+					table.insert(list, player)
+				end
+			end
+			return list
+		end,
+		onFightStarted = function()
+			if match ~= current or current.ended then
+				return
+			end
+			WaveService.setBossPhase("Boss")
+			setMatchState(GameStates.MatchActive)
+			for _, player in livingParticipants(current) do
+				setState(player, GameStates.MatchActive)
+			end
+		end,
+		onDefeated = function(damageBy)
+			onBossDefeated(current, damageBy)
+		end,
+	})
+end
+
 local function startZombieMatch(mode: ModeId, players: { Player }): boolean
 	if match then
 		for _, player in players do
@@ -310,7 +383,7 @@ local function startZombieMatch(mode: ModeId, players: { Player }): boolean
 	end
 
 	matchCounter += 1
-	local current: Match = { id = matchCounter, mode = mode, participants = valid, alive = {}, ended = false }
+	local current: Match = { id = matchCounter, mode = mode, participants = valid, alive = {}, ended = false, bossRewarded = false }
 	match = current
 	updateGateSigns()
 	setMatchState(GameStates.Countdown)
@@ -371,8 +444,8 @@ local function startZombieMatch(mode: ModeId, players: { Player }): boolean
 				end
 				reviveWaitingPlayers(current)
 			end,
-			onVictory = function()
-				endZombieMatch(current, true)
+			onBossRound = function()
+				startBossRound(current)
 			end,
 			onZombieDied = function(zombie, killer, damagers)
 				local assist = if mode == "Coop" then GameModeDefinitions.Coop.AssistRewardFraction else 0
@@ -406,7 +479,7 @@ local function startTeamMatch(red: { Player }, blue: { Player }): boolean
 		end
 	end
 	matchCounter += 1
-	local current: Match = { id = matchCounter, mode = "TeamBattle", participants = all, alive = {}, ended = false }
+	local current: Match = { id = matchCounter, mode = "TeamBattle", participants = all, alive = {}, ended = false, bossRewarded = false }
 	match = current
 	updateGateSigns()
 	setMatchState(GameStates.MatchActive)

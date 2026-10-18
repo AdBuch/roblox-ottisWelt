@@ -23,6 +23,7 @@ local CombatEffects = require(script.Parent.CombatEffects)
 local CombatRules = require(script.Parent.CombatRules)
 local CombatTargets = require(script.Parent.CombatTargets)
 local CombatUtil = require(script.Parent.CombatUtil)
+local DamageEffectsService = require(script.Parent.DamageEffectsService)
 local ComboService = require(script.Parent.ComboService)
 local EquipmentModels = require(script.Parent.EquipmentModels)
 local InventoryService = require(script.Parent.InventoryService)
@@ -59,6 +60,8 @@ type PlayerState = {
 	parryReadyAt: number,
 	lastHitTaken: number,
 	spawnProtectedUntil: number,
+	immuneUntil: number, -- landing / knockdown recovery protection (no visual force field)
+	controlLocked: boolean, -- grappled by Otti: no walking or jumping
 	slowFactor: number,
 	slowToken: number,
 	actionToken: number, -- changes on death/state reset: running moves stop
@@ -93,6 +96,8 @@ local function getState(player: Player): PlayerState
 			parryReadyAt = 0,
 			lastHitTaken = 0,
 			spawnProtectedUntil = 0,
+			immuneUntil = 0,
+			controlLocked = false,
 			slowFactor = 1,
 			slowToken = 0,
 			actionToken = 0,
@@ -153,7 +158,9 @@ local function updateWalkSpeed(player: Player)
 	if state.blocking and shield then
 		speed = CombatConfig.BlockingWalkSpeed * shield.BlockSpeedMultiplier
 	end
-	humanoid.WalkSpeed = speed * state.slowFactor
+	humanoid.WalkSpeed = if state.controlLocked then 0 else speed * state.slowFactor
+	humanoid.JumpPower = if state.controlLocked then 0 else 50
+	humanoid.UseJumpPower = true
 end
 
 ------------------------------------------------------------------------------------------
@@ -387,8 +394,13 @@ type Incoming = {
 	isProjectile: boolean,
 	blockPierce: number,
 	knockback: number,
-	fromZombie: boolean,
+	fromZombie: boolean, -- zombies and Otti (PvE): brief hit immunity, no PvP cap
 	attacker: Player?,
+	blockStops: boolean?, -- a facing shield stops all damage (Otti's bite)
+	knockbackIfBlocked: boolean?, -- tail sweeps push back even through a shield
+	knockdownSeconds: number?,
+	slowSeconds: number?, -- strong stagger
+	unblockable: boolean?,
 }
 
 -- Returns damage dealt, whether it was blocked/parried, and the stagger multiplier for the attacker.
@@ -399,7 +411,7 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 	end
 	local state = getState(victim)
 	local now = os.clock()
-	if now < state.spawnProtectedUntil then
+	if now < state.spawnProtectedUntil or (incoming.fromZombie and now < state.immuneUntil) then
 		return 0, true, 1
 	end
 	if incoming.fromZombie and now - state.lastHitTaken < CombatConfig.HitImmunitySeconds then
@@ -410,7 +422,9 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 	local blocked = false
 	local stagger = 1
 	local shield = InventoryService.getActiveShield(victim)
-	if state.blocking and shield and state.shieldId == shield.Id and now - state.blockStart >= shield.RaiseSeconds then
+	if incoming.unblockable then
+		-- grapples can't be blocked
+	elseif state.blocking and shield and state.shieldId == shield.Id and now - state.blockStart >= shield.RaiseSeconds then
 		local inRange = incoming.isProjectile or CombatUtil.flatDistance(root.Position, incoming.fromPosition) <= CombatConfig.ShieldBlockDistance
 		if inRange and CombatUtil.isFacing(root.CFrame, incoming.fromPosition, shield.FacingDot) then
 			local reduction = (if incoming.isProjectile then shield.ProjectileReduction else shield.Reduction) * (1 - incoming.blockPierce)
@@ -420,7 +434,7 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 			shieldFeedback(state)
 		end
 	elseif state.shieldId == nil and now < state.parryUntil and CombatUtil.isFacing(root.CFrame, incoming.fromPosition, 0) then
-		damage = math.max(1, math.floor(damage * (1 - CombatConfig.ParryReduction) + 0.5))
+		damage = if incoming.blockStops then 0 else math.max(1, math.floor(damage * (1 - CombatConfig.ParryReduction) + 0.5))
 		blocked = true
 		stagger = 1.5
 		CombatEffects.burst(root.Position + Vector3.new(0, 1, 0), Color3.fromRGB(200, 230, 255), 0.8)
@@ -432,18 +446,30 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 		damage = math.min(damage, math.floor(humanoid.MaxHealth * CombatConfig.PvPMaxDamageFraction))
 	end
 	damage = math.floor(damage + 0.5)
+	local pushed = incoming.knockback > 0 and (not blocked or incoming.knockbackIfBlocked == true)
+	if pushed then
+		local away = CombatUtil.flat(root.Position - incoming.fromPosition)
+		if away.Magnitude > 0.05 then
+			-- Horizontal only and limited: the arena barrier keeps everyone on the floor
+			local strength = if blocked then incoming.knockback * 0.6 else incoming.knockback
+			Remotes.CombatFeedback:FireClient(victim, CombatConfig.Feedback.Knockback, away.Unit * math.min(strength, 45))
+		end
+	end
 	if damage <= 0 then
 		return 0, blocked, stagger
 	end
 	state.lastHitTaken = now
 	CombatRules.onPlayerDamaged(victim, incoming.attacker, damage)
 	humanoid:TakeDamage(damage)
-	Remotes.CombatFeedback:FireClient(victim, CombatConfig.Feedback.PlayerHit, damage, blocked)
-	if incoming.knockback > 0 and not blocked then
-		local away = CombatUtil.flat(root.Position - incoming.fromPosition)
-		if away.Magnitude > 0.05 then
-			Remotes.CombatFeedback:FireClient(victim, CombatConfig.Feedback.Knockback, away.Unit * incoming.knockback)
-		end
+	Remotes.CombatFeedback:FireClient(victim, CombatConfig.Feedback.PlayerHit, damage, blocked, incoming.fromPosition)
+	if not blocked then
+		DamageEffectsService.hit("Player", root.Position + Vector3.new(0, 0.8, 0), math.clamp(damage / 15, 0.4, 1.4), CombatUtil.flat(root.Position - incoming.fromPosition))
+	end
+	if incoming.knockdownSeconds and incoming.knockdownSeconds > 0 and not blocked then
+		PlayerCombatService.knockdown(victim, incoming.knockdownSeconds)
+	end
+	if incoming.slowSeconds and incoming.slowSeconds > 0 then
+		PlayerCombatService.applySlow(victim, if blocked then 0.75 else 0.5, incoming.slowSeconds)
 	end
 	return damage, blocked, stagger
 end
@@ -462,6 +488,81 @@ function PlayerCombatService.applyZombieHit(player: Player, attackerPosition: Ve
 		fromZombie = true,
 	})
 	return dealt > 0 or blocked, blocked, stagger
+end
+
+-- An Undead Sagittarius arrow reaches a player (projectile: shields use their arrow protection).
+function PlayerCombatService.applyEnemyArrowHit(player: Player, fromPosition: Vector3, damage: number): boolean
+	if not CombatRules.canZombiesTarget(player) then
+		return false
+	end
+	local dealt, blocked = receiveHit(player, {
+		damage = damage,
+		fromPosition = fromPosition,
+		isProjectile = true,
+		blockPierce = 0,
+		knockback = 6,
+		fromZombie = true,
+	})
+	return dealt > 0 or blocked
+end
+
+export type BossHit = {
+	fromPosition: Vector3,
+	damage: number,
+	blockable: boolean,
+	blockStops: boolean?,
+	blockPierce: number?,
+	knockback: number,
+	knockbackIfBlocked: boolean?,
+	knockdownSeconds: number?,
+	slowSeconds: number?,
+}
+
+-- One validated Otti hit. Returns damage dealt and whether a shield (or parry) caught it.
+function PlayerCombatService.applyBossHit(player: Player, hit: BossHit): (number, boolean)
+	if not CombatRules.canZombiesTarget(player) then
+		return 0, false -- the same rules as zombies: lobby players and spectators are never hit
+	end
+	local dealt, blocked = receiveHit(player, {
+		damage = hit.damage,
+		fromPosition = hit.fromPosition,
+		isProjectile = false,
+		blockPierce = hit.blockPierce or 0,
+		knockback = hit.knockback,
+		fromZombie = true,
+		blockStops = hit.blockStops,
+		knockbackIfBlocked = hit.knockbackIfBlocked,
+		knockdownSeconds = hit.knockdownSeconds,
+		slowSeconds = hit.slowSeconds,
+		unblockable = not hit.blockable,
+	})
+	return dealt, blocked
+end
+
+-- Brief protection without a visible force field (after knockdowns and throws).
+function PlayerCombatService.grantImmunity(player: Player, seconds: number)
+	local state = getState(player)
+	state.immuneUntil = math.max(state.immuneUntil, os.clock() + seconds)
+end
+
+-- A short, controlled knockdown (the client owns its physics and lies down at most
+-- OttiBossConfig.MaxKnockdownSeconds), followed by brief recovery protection.
+function PlayerCombatService.knockdown(player: Player, seconds: number)
+	local duration = math.min(seconds, 1.2)
+	setBlocking(player, false)
+	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Knockdown, duration)
+	PlayerCombatService.grantImmunity(player, duration + 1)
+end
+
+-- Otti's grapple: no walking or jumping while held. Always paired with an unlock.
+function PlayerCombatService.setControlLocked(player: Player, locked: boolean)
+	local state = getState(player)
+	state.controlLocked = locked
+	if locked then
+		setBlocking(player, false)
+		state.actionToken += 1 -- a running move stops
+	end
+	updateWalkSpeed(player)
 end
 
 -- Slow (nets): sets, never stacks, always expires.
@@ -497,6 +598,7 @@ end
 function PlayerCombatService.resetCombatState(player: Player)
 	local state = getState(player)
 	setBlocking(player, false)
+	state.controlLocked = false
 	state.slowFactor = 1
 	state.slowToken += 1
 	state.actionToken += 1
@@ -533,6 +635,9 @@ local function onActionRequest(player: Player, action: unknown, aim: unknown)
 		return
 	end
 	local now = os.clock()
+	if state.controlLocked then
+		return -- held by Otti
+	end
 	if now < state.busyUntil then
 		return -- still performing the previous move (no macro can skip attack timing)
 	end
@@ -581,6 +686,7 @@ local function onActionRequest(player: Player, action: unknown, aim: unknown)
 	SpecialMoveService.execute(move, {
 		player = player,
 		context = context :: CombatRules.CombatContext,
+		weaponId = weapon.Id,
 		character = character,
 		root = root,
 		aimPoint = aimPoint,
@@ -632,6 +738,7 @@ local function onCharacterAdded(player: Player, character: Model)
 	state.busyUntil = 0
 	state.lastHitTaken = 0
 	state.parryUntil = 0
+	state.controlLocked = false
 	ComboService.clear(player)
 	removeRegeneration(character)
 

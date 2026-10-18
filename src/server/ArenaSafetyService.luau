@@ -3,13 +3,14 @@
 --   players in the arena (fighting, countdown, results) outside the floor -> arena start
 --   spectators / waiting co-op players on the arena floor or lost         -> tribune walkway
 --   lobby players who fell out of the complex                             -> lobby spawn
---   zombies outside the arena floor                                       -> valid spot inside
+--   zombies or Otti outside the arena floor                               -> valid spot inside
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
+local Config = require(ReplicatedStorage.Shared.Config)
 local GameStates = require(ReplicatedStorage.Shared.GameStates)
 local Arena = require(script.Parent.Arena)
 local LobbyService = require(script.Parent.LobbyService)
@@ -54,7 +55,11 @@ local function checkPlayers()
 end
 
 local function checkZombies()
-	for _, model in CollectionService:GetTagged(CombatConfig.ZombieTag) do
+	local enemies = CollectionService:GetTagged(CombatConfig.ZombieTag)
+	for _, boss in CollectionService:GetTagged(Config.OttiTag) do
+		table.insert(enemies, boss)
+	end
+	for _, model in enemies do
 		if not model:IsA("Model") then
 			continue
 		end

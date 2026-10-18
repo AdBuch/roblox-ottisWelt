@@ -1,7 +1,7 @@
 --!strict
--- The five Roman zombie variants: stats, coin rewards, spawn availability/weights, and the
+-- The six Roman zombie variants: stats, Aura rewards (field "Coins"), spawn availability/weights, and the
 -- body/gear choices ZombieFactory builds from. All variants share the same AI (ZombieService);
--- Special selects an extra ability ("Net" throw or champion "Guard").
+-- Special selects an extra ability ("Net" throw, champion "Guard" or "Archer" ranged AI).
 
 export type ZombieBody = {
 	Scale: number, -- uniform scale applied to the whole rig
@@ -13,9 +13,9 @@ export type ZombieBody = {
 }
 
 export type ZombieGear = {
-	Helmet: "Crested" | "Damaged" | "Cap" | "OpenFace" | "Ornate",
+	Helmet: "Crested" | "Damaged" | "Cap" | "OpenFace" | "Ornate" | "Wrap",
 	Shoulders: "Single" | "HeavyBoth" | "None",
-	Weapon: "Gladius" | "Club" | "Spear" | "LargeSword",
+	Weapon: "Gladius" | "Club" | "Spear" | "LargeSword" | "Bow",
 	Shield: "Round" | "Buckler" | "Ornate" | "None",
 	Armor: "Harness" | "Straps" | "Vest" | "Light" | "Heavy",
 	ThickBelt: boolean,
@@ -24,9 +24,11 @@ export type ZombieGear = {
 	ClothColor: Color3,
 	CrestColor: Color3,
 	EyeGlow: number, -- eye light brightness
+	Quiver: boolean?, -- quiver with visible arrows on the back (archer)
+	WristGuard: boolean?,
 }
 
-export type ZombieSpecial = "None" | "Net" | "Guard"
+export type ZombieSpecial = "None" | "Net" | "Guard" | "Archer"
 
 export type ZombieDefinition = {
 	Id: string,
@@ -56,6 +58,16 @@ export type ZombieDefinition = {
 	-- Champion guard
 	GuardSeconds: number?,
 	GuardCooldown: number?,
+	-- Archer (Undead Sagittarius)
+	DetectRange: number?, -- overrides the profile chase distance
+	ArrowDamage: number?,
+	FireCooldown: number?,
+	DrawSeconds: number?, -- visible bow draw before every shot
+	PreferredRangeMin: number?,
+	PreferredRangeMax: number?,
+	MinComfortRange: number?, -- relocates when a player gets closer than this
+	AimErrorDegrees: number?, -- base inaccuracy (wounded/critical archers miss more)
+	LeadFactor: number?, -- share of the target movement it predicts (slight)
 	Body: ZombieBody,
 	Gear: ZombieGear,
 }
@@ -72,8 +84,8 @@ local LegionRemnant: ZombieDefinition = {
 	WalkSpeed = 12,
 	AttackCooldown = 1.4,
 	WindUpSeconds = 0.4,
-	AttackRange = 5.5,
-	AttackReach = 7,
+	AttackRange = 7,
+	AttackReach = 8,
 	KnockbackMultiplier = 1,
 	StaggerSeconds = 0.6,
 	Coins = 10,
@@ -114,8 +126,8 @@ local RottenVelite: ZombieDefinition = {
 	WalkSpeed = 15,
 	AttackCooldown = 0.95,
 	WindUpSeconds = 0.3,
-	AttackRange = 5,
-	AttackReach = 6.5,
+	AttackRange = 9,
+	AttackReach = 11, -- spear
 	KnockbackMultiplier = 1.3,
 	StaggerSeconds = 0.8,
 	Coins = 8,
@@ -156,8 +168,8 @@ local ArenaBrute: ZombieDefinition = {
 	WalkSpeed = 8.5,
 	AttackCooldown = 2.1,
 	WindUpSeconds = 0.6,
-	AttackRange = 6.5,
-	AttackReach = 8,
+	AttackRange = 8,
+	AttackReach = 9,
 	KnockbackMultiplier = 0.4, -- heavy: barely pushed back...
 	StaggerSeconds = 0.3, -- ...and recovers quickly
 	Coins = 18,
@@ -198,8 +210,8 @@ local NetFighter: ZombieDefinition = {
 	WalkSpeed = 11.5,
 	AttackCooldown = 1.3,
 	WindUpSeconds = 0.4,
-	AttackRange = 5.5,
-	AttackReach = 7,
+	AttackRange = 7,
+	AttackReach = 8,
 	KnockbackMultiplier = 1,
 	StaggerSeconds = 0.6,
 	Coins = 14,
@@ -209,7 +221,7 @@ local NetFighter: ZombieDefinition = {
 	AIProfile = "Controller",
 	Role = "Tactical controller",
 	SpecialText = "Throws a net that slows you",
-	NetRange = 13,
+	NetRange = 16,
 	NetCooldown = 7,
 	NetWindUp = 0.7,
 	NetSlowFactor = 0.75, -- 25 % slower
@@ -245,8 +257,8 @@ local ArenaChampion: ZombieDefinition = {
 	WalkSpeed = 9,
 	AttackCooldown = 1.6,
 	WindUpSeconds = 0.55,
-	AttackRange = 6.5,
-	AttackReach = 8,
+	AttackRange = 8,
+	AttackReach = 9,
 	KnockbackMultiplier = 0.3,
 	StaggerSeconds = 0.35,
 	Coins = 25,
@@ -281,6 +293,59 @@ local ArenaChampion: ZombieDefinition = {
 	},
 }
 
+local UndeadSagittarius: ZombieDefinition = {
+	Id = "UndeadSagittarius",
+	DisplayName = "Undead Sagittarius",
+	Health = 45,
+	Damage = 5, -- weak close-range strike when cornered
+	WalkSpeed = 12,
+	AttackCooldown = 1.6,
+	WindUpSeconds = 0.45,
+	AttackRange = 5,
+	AttackReach = 6,
+	KnockbackMultiplier = 1.25,
+	StaggerSeconds = 0.7,
+	Coins = 12,
+	AvailableFromRound = 3,
+	SpawnWeight = 10, -- less common than melee zombies; active count is capped per player count
+	Special = "Archer",
+	AIProfile = "Marksman",
+	Role = "Ranged support",
+	SpecialText = "Draws its bow before every shot. Block or dodge!",
+	DetectRange = 140,
+	ArrowDamage = 8,
+	FireCooldown = 2.2,
+	DrawSeconds = 0.75,
+	PreferredRangeMin = 55,
+	PreferredRangeMax = 85,
+	MinComfortRange = 25,
+	AimErrorDegrees = 2.2,
+	LeadFactor = 0.35,
+	Body = {
+		Scale = 0.92,
+		Torso = Vector3.new(2.2, 2.3, 1.5),
+		Head = Vector3.new(1.9, 1.8, 1.75),
+		Arm = Vector3.new(0.9, 2.1, 0.9),
+		Leg = Vector3.new(1.0, 2.25, 1.0),
+		HipSpread = 0.52,
+	},
+	Gear = {
+		Helmet = "Wrap",
+		Shoulders = "None",
+		Weapon = "Bow",
+		Shield = "None",
+		Armor = "Vest",
+		ThickBelt = false,
+		Scarf = true,
+		Net = false,
+		ClothColor = Color3.fromRGB(78, 98, 132), -- faded blue scarf
+		CrestColor = RED,
+		EyeGlow = 2,
+		Quiver = true,
+		WristGuard = true,
+	},
+}
+
 local ZombieDefinitions = {
 	ById = table.freeze({
 		LegionRemnant = LegionRemnant,
@@ -288,8 +353,9 @@ local ZombieDefinitions = {
 		ArenaBrute = ArenaBrute,
 		NetFighter = NetFighter,
 		ArenaChampion = ArenaChampion,
+		UndeadSagittarius = UndeadSagittarius,
 	}) :: { [string]: ZombieDefinition },
-	Ordered = table.freeze({ LegionRemnant, RottenVelite, ArenaBrute, NetFighter, ArenaChampion }) :: { ZombieDefinition },
+	Ordered = table.freeze({ LegionRemnant, RottenVelite, ArenaBrute, NetFighter, ArenaChampion, UndeadSagittarius }) :: { ZombieDefinition },
 }
 
 return table.freeze(ZombieDefinitions)

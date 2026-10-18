@@ -2,7 +2,8 @@
 -- Six-round zombie runs for Solo and Co-op. Round sizes come from RoundDefinitions (Co-op
 -- scales with the number of participating players). At most `maxActive` zombies are alive at
 -- once; the rest spawn as others die. The next round starts only after every zombie of the
--- current round is dead; after round 6 the victory callback fires exactly once.
+-- current round is dead; after round 6 the boss callback (Round 7, Otti) fires exactly once.
+-- Undead Sagittarius archers are capped per player count (RoundDefinitions.maxArchers).
 -- A run token guards against stale callbacks (aborted runs) and duplicate round starts.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12,7 +13,7 @@ local RoundDefinitions = require(ReplicatedStorage.Shared.RoundDefinitions)
 local Arena = require(script.Parent.Arena)
 local ZombieService = require(script.Parent.ZombieService)
 
-export type WavePhase = "Idle" | "Starting" | "Fighting" | "Intermission" | "Victory"
+export type WavePhase = "Idle" | "Starting" | "Fighting" | "Intermission" | "BossIntro" | "Boss" | "Victory"
 
 export type RunOptions = {
 	mode: string,
@@ -20,7 +21,7 @@ export type RunOptions = {
 	getPlayerCount: () -> number,
 	onRoundStarted: (round: number) -> (),
 	onRoundComplete: (round: number) -> (),
-	onVictory: () -> (),
+	onBossRound: () -> (), -- after the last Round 6 zombie: start the final boss (Round 7)
 	onZombieDied: (zombie: ZombieService.Zombie, killer: Player?, damagers: { Player }) -> (),
 }
 
@@ -47,7 +48,7 @@ local function publish()
 	end
 	folder:SetAttribute(Config.WavePhaseAttribute, phase)
 	folder:SetAttribute(Config.RoundAttribute, round)
-	folder:SetAttribute(Config.RoundMaxAttribute, RoundDefinitions.TotalRounds)
+	folder:SetAttribute(Config.RoundMaxAttribute, RoundDefinitions.DisplayRounds)
 	folder:SetAttribute(Config.ZombiesAliveAttribute, aliveCount)
 	folder:SetAttribute(Config.ZombiesTotalAttribute, totalThisRound)
 	folder:SetAttribute(Config.CountdownAttribute, countdown)
@@ -77,11 +78,12 @@ local function checkRoundComplete(myToken: number)
 	end
 	local run = options
 	if round >= RoundDefinitions.TotalRounds then
-		phase = "Victory" -- set before any yield: the victory can only fire once per run
+		phase = "BossIntro" -- set before any yield: the boss round can only start once per run
 		publish()
-		print(PREFIX, "All rounds complete: COLOSSEUM CONQUERED")
+		print(PREFIX, "Round 6 complete: the final boss approaches")
 		if run then
-			task.spawn(run.onVictory)
+			task.spawn(run.onRoundComplete, round)
+			task.spawn(run.onBossRound)
 		end
 		return
 	end
@@ -128,7 +130,11 @@ startRound = function(newRound: number)
 		if token ~= myToken then
 			return
 		end
-		local definition = RoundDefinitions.pickVariant(newRound, rng)
+		local exclude: { [string]: boolean }? = nil
+		if ZombieService.countAliveOf("UndeadSagittarius") >= RoundDefinitions.maxArchers(run.getPlayerCount()) then
+			exclude = { UndeadSagittarius = true } -- archer cap reached: pick a melee zombie
+		end
+		local definition = RoundDefinitions.pickVariant(newRound, rng, exclude)
 		local zombie = ZombieService.spawn(definition, pickSpawn(i + gateOffset), function(z, killer, damagers)
 			if myToken ~= token then
 				return -- belonged to an aborted run
@@ -177,6 +183,18 @@ function WaveService.abort()
 	ZombieService.despawnAll()
 	phase = "Idle"
 	round = 0
+	aliveCount = 0
+	spawnedCount = 0
+	totalThisRound = 0
+	countdown = 0
+	publish()
+end
+
+-- Round 7: the boss encounter owns the arena now (OttiBossService); keeps the header in sync.
+function WaveService.setBossPhase(newPhase: WavePhase)
+	token += 1 -- no stale zombie callbacks from earlier rounds
+	round = RoundDefinitions.BossRound
+	phase = newPhase
 	aliveCount = 0
 	spawnedCount = 0
 	totalThisRound = 0

@@ -34,9 +34,10 @@ local function getTarget(player: Player): TargetState
 	return state
 end
 
-function ZombieCrowdService.slotPosition(targetRoot: BasePart, index: number): Vector3
+-- `radius`: long weapons stand farther out (defaults to CrowdSlotRadius).
+function ZombieCrowdService.slotPosition(targetRoot: BasePart, index: number, radius: number?): Vector3
 	local angle = (index - 1) / CombatConfig.CrowdSlotCount * 2 * math.pi
-	return targetRoot.Position + Vector3.new(math.cos(angle), 0, math.sin(angle)) * CombatConfig.CrowdSlotRadius
+	return targetRoot.Position + Vector3.new(math.cos(angle), 0, math.sin(angle)) * (radius or CombatConfig.CrowdSlotRadius)
 end
 
 function ZombieCrowdService.releaseSlot(key: Key)

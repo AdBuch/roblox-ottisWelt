@@ -61,6 +61,15 @@ function AuraService.awardMatchResult(winners: { Player }, losers: { Player }, w
 	grant(event)
 end
 
+-- Otti defeated (called exactly once per match by MatchService).
+function AuraService.awardBossVictory(rewards: { { player: Player, amount: number } })
+	local event: RewardEvent = { reason = "boss", recipients = {} }
+	for _, reward in rewards do
+		table.insert(event.recipients, { player = reward.player, amount = reward.amount, kind = "boss" })
+	end
+	grant(event)
+end
+
 function AuraService.resetRunStats(player: Player)
 	player:SetAttribute(Config.RunKillsAttribute, 0)
 	player:SetAttribute(Config.RunAuraAttribute, 0)

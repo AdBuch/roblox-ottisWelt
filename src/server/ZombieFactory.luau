@@ -4,6 +4,10 @@
 -- walk and pose, and a Humanoid lets it use PathfindingService. No asset IDs.
 -- Coordinates are in rest pose with the feet at y = 0, facing -Z, before scaling.
 -- Only the HumanoidRootPart collides: it is sized to the torso so zombies have a solid body.
+-- Damage support: every part carries a "Limb" attribute (the limb it hangs on), detachable armor a
+-- "Detach" group (Helmet, ShoulderR, ShoulderL), and hidden "DamageDetail" parts (scratches,
+-- cracks, torn cloth) are prepared up front, so condition changes only toggle visibility
+-- (ZombieDamageStateService / ZombieDismembermentService) instead of rebuilding the model.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -35,7 +39,13 @@ export type ZombieRig = {
 	humanoid: Humanoid,
 	root: BasePart,
 	torso: BasePart,
+	head: BasePart,
 	leftArm: BasePart,
+	rightArm: BasePart,
+	leftLeg: BasePart,
+	rightLeg: BasePart,
+	rootJoint: Motor6D,
+	rootJointRest: CFrame,
 	rightShoulder: Motor6D,
 	rightShoulderRest: CFrame,
 	leftShoulder: Motor6D,
@@ -92,10 +102,15 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 			specialMesh.MeshType = if mesh == "Sphere" then Enum.MeshType.Sphere else Enum.MeshType.Head
 			specialMesh.Parent = part
 		end
+		if color == SKIN then
+			part:SetAttribute("Skin", true) -- recolored by the damage states
+		end
 		part.Parent = model
 		table.insert(visibleParts, part)
 		return part
 	end
+
+	local detachGroup: string? = nil -- while set, new accessories belong to this detachable group
 
 	-- Creates an accessory part in rest pose and welds it to a limb.
 	local function add(limb: BasePart, name: string, size: Vector3, position: Vector3, color: Color3, material: Enum.Material, rotation: CFrame?, shape: Enum.PartType?, mesh: MeshKind?): Part
@@ -105,7 +120,18 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 		weld.Part1 = part
 		weld.C0 = limb.CFrame:Inverse() * part.CFrame
 		weld.Parent = part
+		part:SetAttribute("Limb", limb:GetAttribute("Limb"))
+		if detachGroup then
+			part:SetAttribute("Detach", detachGroup)
+		end
 		return part
+	end
+
+	-- A prepared damage detail: hidden until the zombie reaches `state` (Wounded / Critical).
+	local function detail(limb: BasePart, state: string, name: string, size: Vector3, position: Vector3, color: Color3, material: Enum.Material, rotation: CFrame?)
+		local part = add(limb, name, size, position, color, material, rotation)
+		part.Transparency = 1
+		part:SetAttribute("DamageDetail", state)
 	end
 
 	local function motor(name: string, part0: BasePart, part1: BasePart, joint: Vector3): Motor6D
@@ -159,7 +185,11 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 	local rightLeg = newPart("RightLeg", Leg, CFrame.new(body.HipSpread, legLen / 2, 0), SKIN, smooth, nil, "Head")
 	local leftLeg = newPart("LeftLeg", Leg, CFrame.new(-body.HipSpread, legLen / 2, 0), SKIN, smooth, nil, "Head")
 
-	motor("RootJoint", root, torso, Vector3.new(0, legLen + 1, 0))
+	for _, limb in { torso, head, rightArm, leftArm, rightLeg, leftLeg } do
+		limb:SetAttribute("Limb", limb.Name)
+	end
+
+	local rootJoint = motor("RootJoint", root, torso, Vector3.new(0, legLen + 1, 0))
 	motor("Neck", torso, head, Vector3.new(0, torsoTop, 0))
 	local rightShoulder = motor("RightShoulder", torso, rightArm, Vector3.new(shoulderX, shoulderY, 0))
 	local leftShoulder = motor("LeftShoulder", torso, leftArm, Vector3.new(-shoulderX, shoulderY, 0))
@@ -193,9 +223,16 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 	eyeGlow.Brightness = gear.EyeGlow
 	eyeGlow.Parent = head
 
-	-- Helmet
+	-- Helmet (detachable as one group)
 	local capBottom = headY + H.Y * 0.2
-	if gear.Helmet == "Cap" then
+	detachGroup = "Helmet"
+	if gear.Helmet == "Wrap" then
+		-- Archer: cloth head wrap with a small bronze browband
+		add(head, "HeadWrap", Vector3.new(H.X * 1.08, H.Y * 0.5, H.Z * 1.08), Vector3.new(0, capBottom + H.Y * 0.18, 0), gear.ClothColor, fabric, nil, nil, "Head")
+		add(head, "WrapKnot", Vector3.new(0.5, 0.45, 0.4), Vector3.new(0, capBottom + H.Y * 0.1, H.Z * 0.55), gear.ClothColor, fabric, nil, BALL)
+		add(head, "WrapTail", Vector3.new(0.35, 0.9, 0.1), Vector3.new(0.15, capBottom - 0.3, H.Z * 0.6), gear.ClothColor, fabric, CFrame.Angles(math.rad(15), 0, math.rad(10)))
+		add(head, "Browband", Vector3.new(H.X * 1.1, 0.16, H.Z * 1.1), Vector3.new(0, capBottom + 0.02, 0), BRONZE, metal, nil, nil, "Head")
+	elseif gear.Helmet == "Cap" then
 		-- Small open bronze cap with a brim
 		local capHeight = H.Y * 0.42
 		add(head, "Cap", Vector3.new(H.X * 1.08, capHeight, H.Z * 1.08), Vector3.new(0, capBottom + capHeight / 2, 0), BRONZE, metal, nil, nil, "Head")
@@ -238,6 +275,8 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 			end
 		end
 	end
+
+	detachGroup = nil
 
 	-- Torso gear
 	local beltY = torsoY - T.Y * 0.3
@@ -286,13 +325,37 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 		end
 	end
 
-	-- Shoulder armor
+	-- Prepared damage details (hidden until the condition state shows them). Stylized only:
+	-- dark scratches, cracks and torn cloth; no wounds.
+	local front = -T.Z * 0.5
+	for i, offset in { Vector3.new(-0.35, 0.35, 0), Vector3.new(0.1, 0.15, 0), Vector3.new(0.45, 0.45, 0) } do
+		detail(torso, "Wounded", "Scratch", Vector3.new(0.08, 0.75, 0.06), Vector3.new(offset.X * T.X * 0.5, torsoY + offset.Y, front * 1.02), CRACK, smooth, CFrame.Angles(0, 0, math.rad(25 + i * 8)))
+	end
+	detail(head, "Wounded", "Scratch", Vector3.new(0.07, 0.5, 0.05), Vector3.new(H.X * 0.3, headY + H.Y * 0.05, frontZ * 0.97), CRACK, smooth, CFrame.Angles(0, 0, math.rad(-30)))
+	for i = 0, 3 do
+		local angle = (i / 4 + 0.1) * 2 * math.pi
+		local position = Vector3.new(math.sin(angle) * T.X * 0.43, beltY - 1.05, -math.cos(angle) * T.Z * 0.45)
+		detail(torso, "Wounded", "TornCloth", Vector3.new(0.4, 0.45, 0.08), position, CLOTH:Lerp(Color3.new(0, 0, 0), 0.35), fabric, CFrame.lookAt(position, position + Vector3.new(position.X, 0, position.Z)).Rotation * CFrame.Angles(0, 0, math.rad(45)))
+	end
+	for _, arm in { rightArm, leftArm } do
+		detail(arm, "Wounded", "Scratch", Vector3.new(0.06, 0.6, 0.06), Vector3.new(arm.Position.X / S, armY + 0.1, -Arm.Z * 0.5), CRACK, smooth, CFrame.Angles(0, 0, math.rad(20)))
+	end
+	detail(torso, "Critical", "BigCrack", Vector3.new(0.1, 1.3, 0.07), Vector3.new(-T.X * 0.1, torsoY, front * 1.04), CRACK, smooth, CFrame.Angles(0, 0, math.rad(-35)))
+	detail(torso, "Critical", "BigCrack", Vector3.new(0.08, 0.7, 0.07), Vector3.new(T.X * 0.05, torsoY - 0.35, front * 1.04), CRACK, smooth, CFrame.Angles(0, 0, math.rad(40)))
+	detail(head, "Critical", "Crack", Vector3.new(0.06, 0.7, 0.05), Vector3.new(-H.X * 0.15, headY + H.Y * 0.1, frontZ * 0.99), CRACK, smooth, CFrame.Angles(0, 0, math.rad(15)))
+	for _, leg in { leftLeg, rightLeg } do
+		detail(leg, "Critical", "Scratch", Vector3.new(0.06, 0.6, 0.06), Vector3.new(leg.Position.X / S, Leg.Y * 0.55, -Leg.Z * 0.52), CRACK, smooth, CFrame.Angles(0, 0, math.rad(-25)))
+	end
+
+	-- Shoulder armor (detachable per side)
 	local function shoulderPlate(arm: BasePart, side: number, size: number)
+		detachGroup = if side > 0 then "ShoulderR" else "ShoulderL"
 		local x = side * (shoulderX + 0.1)
 		add(arm, "ShoulderPlate", Vector3.new(Arm.X * size, 0.5, Arm.Z * size), Vector3.new(x, shoulderY + 0.25, 0), BRONZE, metal, CFrame.Angles(0, 0, -side * math.rad(18)), nil, "Sphere")
 		add(arm, "ShoulderPlate", Vector3.new(Arm.X * size * 0.9, 0.42, Arm.Z * size * 0.92), Vector3.new(x + side * 0.25, shoulderY - 0.1, 0), BRONZE_DARK, metal, CFrame.Angles(0, 0, -side * math.rad(30)), nil, "Sphere")
 		add(arm, "Patina", Vector3.new(Arm.X * 0.6, 0.12, Arm.Z * 0.5), Vector3.new(x - side * 0.1, shoulderY + 0.48, -0.1), OXIDE, metal, CFrame.Angles(0, 0, -side * math.rad(18)), nil, "Sphere")
 		add(arm, "Rivet", Vector3.one * 0.25, Vector3.new(x, shoulderY + 0.2, -Arm.Z * size * 0.45), if gear.Armor == "Heavy" then GOLD else BRONZE, Enum.Material.Metal, nil, BALL)
+		detachGroup = nil
 	end
 	if gear.Shoulders == "Single" then
 		shoulderPlate(rightArm, 1, 1.75)
@@ -300,7 +363,9 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 		shoulderPlate(rightArm, 1, 1.9)
 		shoulderPlate(leftArm, -1, 1.9)
 	else
+		detachGroup = "ShoulderR"
 		add(rightArm, "ShoulderPad", Vector3.new(Arm.X * 1.3, 0.35, Arm.Z * 1.3), Vector3.new(shoulderX, shoulderY + 0.2, 0), LEATHER, leather, nil, nil, "Sphere")
+		detachGroup = nil
 	end
 
 	-- Bracers
@@ -340,10 +405,36 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 		end
 		add(rightArm, "Stud", Vector3.one * 0.3, Vector3.new(hx, handY + 0.55, -2.9), BRONZE, Enum.Material.Metal, nil, BALL)
 		add(rightArm, "Crack", Vector3.new(0.05, 0.05, 0.9), Vector3.new(hx + 0.55, handY + 0.1, -2.9), CRACK, smooth)
-	else -- Spear
-		add(rightArm, "Shaft", Vector3.new(4.2, 0.22, 0.22), Vector3.new(hx, handY, -1.2), WOOD, Enum.Material.Wood, faceForward, CYLINDER)
-		add(rightArm, "SpearTip", Vector3.new(0.1, 0.5, 0.75), Vector3.new(hx, handY, -3.6), BRONZE, metal, CFrame.Angles(math.rad(45), 0, 0))
-		add(rightArm, "Binding", Vector3.one * 0.3, Vector3.new(hx, handY, -3.25), LEATHER_DARK, leather, nil, BALL)
+	elseif gear.Weapon == "Bow" then
+		-- Roman recurve bow in the LEFT hand (vertical), the right hand draws
+		local bx, by, bz = -shoulderX, handY, -0.35
+		add(leftArm, "BowGrip", Vector3.new(0.22, 0.5, 0.22), Vector3.new(bx, by, bz), LEATHER_DARK, leather)
+		for _, dir in { 1, -1 } do
+			add(leftArm, "BowLimb", Vector3.new(0.16, 1.5, 0.16), Vector3.new(bx, by + dir * 0.9, bz - 0.25), WOOD, Enum.Material.Wood, CFrame.Angles(math.rad(dir * 18), 0, 0))
+			add(leftArm, "BowTip", Vector3.new(0.14, 0.45, 0.14), Vector3.new(bx, by + dir * 1.7, bz - 0.2), BRONZE, metal, CFrame.Angles(math.rad(-dir * 35), 0, 0))
+		end
+		add(leftArm, "BowString", Vector3.new(0.04, 3.5, 0.04), Vector3.new(bx, by, bz + 0.15), NET, fabric)
+		add(rightArm, "DrawGlove", Vector3.one * Arm.X * 0.7, Vector3.new(hx, handY - 0.1, -0.1), LEATHER, leather, nil, BALL)
+	else -- Spear (long reach: the visible shaft matches the validated attack range)
+		add(rightArm, "Shaft", Vector3.new(5.6, 0.22, 0.22), Vector3.new(hx, handY, -1.9), WOOD, Enum.Material.Wood, faceForward, CYLINDER)
+		add(rightArm, "SpearTip", Vector3.new(0.1, 0.5, 0.75), Vector3.new(hx, handY, -4.95), BRONZE, metal, CFrame.Angles(math.rad(45), 0, 0))
+		add(rightArm, "Binding", Vector3.one * 0.3, Vector3.new(hx, handY, -4.6), LEATHER_DARK, leather, nil, BALL)
+	end
+
+	-- Archer extras: quiver with visible arrows on the back, leather wrist guard on the bow arm
+	if gear.Quiver then
+		local quiverPos = Vector3.new(T.X * 0.18, torsoY + 0.3, T.Z * 0.55)
+		local tilt = CFrame.Angles(0, 0, math.rad(-20))
+		add(torso, "Quiver", Vector3.new(0.75, 2.0, 0.75), quiverPos, LEATHER, leather, tilt, nil, "Head")
+		add(torso, "QuiverStrap", Vector3.new(0.25, T.Y * 1.05, 0.08), Vector3.new(0, torsoY + 0.1, -T.Z * 0.5), LEATHER_DARK, leather, CFrame.Angles(0, 0, math.rad(32)))
+		for i, dx in { -0.18, 0.05, 0.25 } do
+			local arrowBase = quiverPos + tilt:VectorToWorldSpace(Vector3.new(dx, 1.2, 0))
+			add(torso, "QuiverArrow", Vector3.new(0.08, 0.7, 0.08), arrowBase, WOOD, Enum.Material.Wood, tilt)
+			add(torso, "Fletching", Vector3.new(0.05, 0.3, 0.22), arrowBase + tilt:VectorToWorldSpace(Vector3.new(0, 0.4, 0)), if i == 2 then SHIELD_RED else NET, fabric, tilt)
+		end
+	end
+	if gear.WristGuard then
+		add(leftArm, "WristGuard", Vector3.new(Arm.X * 1.25, 0.9, Arm.Z * 1.25), Vector3.new(-shoulderX, handY + Arm.X * 0.75, 0), LEATHER_DARK, leather, nil, nil, "Head")
 	end
 
 	-- Left hand: shield or folded net
@@ -434,7 +525,7 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 	tag.Adornee = head
 	tag.Size = UDim2.fromOffset(130, 30)
 	tag.StudsOffset = Vector3.new(0, H.Y * S * 0.6 + 1.6 * S, 0)
-	tag.MaxDistance = 70
+	tag.MaxDistance = 110 -- archers keep 55-85 studs away
 	tag.Parent = model
 
 	local nameLabel = Instance.new("TextLabel")
@@ -466,7 +557,13 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 		humanoid = humanoid,
 		root = root,
 		torso = torso,
+		head = head,
 		leftArm = leftArm,
+		rightArm = rightArm,
+		leftLeg = leftLeg,
+		rightLeg = rightLeg,
+		rootJoint = rootJoint,
+		rootJointRest = rootJoint.C0,
 		rightShoulder = rightShoulder,
 		rightShoulderRest = rightShoulder.C0,
 		leftShoulder = leftShoulder,
