@@ -18,6 +18,9 @@ export type ShieldDefinition = {
 	Description: string,
 }
 
+-- Gladiator Armory sections (display only)
+export type ShieldClass = "Light" | "Balanced" | "Heavy"
+
 local function shield(def: ShieldDefinition): ShieldDefinition
 	return table.freeze(def) :: any
 end
@@ -41,10 +44,36 @@ table.sort(list, function(a, b)
 	return a.Order < b.Order
 end)
 
+local classes: { [string]: ShieldClass } = {
+	WoodenBuckler = "Light",
+	ParmaEquestris = "Light",
+	ThraexShield = "Light",
+	LegionShield = "Balanced",
+	ChampionShield = "Balanced",
+	TowerShield = "Heavy",
+	Scutum = "Heavy",
+	Hoplon = "Heavy",
+}
+
 local ShieldDefinitions = {
 	Starter = "WoodenBuckler",
 	ById = table.freeze(byId),
 	Ordered = table.freeze(list),
+	ClassOrder = table.freeze({ "Light" :: ShieldClass, "Balanced" :: ShieldClass, "Heavy" :: ShieldClass }),
 }
+
+-- Armory section of a shield; new shields without an entry are sorted by their block slowdown.
+function ShieldDefinitions.classOf(def: ShieldDefinition): ShieldClass
+	local class = classes[def.Id]
+	if class then
+		return (class :: any) :: ShieldClass
+	end
+	if def.BlockSpeedMultiplier >= 1.1 then
+		return "Light"
+	elseif def.BlockSpeedMultiplier <= 0.85 then
+		return "Heavy"
+	end
+	return "Balanced"
+end
 
 return table.freeze(ShieldDefinitions)

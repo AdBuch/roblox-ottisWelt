@@ -19,6 +19,8 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
+local Config = require(ReplicatedStorage.Shared.Config)
+local DamageConfig = require(ReplicatedStorage.Shared.DamageConfig)
 local InputDefinitions = require(ReplicatedStorage.Shared.InputDefinitions)
 local PvPBalanceConfig = require(ReplicatedStorage.Shared.PvPBalanceConfig)
 local SpecialMoveDefinitions = require(ReplicatedStorage.Shared.SpecialMoveDefinitions)
@@ -46,6 +48,8 @@ local SHIELD_IDLE = CFrame.new(-0.45, 0.1, 0.7) * CFrame.Angles(0, 0, math.rad(9
 local SHIELD_BLOCK = CFrame.new(0.9, 1.4, 1.6) -- raised in front of the chest
 local SHIELD_BASH = CFrame.new(0.9, 2.6, 1.6) -- pushed forward
 local OFFHAND_REST = CFrame.Angles(math.rad(30), 0, 0)
+local TEAM_RED = Color3.fromRGB(170, 30, 34)
+local TEAM_BLUE = Color3.fromRGB(36, 70, 170)
 
 type PlayerState = {
 	weaponId: string?,
@@ -173,6 +177,7 @@ local function updateWalkSpeed(player: Player)
 	if state.blocking and shield then
 		speed = CombatConfig.BlockingWalkSpeed * shield.BlockSpeedMultiplier
 	end
+	speed *= 1 - math.clamp(InventoryService.getEquippedArmor(player).MovePenalty, 0, 0.5) -- heavier armor, slower steps
 	humanoid.WalkSpeed = if state.controlLocked then 0 else speed * state.slowFactor
 	humanoid.JumpPower = if state.controlLocked then 0 else 50
 	humanoid.UseJumpPower = true
@@ -253,6 +258,29 @@ function PlayerCombatService.refreshEquipment(player: Player)
 		local daggerModel, daggerCore = EquipmentModels.buildOffhandDagger()
 		state.offhandWeld = attach(daggerModel, daggerCore, leftHand, leftGrip * OFFHAND_REST, character)
 		state.offhandModel = daggerModel
+	end
+
+	-- Armor on the body (no helmet: the player stays recognisable); cloth takes the team color
+	local armorModel = EquipmentModels.buildArmor(InventoryService.getEquippedArmor(player).Id, character)
+	armorModel:SetAttribute("OttiEquipment", true)
+	armorModel.Parent = character
+	PlayerCombatService.applyTeamColor(player)
+	updateWalkSpeed(player) -- armor weight
+end
+
+-- Team Battle: the armor's cloth pieces show the team color (default armor colors otherwise).
+function PlayerCombatService.applyTeamColor(player: Player)
+	local character = player.Character
+	if not character then
+		return
+	end
+	local team = player:GetAttribute(Config.TeamAttribute)
+	local color: Color3? = if team == "Red" then TEAM_RED elseif team == "Blue" then TEAM_BLUE else nil
+	for _, part in character:GetDescendants() do
+		if part:IsA("BasePart") and part:GetAttribute("TeamCloth") then
+			local default = part:GetAttribute("DefaultColor")
+			part.Color = color or (if typeof(default) == "Color3" then default else part.Color)
+		end
 	end
 end
 
@@ -450,11 +478,30 @@ type Incoming = {
 	pvpCap: number?, -- PvP: whole-move damage cap left for this victim
 }
 
+-- Armor share removed from this hit (step 5): full in PvE, reduced in PvP (DamageConfig).
+local function armorReduction(victim: Player, incoming: Incoming): number
+	if incoming.unblockable and not DamageConfig.ArmorAppliesToUnblockable then
+		return 0
+	end
+	local armor = InventoryService.getEquippedArmor(victim)
+	local effectiveness = if incoming.fromZombie then DamageConfig.PvEArmorEffectiveness else DamageConfig.PvPArmorEffectiveness
+	return math.clamp(armor.Reduction * effectiveness, 0, DamageConfig.MaxArmorReduction)
+end
+
+-- THE player damage pipeline: every zombie blow, enemy arrow, Otti attack and PvP hit (melee,
+-- arrows, combos, aerials) arrives here, so no weapon can skip the shield or the armor.
+--   1 validate target / protection   2 base damage (incoming.damage; the attack already applied
+--   3 its mode multiplier)   4 shield block / parry   5 armor   6 temporary effects (counter)
+--   7 PvP caps + minimum damage   8 Humanoid damage   9 feedback
 -- Returns damage dealt, whether it was blocked/parried, and the stagger multiplier for the attacker.
 local function receiveHit(victim: Player, incoming: Incoming): (number, boolean, number)
+	-- 1. Validate
 	local _, humanoid, root = CombatUtil.getLivingCharacter(victim)
 	if not humanoid or not root then
 		return 0, false, 1
+	end
+	if incoming.attacker and not CombatRules.isEnemy(incoming.attacker, victim) then
+		return 0, false, 1 -- no friendly fire, no PvP outside Team Battle (lobby / armory are safe)
 	end
 	local state = getState(victim)
 	local now = os.clock()
@@ -465,10 +512,14 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 		return 0, false, 1 -- brief immunity: no burst damage from several zombies at once
 	end
 
-	local damage = incoming.damage
+	-- 2./3. Base damage (mode multipliers were applied by the attack itself)
+	local baseDamage = math.max(0, incoming.damage)
+	local shieldMultiplier = 1
+	local stopped = false -- a facing shield stops everything (Otti's bite)
 	local blocked = false
 	local stagger = 1
 	local shield = InventoryService.getActiveShield(victim)
+	-- 4. Shield block / parry
 	if incoming.unblockable then
 		-- grapples can't be blocked
 	elseif state.blocking and shield and state.shieldId == shield.Id and now - state.blockStart >= shield.RaiseSeconds then
@@ -482,27 +533,37 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 				state.blockLockedUntil = now + PvPBalanceConfig.GuardBreakShieldLock
 				CombatEffects.burst(root.Position + Vector3.new(0, 1, 0), Color3.fromRGB(255, 150, 80), 1)
 			end
-			damage = if incoming.blockStops then 0 else math.max(1, math.floor(damage * (1 - reduction) + 0.5))
+			shieldMultiplier = 1 - reduction
+			stopped = incoming.blockStops == true
 			blocked = not incoming.guardBreak
 			stagger = shield.StaggerMultiplier
 			shieldFeedback(state)
 		end
 	elseif state.shieldId == nil and now < state.parryUntil and CombatUtil.isFacing(root.CFrame, incoming.fromPosition, 0) then
-		damage = if incoming.blockStops then 0 else math.max(1, math.floor(damage * (1 - CombatConfig.ParryReduction) + 0.5))
+		shieldMultiplier = 1 - CombatConfig.ParryReduction
+		stopped = incoming.blockStops == true
 		blocked = true
 		stagger = 1.5
 		CombatEffects.burst(root.Position + Vector3.new(0, 1, 0), Color3.fromRGB(200, 230, 255), 0.8)
 		Remotes.CombatFeedback:FireClient(victim, CombatConfig.Feedback.Parry)
 	end
-	if not blocked and now < state.counterUntil and CombatUtil.isFacing(root.CFrame, incoming.fromPosition, 0) then
-		-- Inside a combo's short counter window: the first blow is deflected (never the whole combo)
-		damage = math.max(1, math.floor(damage * (1 - PvPBalanceConfig.CounterReduction) + 0.5))
+	local afterBlock = if stopped then 0 else baseDamage * shieldMultiplier
+
+	-- 5. Armor
+	local afterArmor = afterBlock * (1 - armorReduction(victim, incoming))
+
+	-- 6. Temporary effects: inside a combo's short counter window the first blow is deflected
+	-- (never the whole combo)
+	if not blocked and afterArmor > 0 and now < state.counterUntil and CombatUtil.isFacing(root.CFrame, incoming.fromPosition, 0) then
+		afterArmor *= 1 - PvPBalanceConfig.CounterReduction
 		blocked = true
 		stagger = 1.3
 		CombatEffects.burst(root.Position + Vector3.new(0, 1, 0), Color3.fromRGB(255, 230, 160), 0.8)
 	end
 
-	if not incoming.fromZombie then
+	-- 7. Minimum valid damage (only when something got through) and PvP caps
+	local damage = if afterArmor > 0 then math.max(DamageConfig.MinimumDamage, math.round(afterArmor)) else 0
+	if not incoming.fromZombie and damage > 0 then
 		-- PvP: no single hit may remove more than a share of max health (no one-shots), and one
 		-- combo / aerial move never takes more than its whole-move share
 		damage = math.min(damage, math.floor(humanoid.MaxHealth * PvPBalanceConfig.MaxHitFraction))
@@ -518,6 +579,7 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 		end
 	end
 	damage = math.floor(damage + 0.5)
+	-- 9a. Knockback (also for fully blocked hits)
 	local pushed = incoming.knockback > 0 and (not blocked or incoming.knockbackIfBlocked == true)
 	if pushed then
 		local away = CombatUtil.flat(root.Position - incoming.fromPosition)
@@ -530,9 +592,11 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 	if damage <= 0 then
 		return 0, blocked, stagger
 	end
+	-- 8. Apply
 	state.lastHitTaken = now
 	CombatRules.onPlayerDamaged(victim, incoming.attacker, damage)
 	humanoid:TakeDamage(damage)
+	-- 9. Feedback
 	Remotes.CombatFeedback:FireClient(victim, CombatConfig.Feedback.PlayerHit, damage, blocked, incoming.fromPosition)
 	if not blocked then
 		DamageEffectsService.hit("Player", root.Position + Vector3.new(0, 0.8, 0), math.clamp(damage / 15, 0.4, 1.4), CombatUtil.flat(root.Position - incoming.fromPosition))
@@ -918,6 +982,9 @@ function PlayerCombatService.init()
 
 	local function setup(player: Player)
 		InventoryService.publish(player)
+		player:GetAttributeChangedSignal(Config.TeamAttribute):Connect(function()
+			PlayerCombatService.applyTeamColor(player)
+		end)
 		player.CharacterAdded:Connect(function(character)
 			onCharacterAdded(player, character)
 		end)

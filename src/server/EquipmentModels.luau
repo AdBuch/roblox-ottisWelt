@@ -373,4 +373,225 @@ function EquipmentModels.buildShield(id: string): (Model, BasePart)
 	end)
 end
 
+------------------------------------------------------------------------------------------
+-- Armor (ArmorDefinitions): pieces welded to the body's limbs. Works on R15 characters, on R6
+-- (mapped onto the six R6 limbs) and on the armory mannequins (R15 limb names). No helmet, so
+-- the face and avatar stay visible. Cloth pieces carry the "TeamCloth" attribute: Team Battle
+-- recolors them (PlayerCombatService.applyTeamColor).
+------------------------------------------------------------------------------------------
+
+local CREAM = Color3.fromRGB(226, 214, 186)
+local DARK_RED = Color3.fromRGB(104, 26, 28)
+local DEEP_RED = Color3.fromRGB(128, 24, 30)
+local WORN_BRONZE = Color3.fromRGB(150, 108, 58)
+local LIGHT_LEATHER = Color3.fromRGB(122, 82, 48)
+
+type Region = { limb: BasePart, offset: CFrame, size: Vector3 }
+type PieceFn = (size: Vector3) -> (Vector3, CFrame)
+type PieceOptions = { shape: Enum.PartType?, teamCloth: boolean? }
+
+-- R15 limb name -> (R6 limb, centre as share of its height, share of its height)
+local R6_REGIONS: { [string]: { any } } = {
+	UpperTorso = { "Torso", 0.2, 0.6 },
+	LowerTorso = { "Torso", -0.4, 0.2 },
+	LeftUpperArm = { "Left Arm", 0.25, 0.5 },
+	LeftLowerArm = { "Left Arm", -0.22, 0.45 },
+	RightUpperArm = { "Right Arm", 0.25, 0.5 },
+	RightLowerArm = { "Right Arm", -0.22, 0.45 },
+	LeftUpperLeg = { "Left Leg", 0.25, 0.5 },
+	LeftLowerLeg = { "Left Leg", -0.25, 0.5 },
+	RightUpperLeg = { "Right Leg", 0.25, 0.5 },
+	RightLowerLeg = { "Right Leg", -0.25, 0.5 },
+}
+
+local function region(body: Model, name: string): Region?
+	local limb = body:FindFirstChild(name)
+	if limb and limb:IsA("BasePart") then
+		return { limb = limb, offset = CFrame.identity, size = limb.Size }
+	end
+	local r6 = R6_REGIONS[name]
+	local r6Limb = r6 and body:FindFirstChild(r6[1])
+	if r6Limb and r6Limb:IsA("BasePart") then
+		local s = r6Limb.Size
+		return { limb = r6Limb, offset = CFrame.new(0, s.Y * r6[2], 0), size = Vector3.new(s.X, s.Y * r6[3], s.Z) }
+	end
+	return nil
+end
+
+function EquipmentModels.buildArmor(id: string, body: Model): Model
+	local model = Instance.new("Model")
+	model.Name = "Armor_" .. id
+	model:SetAttribute("ArmorId", id)
+
+	local function put(limbName: string, name: string, color: Color3, material: Enum.Material, fn: PieceFn, options: PieceOptions?)
+		local r = region(body, limbName)
+		if not r then
+			return
+		end
+		local size, offset = fn(r.size)
+		local c0 = r.offset * offset
+		local part = newPart(name, size, r.limb.CFrame * c0, color, material, model, options and options.shape)
+		if options and options.teamCloth then
+			part:SetAttribute("TeamCloth", true)
+			part:SetAttribute("DefaultColor", color)
+		end
+		local weld = Instance.new("Weld")
+		weld.Part0 = r.limb
+		weld.Part1 = part
+		weld.C0 = c0
+		weld.Parent = part
+	end
+
+	-- Reusable pieces --------------------------------------------------------------------
+	local function bands(limbs: { string }, name: string, color: Color3, material: Enum.Material, yShare: number, hShare: number, grow: number)
+		for _, limb in limbs do
+			put(limb, name, color, material, function(s)
+				return Vector3.new(s.X * grow, s.Y * hShare, s.Z * grow), CFrame.new(0, s.Y * yShare, 0)
+			end)
+		end
+	end
+	local function straps(color: Color3)
+		for _, z in { -1, 1 } do
+			for _, angle in { 38, -38 } do
+				put("UpperTorso", "ChestStrap", color, Enum.Material.Leather, function(s)
+					return Vector3.new(0.32, s.Y * 1.25, 0.08), CFrame.new(0, 0, z * (s.Z / 2 + 0.04)) * CFrame.Angles(0, 0, math.rad(angle))
+				end)
+			end
+		end
+	end
+	local function belt(color: Color3, material: Enum.Material, buckle: Color3)
+		put("LowerTorso", "Belt", color, material, function(s)
+			return Vector3.new(s.X * 1.06, math.max(0.3, s.Y * 0.8), s.Z * 1.08), CFrame.new(0, s.Y * 0.2, 0)
+		end)
+		put("LowerTorso", "Buckle", buckle, Enum.Material.Metal, function(s)
+			return Vector3.new(0.4, 0.3, 0.08), CFrame.new(0, s.Y * 0.2, -s.Z * 0.54 - 0.04)
+		end)
+	end
+	local function plate(limb: string, name: string, color: Color3, material: Enum.Material, width: number, height: number, y: number, front: boolean)
+		local side = if front then -1 else 1
+		put(limb, name, color, material, function(s)
+			return Vector3.new(s.X * width, s.Y * height, 0.16), CFrame.new(0, s.Y * y, side * (s.Z / 2 + 0.08))
+		end)
+	end
+	local function shoulder(limb: string, color: Color3, material: Enum.Material, scale: number, layer: number)
+		local side = if limb:find("Left") then -1 else 1
+		put(limb, "Shoulder", color, material, function(s)
+			return Vector3.new(s.X * 1.3 * scale, 0.26, s.Z * 1.3 * scale),
+				CFrame.new(side * s.X * 0.12, s.Y * 0.5 - 0.05 - layer * 0.3, 0) * CFrame.Angles(0, 0, math.rad(side * -(14 + layer * 8)))
+		end)
+	end
+	local function skirt(color: Color3, material: Enum.Material, length: number, row: number, teamCloth: boolean?)
+		local drop = row * 0.28
+		for _, z in { -1, 1 } do
+			for _, x in { -0.62, -0.21, 0.21, 0.62 } do
+				put("LowerTorso", "Pteryx", color, material, function(s)
+					return Vector3.new(s.X * 0.19, length, 0.08),
+						CFrame.new(x * s.X * 0.5 * 1.25, -s.Y / 2 - length / 2 + 0.15 - drop, z * (s.Z / 2 + 0.05 + row * 0.03))
+				end, { teamCloth = teamCloth })
+			end
+		end
+		for _, x in { -1, 1 } do
+			for _, z in { -0.25, 0.25 } do
+				put("LowerTorso", "Pteryx", color, material, function(s)
+					return Vector3.new(0.08, length * 0.9, s.Z * 0.42), CFrame.new(x * (s.X / 2 + 0.05 + row * 0.03), -s.Y / 2 - length * 0.45 + 0.15 - drop, z * s.Z)
+				end, { teamCloth = teamCloth })
+			end
+		end
+	end
+	local function loinCloth(color: Color3, length: number)
+		put("LowerTorso", "LoinCloth", color, Enum.Material.Fabric, function(s)
+			return Vector3.new(s.X * 0.45, length, 0.06), CFrame.new(0, -s.Y / 2 - length / 2 + 0.2, -s.Z / 2 - 0.1)
+		end, { teamCloth = true })
+	end
+	local function greaves(color: Color3, material: Enum.Material, rim: Color3?)
+		for _, limb in { "LeftLowerLeg", "RightLowerLeg" } do
+			put(limb, "Greave", color, material, function(s)
+				return Vector3.new(s.X * 0.9, s.Y * 0.62, 0.16), CFrame.new(0, s.Y * 0.05, -s.Z / 2 - 0.06)
+			end)
+			if rim then
+				put(limb, "GreaveRim", rim, Enum.Material.Metal, function(s)
+					return Vector3.new(s.X * 0.95, 0.12, 0.18), CFrame.new(0, s.Y * 0.36, -s.Z / 2 - 0.07)
+				end)
+			end
+		end
+	end
+	local function sash(color: Color3)
+		put("UpperTorso", "Sash", color, Enum.Material.Fabric, function(s)
+			return Vector3.new(0.4, s.Y * 1.2, s.Z * 1.12), CFrame.new(0, 0, 0) * CFrame.Angles(0, 0, math.rad(-34))
+		end, { teamCloth = true })
+	end
+	local function cape(color: Color3)
+		put("UpperTorso", "Cape", color, Enum.Material.Fabric, function(s)
+			return Vector3.new(s.X * 0.9, s.Y * 1.5, 0.08), CFrame.new(0, -s.Y * 0.3, s.Z / 2 + 0.22) * CFrame.Angles(math.rad(-6), 0, 0)
+		end, { teamCloth = true })
+	end
+
+	-- Sets --------------------------------------------------------------------------------
+	if id == "MurmilloArmor" then
+		plate("UpperTorso", "LeatherCuirass", LIGHT_LEATHER, Enum.Material.Leather, 0.92, 0.85, 0.02, true)
+		for _, x in { -0.3, 0, 0.3 } do
+			put("UpperTorso", "Stud", BRONZE, Enum.Material.Metal, function(s)
+				return Vector3.one * 0.18, CFrame.new(x * s.X, s.Y * 0.1, -s.Z / 2 - 0.17)
+			end, { shape = BALL })
+		end
+		straps(LEATHER)
+		shoulder("RightUpperArm", BRONZE, Enum.Material.Metal, 1.2, 0)
+		bands({ "RightUpperArm" }, "Manica", LIGHT_LEATHER, Enum.Material.Leather, -0.1, 0.6, 1.08)
+		bands({ "LeftLowerArm", "RightLowerArm" }, "Bracer", BRONZE, Enum.Material.Metal, -0.05, 0.55, 1.1)
+		belt(BRONZE, Enum.Material.Metal, GOLD)
+		loinCloth(DARK_RED, 1.0)
+		skirt(DARK_RED, Enum.Material.Fabric, 0.7, 0, true)
+		greaves(BRONZE, Enum.Material.Metal, nil)
+	elseif id == "HopliteBronze" then
+		plate("UpperTorso", "Cuirass", BRONZE, Enum.Material.Metal, 1.0, 0.95, 0, true)
+		plate("UpperTorso", "Backplate", BRONZE, Enum.Material.Metal, 1.0, 0.95, 0, false)
+		put("UpperTorso", "Pecs", Color3.fromRGB(196, 142, 70), Enum.Material.Metal, function(s)
+			return Vector3.new(s.X * 0.7, s.Y * 0.08, 0.06), CFrame.new(0, s.Y * 0.05, -s.Z / 2 - 0.19)
+		end)
+		bands({ "LowerTorso" }, "AbdomenBand", BRONZE, Enum.Material.Metal, 0.2, 0.9, 1.1)
+		skirt(CREAM, Enum.Material.Fabric, 0.95, 0, false)
+		skirt(LEATHER, Enum.Material.Leather, 0.7, 1, false)
+		shoulder("LeftUpperArm", BRONZE, Enum.Material.Metal, 1.1, 0)
+		shoulder("RightUpperArm", BRONZE, Enum.Material.Metal, 1.1, 0)
+		bands({ "LeftLowerArm", "RightLowerArm" }, "Bracer", LEATHER, Enum.Material.Leather, -0.05, 0.5, 1.08)
+		greaves(BRONZE, Enum.Material.Metal, nil)
+		cape(DEEP_RED)
+	elseif id == "ChampionArmor" then
+		plate("UpperTorso", "Cuirass", WORN_BRONZE, Enum.Material.Metal, 1.02, 0.98, 0, true)
+		plate("UpperTorso", "Backplate", WORN_BRONZE, Enum.Material.Metal, 1.02, 0.98, 0, false)
+		for _, y in { 0.42, -0.42 } do
+			put("UpperTorso", "GoldTrim", GOLD, Enum.Material.Metal, function(s)
+				return Vector3.new(s.X * 1.03, 0.1, 0.1), CFrame.new(0, s.Y * y, -s.Z / 2 - 0.18)
+			end)
+		end
+		put("UpperTorso", "Medallion", GOLD, Enum.Material.Metal, function(s)
+			return Vector3.new(0.12, 0.5, 0.5), CFrame.new(0, s.Y * 0.08, -s.Z / 2 - 0.2) * CFrame.Angles(0, math.rad(90), 0)
+		end, { shape = CYLINDER })
+		put("UpperTorso", "BattleScar", Color3.fromRGB(110, 82, 50), Enum.Material.CorrodedMetal, function(s)
+			return Vector3.new(0.5, 0.08, 0.06), CFrame.new(s.X * 0.22, -s.Y * 0.18, -s.Z / 2 - 0.18) * CFrame.Angles(0, 0, math.rad(25))
+		end)
+		for _, limb in { "LeftUpperArm", "RightUpperArm" } do
+			shoulder(limb, WORN_BRONZE, Enum.Material.Metal, 1.35, 0)
+			shoulder(limb, GOLD, Enum.Material.Metal, 1.15, 1)
+		end
+		belt(GOLD, Enum.Material.Metal, DEEP_RED)
+		skirt(DEEP_RED, Enum.Material.Fabric, 1.0, 0, true)
+		skirt(LEATHER, Enum.Material.Leather, 0.8, 1, false)
+		bands({ "LeftLowerArm", "RightLowerArm" }, "Bracer", WORN_BRONZE, Enum.Material.Metal, -0.05, 0.6, 1.12)
+		bands({ "LeftLowerArm", "RightLowerArm" }, "BracerRim", GOLD, Enum.Material.Metal, 0.25, 0.08, 1.16)
+		greaves(WORN_BRONZE, Enum.Material.Metal, GOLD)
+		cape(DEEP_RED)
+	else -- RecruitLeather
+		straps(LEATHER)
+		belt(LEATHER, Enum.Material.Leather, BRONZE)
+		bands({ "LeftLowerArm", "RightLowerArm" }, "Bracer", LIGHT_LEATHER, Enum.Material.Leather, -0.1, 0.45, 1.08)
+		put("LeftUpperArm", "ShoulderPad", LEATHER, Enum.Material.Leather, function(s)
+			return Vector3.new(s.X * 1.15, 0.22, s.Z * 1.15), CFrame.new(-s.X * 0.08, s.Y * 0.45, 0) * CFrame.Angles(0, 0, math.rad(14))
+		end)
+		loinCloth(DARK_RED, 0.9)
+		sash(DARK_RED)
+	end
+	return model
+end
+
 return EquipmentModels

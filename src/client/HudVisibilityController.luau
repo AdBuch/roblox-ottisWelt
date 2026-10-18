@@ -3,8 +3,8 @@
 -- (UiStateDefinitions.States), the HUD mode allows it (Full / Minimal / Hidden) and the element
 -- itself has something to show. Some elements are "forced" (low-health warning, critical
 -- warnings): they show in every mode.
--- Mode control: a small eye button on the right edge and the H key (desktop). The mode is kept for
--- the current session (no DataStore needed).
+-- Mode control: a small eye button on the right edge and the H key (desktop). The chosen mode is
+-- a saved preference (Main sends changes to the server, which stores them with the profile).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
@@ -20,6 +20,8 @@ export type Visibility = {
 	getState: () -> string,
 	getMode: () -> string,
 	cycleMode: () -> (),
+	setMode: (mode: string) -> (), -- silent (saved preference)
+	onModeChanged: (callback: (mode: string) -> ()) -> (), -- player changed the mode
 	refresh: () -> (),
 	onChanged: (callback: () -> ()) -> (),
 	button: TextButton,
@@ -34,6 +36,7 @@ local sessionMode: string? = nil -- remembered while the client runs
 function HudVisibilityController.create(edge: Frame, notify: (text: string) -> ()): Visibility
 	local entries: { Entry } = {}
 	local listeners: { () -> () } = {}
+	local modeListeners: { (mode: string) -> () } = {}
 	local state = "Lobby"
 	local mode = sessionMode or UiConfig.DefaultHudMode
 
@@ -80,6 +83,9 @@ function HudVisibilityController.create(edge: Frame, notify: (text: string) -> (
 		mode = order[index % #order + 1]
 		sessionMode = mode
 		notify("HUD: " .. mode:upper())
+		for _, callback in modeListeners do
+			callback(mode)
+		end
 		refresh()
 	end
 
@@ -116,6 +122,16 @@ function HudVisibilityController.create(edge: Frame, notify: (text: string) -> (
 			return mode
 		end,
 		cycleMode = cycleMode,
+		setMode = function(newMode: string)
+			if newMode ~= mode and table.find(UiStateDefinitions.ModeOrder, newMode) then
+				mode = newMode
+				sessionMode = newMode
+				refresh()
+			end
+		end,
+		onModeChanged = function(callback: (mode: string) -> ())
+			table.insert(modeListeners, callback)
+		end,
 		refresh = function()
 			refresh()
 		end,

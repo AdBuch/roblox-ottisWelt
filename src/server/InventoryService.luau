@@ -1,22 +1,24 @@
 --!strict
--- Server-owned inventory per player: Aura Points, owned weapons/shields, equipped items.
--- Profiles are kept in memory for this server session, keyed by UserId, so they survive death,
--- matches and even rejoining the same server.
+-- Server-owned inventory per player: Aura Points, owned weapons/shields/armor, the equipped item
+-- of each kind and a few player preferences. Profiles live in memory keyed by UserId;
+-- PlayerDataService loads them from the DataStore on join (load) and saves serialize().
 --
--- Migration: older profiles stored `coins`. migrateProfile() moves that value into
--- `auraPoints` exactly once and clears `coins`, so nothing is duplicated or lost.
--- DataStore later: load a saved table into migrateProfile() and save serialize().
+-- Migration: version 1 stored `coins` (moved into `auraPoints` once and cleared); version 2 had
+-- no armor (Recruit Leather is granted). migrateProfile() is safe to call repeatedly and also
+-- removes unknown ids, so a saved profile can never equip something that no longer exists.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local ArmorDefinitions = require(ReplicatedStorage.Shared.ArmorDefinitions)
 local Config = require(ReplicatedStorage.Shared.Config)
 local ShieldDefinitions = require(ReplicatedStorage.Shared.ShieldDefinitions)
 local WeaponDefinitions = require(ReplicatedStorage.Shared.WeaponDefinitions)
 
 type WeaponDefinition = WeaponDefinitions.WeaponDefinition
 type ShieldDefinition = ShieldDefinitions.ShieldDefinition
+type ArmorDefinition = ArmorDefinitions.ArmorDefinition
 
-export type ItemKind = "Weapon" | "Shield"
+export type ItemKind = "Weapon" | "Shield" | "Armor"
 
 export type Profile = {
 	version: number,
@@ -24,15 +26,25 @@ export type Profile = {
 	coins: number?, -- legacy field (version 1); migrated into auraPoints
 	ownedWeapons: { [string]: boolean },
 	ownedShields: { [string]: boolean },
+	ownedArmor: { [string]: boolean },
 	equippedWeapon: string,
 	equippedShield: string,
+	equippedArmor: string,
+	preferences: { [string]: string },
 }
 
-local PROFILE_VERSION = 2
+local PROFILE_VERSION = 3
+
+-- Preferences a client may store (value must be one of the listed strings)
+local PREFERENCES: { [string]: { string } } = {
+	HudMode = { "Full", "Minimal", "Hidden" },
+	BossIntro = { "Seen", "" },
+}
 
 local InventoryService = {}
 
 local profiles: { [number]: Profile } = {}
+local changedListeners: { (player: Player) -> () } = {}
 
 local function newProfile(): Profile
 	return {
@@ -41,21 +53,66 @@ local function newProfile(): Profile
 		coins = nil,
 		ownedWeapons = { [WeaponDefinitions.Starter] = true },
 		ownedShields = { [ShieldDefinitions.Starter] = true },
+		ownedArmor = { [ArmorDefinitions.Starter] = true },
 		equippedWeapon = WeaponDefinitions.Starter,
 		equippedShield = ShieldDefinitions.Starter,
+		equippedArmor = ArmorDefinitions.Starter,
+		preferences = {},
 	}
 end
 
--- Moves a legacy coin balance into Aura Points once. Safe to call repeatedly.
+local function cleanSet(value: unknown, known: { [string]: any }): { [string]: boolean }
+	local set: { [string]: boolean } = {}
+	if typeof(value) == "string" then
+		for id in value:gmatch("[^,]+") do
+			if known[id] then
+				set[id] = true
+			end
+		end
+	elseif typeof(value) == "table" then
+		for id, owned in value :: { [any]: any } do
+			if typeof(id) == "string" and owned == true and known[id] then
+				set[id] = true
+			end
+		end
+	end
+	return set
+end
+
+-- Brings any profile (new, legacy, or loaded from the DataStore) to the current version.
 function InventoryService.migrateProfile(profile: Profile): Profile
 	local legacy = profile.coins
 	if legacy ~= nil then
-		profile.auraPoints = (profile.auraPoints or 0) + math.max(0, math.floor(legacy))
+		profile.auraPoints = (tonumber(profile.auraPoints) or 0) + math.max(0, math.floor(legacy))
 		profile.coins = nil -- cleared in the same step: the value can't be counted twice
 	end
-	profile.auraPoints = math.max(0, math.floor(profile.auraPoints or 0))
+	local aura = tonumber(profile.auraPoints) or 0
+	profile.auraPoints = if aura == aura then math.max(0, math.floor(aura)) else 0
+	profile.ownedWeapons = cleanSet(profile.ownedWeapons, WeaponDefinitions.ById)
+	profile.ownedShields = cleanSet(profile.ownedShields, ShieldDefinitions.ById)
+	profile.ownedArmor = cleanSet(profile.ownedArmor, ArmorDefinitions.ById)
 	profile.ownedWeapons[WeaponDefinitions.Starter] = true
 	profile.ownedShields[ShieldDefinitions.Starter] = true
+	profile.ownedArmor[ArmorDefinitions.Starter] = true
+	if typeof(profile.equippedWeapon) ~= "string" or not profile.ownedWeapons[profile.equippedWeapon] then
+		profile.equippedWeapon = WeaponDefinitions.Starter
+	end
+	if typeof(profile.equippedShield) ~= "string" or not profile.ownedShields[profile.equippedShield] then
+		profile.equippedShield = ShieldDefinitions.Starter
+	end
+	if typeof(profile.equippedArmor) ~= "string" or not profile.ownedArmor[profile.equippedArmor] then
+		profile.equippedArmor = ArmorDefinitions.Starter
+	end
+	local preferences: { [string]: string } = {}
+	if typeof(profile.preferences) == "table" then
+		for key, value in profile.preferences :: { [any]: any } do
+			local allowed = PREFERENCES[key]
+			if allowed and table.find(allowed, value) then
+				preferences[key] = value
+			end
+		end
+	end
+	profile.preferences = preferences
 	profile.version = PROFILE_VERSION
 	return profile
 end
@@ -82,14 +139,44 @@ local function joinOwned(owned: { [string]: boolean }): string
 	return table.concat(ids, ",")
 end
 
+local function changed(player: Player)
+	for _, callback in changedListeners do
+		task.spawn(callback, player)
+	end
+end
+
+-- Called after every change that should be saved (PlayerDataService marks the profile dirty).
+function InventoryService.onChanged(callback: (player: Player) -> ())
+	table.insert(changedListeners, callback)
+end
+
 -- Mirrors the profile to player attributes for the HUD and shop displays (display only).
 function InventoryService.publish(player: Player)
 	local profile = getProfile(player)
 	player:SetAttribute(Config.AuraAttribute, profile.auraPoints)
 	player:SetAttribute(Config.EquippedWeaponAttribute, profile.equippedWeapon)
 	player:SetAttribute(Config.EquippedShieldAttribute, profile.equippedShield)
+	player:SetAttribute(Config.EquippedArmorAttribute, profile.equippedArmor)
 	player:SetAttribute(Config.OwnedWeaponsAttribute, joinOwned(profile.ownedWeapons))
 	player:SetAttribute(Config.OwnedShieldsAttribute, joinOwned(profile.ownedShields))
+	player:SetAttribute(Config.OwnedArmorAttribute, joinOwned(profile.ownedArmor))
+	for key in PREFERENCES do
+		player:SetAttribute(Config.PreferencePrefix .. key, profile.preferences[key] or "")
+	end
+end
+
+-- Replaces the in-memory profile with a loaded one. Aura earned before the load finished
+-- (`earnedBefore`) is kept on top, so nothing is lost while the DataStore answers.
+function InventoryService.load(player: Player, saved: { [string]: any }?, earnedBefore: number)
+	local profile: Profile = if saved then (table.clone(saved) :: any) else newProfile()
+	InventoryService.migrateProfile(profile)
+	profile.auraPoints += math.max(0, math.floor(earnedBefore))
+	profiles[player.UserId] = profile
+	InventoryService.publish(player)
+end
+
+function InventoryService.forget(player: Player)
+	profiles[player.UserId] = nil
 end
 
 function InventoryService.getAura(player: Player): number
@@ -103,27 +190,40 @@ function InventoryService.addAura(player: Player, amount: number)
 	local profile = getProfile(player)
 	profile.auraPoints += math.floor(amount)
 	InventoryService.publish(player)
+	changed(player)
+end
+
+local function ownedSet(profile: Profile, kind: ItemKind): { [string]: boolean }
+	return if kind == "Weapon" then profile.ownedWeapons elseif kind == "Shield" then profile.ownedShields else profile.ownedArmor
 end
 
 local function lookup(kind: ItemKind, id: string): (string?, number)
-	if kind == "Weapon" then
-		local def = WeaponDefinitions.ById[id]
-		if def then
-			return def.DisplayName, def.Price
-		end
-	elseif kind == "Shield" then
-		local def = ShieldDefinitions.ById[id]
-		if def then
-			return def.DisplayName, def.Price
-		end
+	local def: { DisplayName: string, Price: number }? = if kind == "Weapon"
+		then WeaponDefinitions.ById[id] :: any
+		elseif kind == "Shield" then ShieldDefinitions.ById[id] :: any
+		elseif kind == "Armor" then ArmorDefinitions.ById[id] :: any
+		else nil
+	if def then
+		return def.DisplayName, def.Price
 	end
 	return nil, 0
 end
 
+function InventoryService.isItem(kind: unknown, id: unknown): boolean
+	if typeof(id) ~= "string" or (kind ~= "Weapon" and kind ~= "Shield" and kind ~= "Armor") then
+		return false
+	end
+	return (lookup(kind :: ItemKind, id)) ~= nil
+end
+
 function InventoryService.owns(player: Player, kind: ItemKind, id: string): boolean
+	return ownedSet(getProfile(player), kind)[id] == true
+end
+
+function InventoryService.isEquipped(player: Player, kind: ItemKind, id: string): boolean
 	local profile = getProfile(player)
-	local owned = if kind == "Weapon" then profile.ownedWeapons else profile.ownedShields
-	return owned[id] == true
+	local equipped = if kind == "Weapon" then profile.equippedWeapon elseif kind == "Shield" then profile.equippedShield else profile.equippedArmor
+	return equipped == id
 end
 
 -- Buys an item. Never allows duplicates or a negative balance. Returns (success, message).
@@ -136,17 +236,17 @@ function InventoryService.purchase(player: Player, kind: ItemKind, id: string): 
 		return false, name .. " is already owned"
 	end
 	local profile = getProfile(player)
-	if profile.auraPoints < price then
+	if price < 0 or profile.auraPoints < price then
 		return false, ("NOT ENOUGH AURA for %s (%d needed)"):format(name, price)
 	end
 	profile.auraPoints -= price
-	local owned = if kind == "Weapon" then profile.ownedWeapons else profile.ownedShields
-	owned[id] = true
+	ownedSet(profile, kind)[id] = true
 	InventoryService.publish(player)
+	changed(player)
 	return true, ("Bought %s for %d Aura"):format(name, price)
 end
 
--- Equips an owned item (exactly one weapon and one shield). Returns (success, message).
+-- Equips an owned item (exactly one per kind). Returns (success, message).
 function InventoryService.equip(player: Player, kind: ItemKind, id: string): (boolean, string)
 	local name = lookup(kind, id)
 	if not name then
@@ -163,13 +263,16 @@ function InventoryService.equip(player: Player, kind: ItemKind, id: string): (bo
 		if weapon and weapon.TwoHanded then
 			message ..= " (two-handed: shield unused, built-in parry)"
 		end
-	else
+	elseif kind == "Shield" then
 		profile.equippedShield = id
 		if InventoryService.getEquippedWeapon(player).TwoHanded then
 			message ..= " (unused while twin daggers are equipped)"
 		end
+	else
+		profile.equippedArmor = id
 	end
 	InventoryService.publish(player)
+	changed(player)
 	return true, message
 end
 
@@ -195,6 +298,16 @@ function InventoryService.getActiveShield(player: Player): ShieldDefinition?
 	return ShieldDefinitions.ById[ShieldDefinitions.Starter]
 end
 
+-- The armor worn (always one: Recruit Leather is free and can't be lost).
+function InventoryService.getEquippedArmor(player: Player): ArmorDefinition
+	local profile = getProfile(player)
+	local def = ArmorDefinitions.ById[profile.equippedArmor]
+	if def and profile.ownedArmor[def.Id] then
+		return def
+	end
+	return ArmorDefinitions.ById[ArmorDefinitions.Starter]
+end
+
 -- Exactly one owned weapon (+ an owned shield unless the weapon is two-handed).
 function InventoryService.hasValidLoadout(player: Player): (boolean, string)
 	local profile = getProfile(player)
@@ -212,10 +325,33 @@ end
 function InventoryService.gearValue(player: Player): number
 	local weapon = InventoryService.getEquippedWeapon(player)
 	local shield = InventoryService.getActiveShield(player)
-	return weapon.Price + (if shield then shield.Price else 0)
+	return weapon.Price + (if shield then shield.Price else 0) + InventoryService.getEquippedArmor(player).Price
 end
 
--- Plain table for a future DataStore save.
+-- Stores a whitelisted preference. Returns true when it changed.
+function InventoryService.setPreference(player: Player, key: unknown, value: unknown): boolean
+	if typeof(key) ~= "string" or typeof(value) ~= "string" then
+		return false
+	end
+	local allowed = PREFERENCES[key]
+	if not allowed or not table.find(allowed, value) then
+		return false
+	end
+	local profile = getProfile(player)
+	if profile.preferences[key] == value then
+		return false
+	end
+	profile.preferences[key] = value
+	player:SetAttribute(Config.PreferencePrefix .. key, value)
+	changed(player)
+	return true
+end
+
+function InventoryService.getPreference(player: Player, key: string): string?
+	return getProfile(player).preferences[key]
+end
+
+-- Plain table for the DataStore (only JSON-safe values).
 function InventoryService.serialize(player: Player): { [string]: any }
 	local profile = getProfile(player)
 	return {
@@ -223,8 +359,11 @@ function InventoryService.serialize(player: Player): { [string]: any }
 		auraPoints = profile.auraPoints,
 		ownedWeapons = joinOwned(profile.ownedWeapons),
 		ownedShields = joinOwned(profile.ownedShields),
+		ownedArmor = joinOwned(profile.ownedArmor),
 		equippedWeapon = profile.equippedWeapon,
 		equippedShield = profile.equippedShield,
+		equippedArmor = profile.equippedArmor,
+		preferences = table.clone(profile.preferences),
 	}
 end
 

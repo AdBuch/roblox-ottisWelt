@@ -26,7 +26,9 @@ src/shared/   -> ReplicatedStorage.Shared
   GameStates                         player + match states (LOBBY … CLEANUP)
   GameModeDefinitions                Solo / Co-op / Team Battle rules
   WeaponDefinitions                  8 weapons (instant basic attack + aerial attack each)
-  ShieldDefinitions                  8 shields (reduction, angle, speed, raise time, bash, arrows)
+  ShieldDefinitions                  8 shields (reduction, angle, speed, raise time, bash, arrows, armory class)
+  ArmorDefinitions                   4 armor sets (damage reduction, movement penalty, price)
+  DamageConfig                       player damage pipeline: minimum damage, PvE / PvP armor effectiveness
   SpecialMoveDefinitions             every basic, aerial and combination move as data (nothing charged)
   ComboDefinitions                   5 shared A/B/J patterns + 2 named combos per weapon
   InputDefinitions / PvPBalanceConfig   combo buffer timing, input mapping / PvP caps for combos and aerials
@@ -58,8 +60,9 @@ src/server/   -> ServerScriptService.Server
   ZombieDamageStateService           Healthy / Wounded / Critical looks + behaviour modifiers
   ZombieDismembermentService         stylized limb/armor loss (zombies only)
   ZombieArcherAI                     Undead Sagittarius ranged AI
-  InventoryService / AuraService     Aura Points, items, purchases, migration / rewards
-  EquipmentShopService / EquipmentModels   shop pedestals / procedural weapons, shields, arrows, nets
+  InventoryService / AuraService     Aura Points, weapons/shields/armor, preferences, purchases, migration / rewards
+  PlayerDataService                  DataStore load/save (Aura, owned + equipped gear, preferences), autosave, BindToClose
+  EquipmentShopService / EquipmentModels   Gladiator Armory displays / procedural weapons, shields, armor, arrows, nets
   PlayerCombatService                hands, blocking/parry, incoming damage, action requests
   SpecialMoveService                 move execution (melee steps, projectiles, aerials, arrow rain)
   ComboValidationService / JumpAttackService   server combo buffer / server-side jump detection, one aerial per jump
@@ -86,7 +89,7 @@ src/client/   -> StarterPlayer.StarterPlayerScripts.Client
   ComboFeedbackController            tiny input chips, COMBO TRAINING board
   PlayerAnimator                     procedural whole-body attack motion (additive, replaceable)
   OttiEntranceController             local camera for the entrance, landing shake, skip
-  ShopController                     per-player shop plaques, prompt text, equipped outline
+  ShopController                     armory info card (BUY / EQUIP / EQUIPPED, INFO), focus highlight, equipped outline
   EffectsController                  damage numbers, dash/lunge/knockback on your own character
   ZombieAnimator                     client walk cycle for arena zombies (limp, crawl)
   OttiAnimator                       procedural Otti animation (gaits, stance changes, tail, attack poses)
@@ -171,10 +174,25 @@ centre of the screen stay free; everything is small, anchored to an edge and sca
 
 ## The basement (lobby)
 
-About twice the old lobby, with wide open floors: arrival hall with the welcome board (spawn), **WEAPONS** wall (west),
-**SHIELDS** wall (south), mode area (north) with **SOLO ARENA**, **CO-OP LEGIONS** and **TEAM BATTLE** gates,
+About twice the old lobby, with wide open floors: arrival hall with the welcome board (spawn), the **GLADIATOR ARMORY** (west),
+mode area (north) with **SOLO ARENA**, **CO-OP LEGIONS** and **TEAM BATTLE** gates,
 **ZOMBIE ARCHIVE** gallery (east annex), **TRAINING** yard (south-west), **TRIBUNES** door (east), a barred prison
 corridor and storage corners. The lobby is a safe zone: no damage, no PvP. Attacks only hit the training dummies.
+
+### GLADIATOR ARMORY
+
+A separate vaulted sandstone chamber (100 × 76 studs) behind an arch in the hall's west wall, marked
+`GLADIATOR ARMORY`, with `WEAPONS / SHIELDS / ARMOR` signposts in the hall and inside. Thick columns, torches, red
+banners, bronze section signs, wooden racks, storage shelves, crates and barrels.
+- **BLADES** (north wall): Rusty Gladius, Legion Sword, Twin Arena Daggers.
+- **HEAVY & REACH** (west wall): Morning Star, Trident, Hoplite Spear, Battle Axe (wider spacing).
+- **RANGED & SPECIAL** (east wall): Hunter Bow with quiver and arrows; future ranged / special weapons.
+- **SHIELDS** (south wall): LIGHT · BALANCED · HEAVY. **ARMOR** (centre dais): four mannequins.
+Rows come from `WeaponDefinitions` (`Row`) and `ShieldDefinitions.classOf`, so new items appear automatically.
+Each display has only a small name plate; walking up highlights it and opens a compact card (stats, price, OWNED /
+EQUIPPED, **BUY** / **EQUIP**, optional `i` details). F / gamepad X / the card button use the same server prompt, which
+checks: lobby state, inside the armory, close to the display, data loaded, owned / affordable. Safe zone like the
+whole lobby: no damage, PvP, projectiles or rewards.
 
 ## Game modes
 
@@ -217,7 +235,7 @@ landing recovery based on the weapon's weight. Attacks use the whole body (torso
 weapon trails, sand on strong landings) through a procedural animation layer that authored animations can replace later.
 
 **Twin Arena Daggers are two-handed:** no shield, a second dagger in the left hand and a built-in **parry**
-(block button: 0.4 s window, −70 % damage, 1.2 s cooldown). The shop plaque and HUD say so.
+(block button: 0.4 s window, −70 % damage, 1.2 s cooldown). The armory card and HUD say so.
 
 **Hunter Bow:** arrows fly 145 studs/s up to 150 studs (server-simulated, never through walls); damage 100 % up to
 100 studs, 90 % to 125, 75 % to 150. A short fixed draw, no holding, consistent arrow power; a subtle crosshair shows
@@ -265,6 +283,32 @@ first 0.3-0.35 s.
 | Scutum | 250 | 82 % | 95 % | 76° | 75 % | 0.20 s |
 | Hoplon | 280 | 72 % | 75 % | 66° | 85 % | 0.15 s (strongest bash) |
 | Thraex Shield | 320 | 84 % | 80 % | 49° | 115 % | 0.04 s |
+
+Shields are shown in the armory by class: **Light** (Wooden Buckler, Parma Equestris, Thraex), **Balanced** (Legion,
+Champion), **Heavy** (Tower, Scutum, Hoplon). Several can be owned, one is equipped (unused with the Twin Daggers).
+
+## Armor (4)
+
+| Armor | Price | Damage reduction (PvE) | PvP (× 0.75) | Movement |
+|---|---|---|---|---|
+| Recruit Leather | free, owned by default | 5 % | ≈ 4 % | – |
+| Murmillo Armor | 180 | 15 % | ≈ 11 % | −2 % |
+| Hoplite Bronze | 320 | 25 % | ≈ 19 % | −6 % |
+| Champion Armor | 520 | 35 % | ≈ 26 % | −10 % |
+
+Exactly one set is worn; it is bought / changed only in the armory while in the lobby, never during a match. Procedural
+pieces on torso, shoulders, arms and legs (no helmet, the avatar stays recognisable); cloth pieces take the team
+color in Team Battle. Values: `ArmorDefinitions`, PvP effectiveness and caps: `DamageConfig`.
+
+## Player damage pipeline
+
+Every hit on a player (zombie blows, enemy arrows, Otti, PvP melee / arrows / combos / aerials) goes through
+`PlayerCombatService.receiveHit`, so no weapon can skip the shield or the armor:
+1 validate target, protection and enemy rules · 2 base damage · 3 mode multiplier (the attack's PvP multiplier) ·
+4 shield block / parry · 5 armor · 6 temporary effects (combo counter window) · 7 minimum damage and PvP caps ·
+8 Humanoid damage · 9 HUD / visual feedback.
+`afterBlock = base × shieldMultiplier`, `afterArmor = afterBlock × (1 − armor × effectiveness)`,
+`final = max(1, round(afterArmor))` (0 only when a shield stops the blow completely).
 
 ## Zombies and their AI personalities
 
@@ -402,21 +446,44 @@ solo 500 Aura; co-op 400 per survivor, 250 for defeated players who damaged him.
 ## Shells, Aura, archive and training
 
 - **Shells:** 12 symmetric spots. Solo uses 8, Co-op 4 + 2 per player (max 12), Team Battle none by default.
-  Each heals exactly **+3** (never above max, not used at full health), only for the collector, and respawns after 12 s (never right under a player).
-- **Aura Points** replace coins everywhere. `AURA: n` is always shown at the top. Profiles are kept per UserId for
-  the server session. Old profiles with `coins` are migrated once (`coins` is added to `auraPoints` and cleared in the same step).
+  Each heals exactly **+10** (`Config.ShellHealAmount`, never above max, not used at full health), only for the collector, and respawns after 12 s (never right under a player).
+- **Aura Points** replace coins everywhere. `AURA: n` is always shown at the top. Profiles are saved in a DataStore
+  (see *Saving*). Old profiles with `coins` are migrated once (`coins` is added to `auraPoints` and cleared in the same step).
 - **Zombie Archive:** six barred cages with the real arena models (anchored, tagged `ZombieDisplay`, never targets, no AI)
   and a plaque each: name, role, health, damage, ability, reward and first round. Otti is not in the archive.
 - **Training yard:** two straw dummies with damage numbers. Specials and combos work, there's no Aura or eliminations, and they refill after 3 s.
 
+## Saving (DataStore)
+
+`PlayerDataService` stores per UserId (store `OttiColosseum_PlayerData_v1`): Aura Points, owned weapons / shields /
+armor, the equipped item of each kind and preferences (HUD mode, Otti intro seen). Loaded data always goes through
+`InventoryService.migrateProfile` (legacy `coins`, missing armor, unknown ids are dropped, starter items guaranteed).
+- **Load** on join with 3 retries. While loading (`DataStatus = Loading`) the armory refuses purchases.
+- **Load failed / no API access:** a fresh profile marked `Unsaved` — it is never written, so saved progress can't be wiped.
+- **Save:** 8 s after a change (purchase, equip, Aura reward, preference), every 120 s if dirty, on leave and on
+  shutdown (`BindToClose`) via `UpdateAsync`; a newer save from another server is kept.
+- **Preferences:** the client may only send whitelisted values (`SavePreference` remote, rate limited).
+
 ## Studio test steps
+
+**Gladiator Armory, armor and saving** (Game Settings → Security → *Enable Studio Access to API Services* for saving)
+1. F5. Follow the `◄ WEAPONS / SHIELDS / ARMOR` signpost to the GLADIATOR ARMORY arch in the hall's west wall.
+2. Walk along BLADES (north), HEAVY & REACH (west), RANGED & SPECIAL (east, bow + quiver), SHIELDS LIGHT / BALANCED / HEAVY
+   (south) and the ARMOR mannequins (centre). Near a display: gold outline + card with stats, price and BUY / EQUIP / EQUIPPED; `i` shows details.
+3. Without enough Aura: BUY says NOT ENOUGH AURA and nothing changes. Recruit Leather is EQUIPPED from the start.
+4. With Aura (e.g. after a Solo run): buy Murmillo Armor → it appears on your character, walk speed drops by 2 %.
+   Pressing again says Already equipped; the card never offers BUY for owned items.
+5. Take a zombie hit with and without armor: damage numbers are lower with armor (e.g. 20 → 17 with Murmillo).
+   Team Battle: Champion Armor reduces player damage by about 26 % instead of 35 %; armor cloth shows the team color.
+6. Shells now heal +10.
+7. Change the HUD mode (H), leave and rejoin: Aura, owned/equipped gear and the HUD mode are restored.
 
 **Solo**
 1. F5. You spawn in the arrival hall: the Aura orb top-right shows 0, Rusty Gladius + Wooden Buckler in your hands, touch: ATK, BLOCK and COMBO around the jump button.
 2. Walk to the TRAINING yard (south-west), hit a dummy, then try Basic → Basic → Q: you should see a short `GLADIATOR'S POINT!` notification.
 3. Visit the ZOMBIE ARCHIVE (east): 6 caged zombies with plaques; the Undead Sagittarius draws its bow at you.
 4. Hold F at the SOLO ARENA gate (north-west). GET READY, then ROUND 1 / 7. Kill zombies: a short `+10` with the Aura orb (no permanent counter in combat).
-5. Die or win: you return to the lobby and keep your Aura. Buy something with F at a pedestal (e.g. Legion Sword for 80).
+5. Die or win: you return to the lobby and keep your Aura. Buy something in the GLADIATOR ARMORY (e.g. Legion Sword for 80).
 
 **Zombie damage, limbs, archers** (buy the Battle Axe or Morning Star for quick results)
 1. From Round 3: hit a zombie below 65 %: darker skin, scratches, torn cloth; below 30 % it limps and hunches.
@@ -461,7 +528,7 @@ solo 500 Aura; co-op 400 per survivor, 250 for defeated players who damaged him.
 ## Limitations
 
 - One arena match per server; parallel matches would need a second arena instance.
-- Aura and items are session-only (no DataStore yet; `InventoryService.serialize/migrateProfile` are the hooks).
+- Saving needs DataStore access (published place, or Studio with "Enable Studio Access to API Services"); without it progress is session-only and never written.
 - Swings, thrusts, spins and parries move the equipment, not the player's arms (no uploaded animations).
 - Otti's animation is procedural (client `OttiAnimator`); authored animations can be plugged in via `OttiBossConfig.AnimationIds`.
 - Dashes, lunges, knockback and knockdowns on players are applied by the player's own client (Roblox gives it physics ownership); the server validates the hits. During Otti's throw the server anchors and moves the player itself.

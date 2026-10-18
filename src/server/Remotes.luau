@@ -38,4 +38,5 @@ return table.freeze({
 	CombatAction = getRemote(Config.CombatActionRemoteName),
 	ShieldBlock = getRemote(Config.ShieldBlockRemoteName),
 	CombatFeedback = getRemote(Config.CombatFeedbackRemoteName),
+	SavePreference = getRemote(Config.PreferenceRemoteName),
 })

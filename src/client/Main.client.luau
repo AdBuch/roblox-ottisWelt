@@ -289,9 +289,29 @@ ShopController.start({
 	aura = Config.AuraAttribute,
 	equippedWeapon = Config.EquippedWeaponAttribute,
 	equippedShield = Config.EquippedShieldAttribute,
+	equippedArmor = Config.EquippedArmorAttribute,
 	ownedWeapons = Config.OwnedWeaponsAttribute,
 	ownedShields = Config.OwnedShieldsAttribute,
-})
+	ownedArmor = Config.OwnedArmorAttribute,
+	dataStatus = Config.DataStatusAttribute,
+}, hud.group)
+
+-- Saved preferences: the HUD mode follows the server-stored value and is sent back on change
+local preferenceRemote = remotes and remotes:FindFirstChild(Config.PreferenceRemoteName)
+local hudPreference = Config.PreferencePrefix .. "HudMode"
+local function applyHudPreference()
+	local saved = player:GetAttribute(hudPreference)
+	if typeof(saved) == "string" and saved ~= "" then
+		visibility.setMode(saved)
+	end
+end
+player:GetAttributeChangedSignal(hudPreference):Connect(applyHudPreference)
+applyHudPreference()
+visibility.onModeChanged(function(mode: string)
+	if preferenceRemote and preferenceRemote:IsA("RemoteEvent") and player:GetAttribute(hudPreference) ~= mode then
+		preferenceRemote:FireServer("HudMode", mode)
+	end
+end)
 
 ------------------------------------------------------------------ round line and banners
 local shownRound = 0

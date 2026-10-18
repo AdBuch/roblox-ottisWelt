@@ -11,7 +11,7 @@ local shared = ReplicatedStorage:FindFirstChild("Shared")
 local required = {
 	"Config", "CombatConfig", "GameStates", "GameModeDefinitions", "WeaponDefinitions", "ShieldDefinitions",
 	"SpecialMoveDefinitions", "ComboDefinitions", "ZombieDefinitions", "ZombieAIProfiles", "RoundDefinitions",
-	"DamageEffectsConfig", "AudioConfig", "ProjectileDefinitions", "OttiBossConfig", "OttiMoveDefinitions", "BossPhaseDefinitions",
+	"DamageEffectsConfig", "AudioConfig", "ProjectileDefinitions", "OttiBossConfig", "OttiMoveDefinitions", "BossPhaseDefinitions", "ArmorDefinitions", "DamageConfig",
 }
 for _, name in required do
 	if not shared or not shared:FindFirstChild(name) then
@@ -28,6 +28,7 @@ local DamageEffectsService = require(script.Parent.DamageEffectsService)
 local EquipmentShopService = require(script.Parent.EquipmentShopService)
 local InventoryService = require(script.Parent.InventoryService)
 local LobbyService = require(script.Parent.LobbyService)
+local PlayerDataService = require(script.Parent.PlayerDataService)
 local MatchService = require(script.Parent.MatchService)
 local OttiBossService = require(script.Parent.OttiBossService)
 local PlayerCombatService = require(script.Parent.PlayerCombatService)
@@ -55,7 +56,7 @@ end
 local arena = Arena.build() -- also disables template SpawnLocations
 local lobby = LobbyService.build() -- the only enabled SpawnLocation: everyone (re)spawns here
 print(PREFIX, ("Arena ready: Colosseum %dx%d studs, %d zombie gates, %d shell spots"):format(Arena.Layout.SemiAxisX * 2, Arena.Layout.SemiAxisZ * 2, #Arena.Layout.ZombieSpawns, #Arena.Layout.ShellPositions))
-print(PREFIX, "Lobby ready: weapons, shields, SOLO / CO-OP / TEAM areas, ZOMBIE ARCHIVE, training, tribunes")
+print(PREFIX, "Lobby ready: GLADIATOR ARMORY (weapons, shields, armor), SOLO / CO-OP / TEAM areas, ZOMBIE ARCHIVE, training, tribunes")
 
 local _ = Remotes -- requiring the module validates/creates all remotes
 print(PREFIX, "Combat remotes ready (CombatAction, ShieldBlock, CombatFeedback)")
@@ -84,8 +85,9 @@ ZombieService.init(arena:WaitForChild(Config.ZombiesFolderName), {
 		})
 	end,
 })
+PlayerDataService.init(PlayerCombatService.refreshEquipment) -- DataStore: Aura, gear, preferences
 PlayerCombatService.init()
-EquipmentShopService.build(lobby.folder, lobby.weaponSlots, lobby.shieldSlots)
+EquipmentShopService.build(lobby.folder, lobby.armory)
 TrainingService.build(lobby.folder, lobby.trainingSlots, lobby.trainingCFrame, lobby.trainingSize)
 ZombieDisplayService.build(lobby.folder, lobby.archiveSlots, lobby.archivePlaques)
 WaveService.init(arena)

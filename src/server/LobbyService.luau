@@ -1,6 +1,6 @@
 --!strict
 -- Builds the underground gladiator complex beneath the Colosseum (about twice the old lobby):
---   central arrival hall (spawn + welcome board), WEAPONS wall (west), SHIELDS wall (south),
+--   central arrival hall (spawn + welcome board), GLADIATOR ARMORY (separate room, west),
 --   mode area (north): SOLO ARENA gate, CO-OP LEGIONS party posts, TEAM BATTLE pads,
 --   ZOMBIE ARCHIVE gallery (east annex), TRAINING yard (south-west), TRIBUNES door (east),
 --   a barred prison corridor and storage corners. Wide open floor, clear signs, no maze.
@@ -30,11 +30,29 @@ local HALF_X, HALF_Z = 64, 44
 local HEIGHT = 22
 local ANNEX_X = 92 -- east annex (archive) reaches this x
 
+-- Gladiator Armory (west of the hall, see buildArmory)
+local ARMORY_X0, ARMORY_X1 = -178, -78
+local ARMORY_HALF_Z = 38
+local ARMORY_HEIGHT = 24
+local DOOR_HALF = 7 -- the armory door / corridor spans z -7..7
+local DOOR_HEIGHT = 13
+
+-- A row of displays: centre on the floor, LookVector into the room, usable length along RightVector.
+export type DisplayLine = { cframe: CFrame, length: number }
+
+export type ArmoryLayout = {
+	blades: DisplayLine,
+	heavy: DisplayLine,
+	ranged: DisplayLine,
+	shields: { Light: DisplayLine, Balanced: DisplayLine, Heavy: DisplayLine },
+	armor: DisplayLine,
+	floorY: number,
+}
+
 export type LobbyLayout = {
 	folder: Folder,
 	spawnCFrame: CFrame,
-	weaponSlots: { CFrame },
-	shieldSlots: { CFrame },
+	armory: ArmoryLayout,
 	soloGate: BasePart,
 	soloLabel: TextLabel,
 	coopJoin: BasePart,
@@ -189,7 +207,12 @@ local function buildShell(folder: Folder)
 	hall.Name = "Hall"
 	makePart("Floor", Vector3.new(HALF_X * 2 + 4, 2, HALF_Z * 2 + 4), at(0, -1, 0), FLOOR, Enum.Material.Cobblestone, hall)
 	makePart("Ceiling", Vector3.new(HALF_X * 2 + 4, 2, HALF_Z * 2 + 4), at(0, HEIGHT + 1, 0), STONE_DARK, Enum.Material.Slate, hall)
-	makePart("WestWall", Vector3.new(2, HEIGHT, HALF_Z * 2 + 4), at(-HALF_X - 1, HEIGHT / 2, 0), STONE, Enum.Material.Cobblestone, hall)
+	-- West wall with the Gladiator Armory opening (z -DOOR_HALF..DOOR_HALF)
+	local westLength = HALF_Z + 2 - DOOR_HALF
+	for _, side in { -1, 1 } do
+		makePart("WestWall", Vector3.new(2, HEIGHT, westLength), at(-HALF_X - 1, HEIGHT / 2, side * (DOOR_HALF + westLength / 2)), STONE, Enum.Material.Cobblestone, hall)
+	end
+	makePart("WestWallTop", Vector3.new(2, HEIGHT - DOOR_HEIGHT, DOOR_HALF * 2), at(-HALF_X - 1, DOOR_HEIGHT + (HEIGHT - DOOR_HEIGHT) / 2, 0), STONE, Enum.Material.Cobblestone, hall)
 	makePart("SouthWall", Vector3.new(HALF_X * 2 + 4, HEIGHT, 2), at(0, HEIGHT / 2, HALF_Z + 1), STONE, Enum.Material.Cobblestone, hall)
 
 	-- North wall with three gate openings (10 wide, 12 high) at x = -36, 0, 36
@@ -246,10 +269,10 @@ local function buildArrival(folder: Folder): CFrame
 	area.Name = "ArrivalHall"
 	sign(area, "WelcomeBoard", Vector3.new(26, 9, 0.6), facing(0, 14, 2, SOUTH), {
 		{ text = "OTTI COLOSSEUM", color = GOLD, scale = 0.3 },
-		{ text = "Choose your weapon and shield", color = WHITE, scale = 0.15 },
+		{ text = "Gear up in the GLADIATOR ARMORY (west)", color = WHITE, scale = 0.15 },
 		{ text = "Pick SOLO, CO-OP or TEAM BATTLE (north)", color = WHITE, scale = 0.15 },
 		{ text = "Learn your foes in the ZOMBIE ARCHIVE (east)", color = WHITE, scale = 0.15 },
-		{ text = "Interact: hold F · Specials: Q and E", color = Color3.fromRGB(255, 210, 120), scale = 0.13 },
+		{ text = "Interact: F · Combos: attack, block and jump", color = Color3.fromRGB(255, 210, 120), scale = 0.13 },
 	}, DARK_WOOD)
 	for _, x in { -11, 11 } do
 		makePart("BoardChain", Vector3.new(0.2, HEIGHT - 18.5, 0.2), at(x, 18.5 + (HEIGHT - 18.5) / 2, 2), IRON, Enum.Material.Metal, area, DECOR)
@@ -277,29 +300,185 @@ local function buildArrival(folder: Folder): CFrame
 	return spawnCFrame
 end
 
-local function buildShopWalls(folder: Folder): ({ CFrame }, { CFrame })
-	local shop = Instance.new("Model")
-	shop.Name = "ShopWalls"
-	-- Weapons: west wall
-	makePart("WeaponBackboard", Vector3.new(0.4, 11, 66), at(-HALF_X + 0.3, 7, -2), DARK_WOOD, Enum.Material.WoodPlanks, shop)
-	makePart("WeaponRail", Vector3.new(0.5, 0.3, 66), at(-HALF_X + 0.6, 10, -2), BRONZE, Enum.Material.Metal, shop, DECOR)
-	sign(shop, "WeaponsSign", Vector3.new(16, 3, 0.4), facing(-HALF_X + 0.6, 15, -2, EAST), { { text = "WEAPONS", color = GOLD, scale = 0.9 } }, RED)
-	-- Shields: south wall
-	makePart("ShieldBackboard", Vector3.new(66, 11, 0.4), at(16, 7, HALF_Z - 0.3), DARK_WOOD, Enum.Material.WoodPlanks, shop)
-	makePart("ShieldRail", Vector3.new(66, 0.3, 0.5), at(16, 10, HALF_Z - 0.6), BRONZE, Enum.Material.Metal, shop, DECOR)
-	sign(shop, "ShieldsSign", Vector3.new(16, 3, 0.4), facing(16, 15, HALF_Z - 0.6, NORTH), { { text = "SHIELDS", color = GOLD, scale = 0.9 } }, RED)
-	shop.Parent = folder
+------------------------------------------------------------------------------------------
+-- GLADIATOR ARMORY: a separate vaulted sandstone chamber west of the hall, reached through a
+-- short corridor from an opening in the hall's west wall. Layout (looking in from the door):
+--   north wall  BLADES (row 1)             west wall  HEAVY & REACH (row 2)
+--   east wall   RANGED & SPECIAL (row 3, north of the door), storage shelves (south of it)
+--   south wall  SHIELDS: LIGHT | BALANCED | HEAVY        centre  ARMOR mannequins on a dais
+-- Displays sit on DisplayLines; EquipmentShopService spreads the items along them, so new
+-- weapons, shields or armor appear automatically. The whole room is part of the safe lobby.
+------------------------------------------------------------------------------------------
 
-	local weaponSlots, shieldSlots = {}, {}
-	for i = 1, 8 do
-		local position = Vector3.new(-HALF_X + 4, FLOOR_Y, -30 + (i - 1) * 8)
-		weaponSlots[i] = CFrame.lookAt(position, position + EAST)
+-- A bronze sign (metal plate, dark lettering) for the armory sections.
+local function bronzeSign(parent: Instance, name: string, width: number, cframe: CFrame, text: string, sub: string?)
+	local lines: { Line } = { { text = text, color = Color3.fromRGB(48, 28, 14), scale = if sub then 0.62 else 0.85 } }
+	if sub then
+		table.insert(lines, { text = sub, color = Color3.fromRGB(70, 40, 20), scale = 0.3 })
 	end
-	for i = 1, 8 do
-		local position = Vector3.new(-12 + (i - 1) * 8, FLOOR_Y, HALF_Z - 4)
-		shieldSlots[i] = CFrame.lookAt(position, position + NORTH)
+	local labels = sign(parent, name, Vector3.new(width, if sub then 3.2 else 2.4, 0.3), cframe, lines, BRONZE)
+	local board = labels[1]:FindFirstAncestorWhichIsA("BasePart")
+	if board then
+		board.Material = Enum.Material.Metal
+		makePart(name .. "Frame", board.Size + Vector3.new(0.5, 0.5, -0.1), board.CFrame * CFrame.new(0, 0, 0.12), DARK_WOOD, Enum.Material.Wood, parent, DECOR)
 	end
-	return weaponSlots, shieldSlots
+end
+
+local function signpost(parent: Instance, x: number, z: number, face: Vector3, boards: { string })
+	makePart("Signpost", Vector3.new(0.6, 9, 0.6), at(x, 4.5, z), DARK_WOOD, Enum.Material.Wood, parent)
+	makePart("SignpostBase", Vector3.new(1.6, 0.6, 1.6), at(x, 0.3, z), STONE, Enum.Material.Limestone, parent)
+	for i, text in boards do
+		sign(parent, "ArrowBoard", Vector3.new(8, 1.4, 0.25), facing(x, 8.6 - (i - 1) * 1.7, z, face) * CFrame.new(0, 0, -0.45), { { text = text, color = GOLD, scale = 0.85 } }, RED)
+	end
+end
+
+local function crateStack(parent: Instance, x: number, z: number, count: number)
+	for i = 1, count do
+		local offset = Vector3.new(((i - 1) % 2) * 3.1, math.floor((i - 1) / 2) * 3, (i % 3) * 0.3)
+		makePart("Crate", Vector3.one * 3, at(x + offset.X, 1.5 + offset.Y, z + offset.Z) * CFrame.Angles(0, math.rad(i * 9), 0), WOOD, Enum.Material.WoodPlanks, parent)
+	end
+end
+
+-- Storage shelf with stored goods (rolled leather, spare shield rims, boxes). Front faces -Z.
+local function shelf(parent: Instance, cframe: CFrame, width: number)
+	for _, side in { -1, 1 } do
+		makePart("ShelfPost", Vector3.new(0.4, 9, 0.4), cframe * CFrame.new(side * width / 2, 4.5, 0), DARK_WOOD, Enum.Material.Wood, parent)
+	end
+	for i, y in { 0.6, 3.4, 6.2, 8.8 } do
+		makePart("ShelfBoard", Vector3.new(width, 0.3, 2.2), cframe * CFrame.new(0, y, 0), WOOD, Enum.Material.WoodPlanks, parent)
+		if i < 4 then
+			makePart("Box", Vector3.new(1.6, 1.4, 1.4), cframe * CFrame.new(-width / 2 + 1.4, y + 0.85, 0), WOOD, Enum.Material.WoodPlanks, parent, DECOR)
+			makePart("Roll", Vector3.new(2.2, 0.8, 0.8), cframe * CFrame.new(0.4, y + 0.55, 0.2), Color3.fromRGB(96, 62, 36), Enum.Material.Leather, parent, { collide = false, shape = Enum.PartType.Cylinder })
+			makePart("SpareRim", Vector3.new(0.25, 2, 2), cframe * CFrame.new(width / 2 - 1.3, y + 1.15, 0) * CFrame.Angles(0, math.rad(80), 0), BRONZE, Enum.Material.Metal, parent, { collide = false, shape = Enum.PartType.Cylinder })
+		end
+	end
+end
+
+local function buildArmory(folder: Folder): ArmoryLayout
+	local room = Instance.new("Model")
+	room.Name = "GladiatorArmory"
+	local x0, x1, hz, h = ARMORY_X0, ARMORY_X1, ARMORY_HALF_Z, ARMORY_HEIGHT
+	local width = x1 - x0
+	local cx = (x0 + x1) / 2
+
+	-- Corridor from the hall's west wall to the armory's east wall
+	local c0, c1 = -HALF_X - 2, x1
+	local corridorLength = c0 - c1
+	makePart("CorridorFloor", Vector3.new(corridorLength, 2, DOOR_HALF * 2 + 4), at((c0 + c1) / 2, -1, 0), FLOOR, Enum.Material.Cobblestone, room)
+	makePart("CorridorCeiling", Vector3.new(corridorLength, 2, DOOR_HALF * 2 + 4), at((c0 + c1) / 2, DOOR_HEIGHT + 1, 0), STONE_DARK, Enum.Material.Slate, room)
+	for _, side in { -1, 1 } do
+		makePart("CorridorWall", Vector3.new(corridorLength, DOOR_HEIGHT, 2), at((c0 + c1) / 2, DOOR_HEIGHT / 2, side * (DOOR_HALF + 1)), SANDSTONE, Enum.Material.Sandstone, room)
+	end
+	torch(room, facing((c0 + c1) / 2, 9, -DOOR_HALF, SOUTH))
+	torch(room, facing((c0 + c1) / 2, 9, DOOR_HALF, NORTH))
+
+	-- Chamber: sandstone walls, cobbled floor with a limestone centre path, dark vault
+	makePart("ArmoryFloor", Vector3.new(width + 4, 2, hz * 2 + 4), at(cx, -1, 0), FLOOR, Enum.Material.Cobblestone, room)
+	makePart("ArmoryPath", Vector3.new(width - 30, 0.1, 10), at(cx + 15, 0.05, 0), Color3.fromRGB(176, 160, 132), Enum.Material.Limestone, room, DECOR)
+	makePart("ArmoryCeiling", Vector3.new(width + 4, 2, hz * 2 + 4), at(cx, h + 1, 0), STONE_DARK, Enum.Material.Slate, room)
+	makePart("ArmoryWestWall", Vector3.new(2, h, hz * 2 + 4), at(x0 - 1, h / 2, 0), SANDSTONE, Enum.Material.Sandstone, room)
+	local eastSegment = hz - DOOR_HALF + 1
+	for _, side in { -1, 1 } do
+		makePart("ArmorySideWall", Vector3.new(width + 4, h, 2), at(cx, h / 2, side * (hz + 1)), SANDSTONE, Enum.Material.Sandstone, room)
+		makePart("ArmoryEastWall", Vector3.new(2, h, eastSegment), at(x1 + 1, h / 2, side * (DOOR_HALF + eastSegment / 2)), SANDSTONE, Enum.Material.Sandstone, room)
+		makePart("Skirting", Vector3.new(width, 1, 0.6), at(cx, 0.5, side * (hz - 0.3)), STONE, Enum.Material.Limestone, room, DECOR)
+	end
+	makePart("ArmoryEastWallTop", Vector3.new(2, h - DOOR_HEIGHT, DOOR_HALF * 2), at(x1 + 1, DOOR_HEIGHT + (h - DOOR_HEIGHT) / 2, 0), SANDSTONE, Enum.Material.Sandstone, room)
+
+	-- Thick columns and vault ribs
+	for _, x in { cx - 32, cx + 32 } do
+		for _, z in { -22, 22 } do
+			makePart("Column", Vector3.new(4.5, h, 4.5), at(x, h / 2, z), SANDSTONE, Enum.Material.Sandstone, room)
+			makePart("ColumnBase", Vector3.new(5.6, 1.2, 5.6), at(x, 0.6, z), STONE, Enum.Material.Limestone, room)
+			makePart("ColumnCapital", Vector3.new(5.6, 1, 5.6), at(x, h - 2.5, z), STONE, Enum.Material.Limestone, room, DECOR)
+			torch(room, facing(x, 10, z + (if z < 0 then 2.3 else -2.3), if z < 0 then SOUTH else NORTH))
+		end
+		local y0, y1 = FLOOR_Y + h - 7, FLOOR_Y + h - 0.6
+		segment(room, "Rib", Vector3.new(x, y0, -hz), Vector3.new(x, y1, -22), 2, 1.4, SANDSTONE, Enum.Material.Sandstone)
+		segment(room, "Rib", Vector3.new(x, y1, -22), Vector3.new(x, y1, 22), 2, 1.4, SANDSTONE, Enum.Material.Sandstone)
+		segment(room, "Rib", Vector3.new(x, y1, 22), Vector3.new(x, y0, hz), 2, 1.4, SANDSTONE, Enum.Material.Sandstone)
+	end
+	for _, z in { -22, 22 } do
+		segment(room, "Rib", Vector3.new(cx - 32, FLOOR_Y + h - 0.6, z), Vector3.new(cx + 32, FLOOR_Y + h - 0.6, z), 1.6, 1.2, SANDSTONE, Enum.Material.Sandstone)
+	end
+
+	-- Display lines, 2.6 studs in front of each wall, facing into the room
+	local function line(x: number, z: number, direction: Vector3, length: number): DisplayLine
+		local position = Vector3.new(x, FLOOR_Y, z)
+		return { cframe = CFrame.lookAt(position, position + direction), length = length }
+	end
+	local inset = 2.6
+	local rangedZ = -(DOOR_HALF + hz) / 2 - 1
+	local layout: ArmoryLayout = {
+		blades = line(cx, -hz + inset, SOUTH, 70),
+		heavy = line(x0 + inset, 0, EAST, 64),
+		ranged = line(x1 - inset, rangedZ, WEST, hz - DOOR_HALF - 8),
+		shields = {
+			Light = line(cx - 28, hz - inset, NORTH, 24),
+			Balanced = line(cx, hz - inset, NORTH, 20),
+			Heavy = line(cx + 28, hz - inset, NORTH, 24),
+		},
+		armor = line(cx + 4, 0, EAST, 36),
+		floorY = FLOOR_Y,
+	}
+
+	-- Bronze section signs above the rows
+	bronzeSign(room, "BladesSign", 14, facing(cx, 16, -hz + 0.3, SOUTH), "BLADES", "fast & balanced")
+	bronzeSign(room, "HeavySign", 18, facing(x0 + 0.3, 16, 0, EAST), "HEAVY & REACH", "heavy & long weapons")
+	bronzeSign(room, "RangedSign", 17, facing(x1 - 0.3, 16, rangedZ, WEST), "RANGED & SPECIAL", "bows & special weapons")
+	bronzeSign(room, "ShieldsSign", 16, facing(cx, 17.8, hz - 0.3, NORTH), "SHIELDS")
+	for class, l in layout.shields :: { [string]: DisplayLine } do
+		bronzeSign(room, class .. "Sign", 8, facing(l.cframe.Position.X, 13.6, hz - 0.3, NORTH), class:upper())
+	end
+
+	-- ARMOR: mannequin dais in the centre with a hanging sign
+	local daisX = layout.armor.cframe.Position.X - 2
+	makePart("ArmorDais", Vector3.new(12, 0.8, layout.armor.length + 4), at(daisX, 0.4, 0), STONE, Enum.Material.Limestone, room)
+	makePart("ArmorDaisRim", Vector3.new(12.6, 0.3, layout.armor.length + 4.6), at(daisX, 0.15, 0), BRONZE, Enum.Material.Metal, room, DECOR)
+	makePart("ArmorRug", Vector3.new(10, 0.1, layout.armor.length + 2), at(daisX, 0.85, 0), RED, Enum.Material.Fabric, room, DECOR)
+	bronzeSign(room, "ArmorSign", 12, facing(daisX, 14, 0, EAST), "ARMOR", "one set · changed in the lobby only")
+	for _, z in { -5, 5 } do
+		makePart("SignChain", Vector3.new(0.2, h - 15.6, 0.2), at(daisX, 15.6 + (h - 15.6) / 2, z), IRON, Enum.Material.Metal, room, DECOR)
+	end
+
+	-- Red banners and torches along the walls
+	for _, x in { cx - 44, cx - 16, cx + 16, cx + 44 } do
+		banner(room, facing(x, 14, -hz, SOUTH))
+		banner(room, facing(x, 14, hz, NORTH))
+	end
+	for _, z in { -30, -12, 12, 30 } do
+		banner(room, facing(x0, 14, z, EAST))
+		torch(room, facing(x0, 12, z + 6, EAST))
+	end
+	for _, x in { cx - 40, cx - 8, cx + 24 } do
+		torch(room, facing(x, 12, -hz, SOUTH))
+		torch(room, facing(x, 12, hz, NORTH))
+	end
+	torch(room, facing(x1, 12, -DOOR_HALF - 3, WEST))
+	torch(room, facing(x1, 12, DOOR_HALF + 3, WEST))
+
+	-- Storage south of the door: shelves, crates and barrels
+	shelf(room, facing(x1 - 2, 0, 14, EAST) * CFrame.Angles(0, math.rad(180), 0), 8)
+	shelf(room, facing(x1 - 2, 0, 24, EAST) * CFrame.Angles(0, math.rad(180), 0), 8)
+	crateStack(room, x1 - 13, 32, 5)
+	for i, z in { 30, 33.2 } do
+		makePart("Barrel", Vector3.new(3, 2.4, 2.4), at(x1 - 3 - i * 0.4, 1.5, z), DARK_WOOD, Enum.Material.Wood, room, { shape = Enum.PartType.Cylinder })
+	end
+
+	-- Entrance in the hall: arch, the GLADIATOR ARMORY sign, torches and directional signs
+	local entrance = Instance.new("Model")
+	entrance.Name = "ArmoryEntrance"
+	for _, side in { -1, 1 } do
+		makePart("ArchPillar", Vector3.new(1.8, DOOR_HEIGHT + 1, 1.8), at(-HALF_X + 0.6, (DOOR_HEIGHT + 1) / 2, side * (DOOR_HALF + 0.9)), SANDSTONE, Enum.Material.Limestone, entrance)
+		torch(entrance, facing(-HALF_X + 0.2, 10, side * (DOOR_HALF + 3), EAST))
+	end
+	makePart("ArchLintel", Vector3.new(2, 1.6, DOOR_HALF * 2 + 4), at(-HALF_X + 0.6, DOOR_HEIGHT + 0.8, 0), SANDSTONE, Enum.Material.Limestone, entrance)
+	bronzeSign(entrance, "ArmoryEntranceSign", 18, facing(-HALF_X + 1.7, DOOR_HEIGHT + 3.4, 0, EAST), "GLADIATOR ARMORY", "weapons · shields · armor")
+	signpost(entrance, -HALF_X + 12, -DOOR_HALF - 5, EAST, { "◄ WEAPONS", "◄ SHIELDS", "◄ ARMOR" })
+	signpost(room, x1 - 8, -DOOR_HALF - 1, EAST, { "BLADES · RANGED ►", "▲ ARMOR · HEAVY & REACH", "◄ SHIELDS" })
+	entrance.Parent = folder
+	room.Parent = folder
+	return layout
 end
 
 type ModeArea = {
@@ -576,7 +755,7 @@ function LobbyService.build(): LobbyLayout
 
 	buildShell(folder)
 	local spawnCFrame = buildArrival(folder)
-	local weaponSlots, shieldSlots = buildShopWalls(folder)
+	local armory = buildArmory(folder)
 	local modes = buildModeArea(folder)
 	local archiveSlots, archivePlaques = buildArchive(folder)
 	local trainingSlots, trainingCFrame, trainingSize = buildTraining(folder)
@@ -588,8 +767,7 @@ function LobbyService.build(): LobbyLayout
 	return {
 		folder = folder,
 		spawnCFrame = spawnCFrame,
-		weaponSlots = weaponSlots,
-		shieldSlots = shieldSlots,
+		armory = armory,
 		soloGate = modes.soloGate,
 		soloLabel = modes.soloLabel,
 		coopJoin = modes.coopJoin,
@@ -615,7 +793,19 @@ function LobbyService.build(): LobbyLayout
 end
 
 -- Lobby players far outside the complex (e.g. fell through) are sent back to the spawn.
+-- Inside the Gladiator Armory chamber (the shop only works here).
+function LobbyService.isInArmory(position: Vector3): boolean
+	return position.X >= ARMORY_X0 - 1
+		and position.X <= ARMORY_X1 + 1
+		and math.abs(position.Z) <= ARMORY_HALF_Z + 1
+		and position.Y >= FLOOR_Y - 5
+		and position.Y <= FLOOR_Y + ARMORY_HEIGHT + 2
+end
+
 function LobbyService.isInside(position: Vector3): boolean
+	if LobbyService.isInArmory(position) or (position.X >= ARMORY_X1 - 1 and position.X <= -HALF_X and math.abs(position.Z) <= DOOR_HALF + 1 and position.Y >= FLOOR_Y - 10 and position.Y <= FLOOR_Y + DOOR_HEIGHT + 5) then
+		return true -- the armory and its corridor belong to the lobby
+	end
 	return position.X >= -HALF_X - 2
 		and position.X <= ANNEX_X + 4
 		and position.Z >= -HALF_Z - 26

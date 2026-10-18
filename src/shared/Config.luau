@@ -15,7 +15,7 @@ local Config = {
 	-- Healing shells (counts per mode live in GameModeDefinitions)
 	ShellNamePrefix = "GoldenShell_",
 	ShellPickupRange = 8,
-	ShellHealAmount = 3,
+	ShellHealAmount = 10,
 	ShellRespawnSeconds = 12,
 
 	-- Match state, published as attributes on Workspace.GeneratedArena
@@ -67,6 +67,10 @@ local Config = {
 	EquippedShieldAttribute = "EquippedShield",
 	OwnedWeaponsAttribute = "OwnedWeapons", -- comma-separated ids
 	OwnedShieldsAttribute = "OwnedShields",
+	EquippedArmorAttribute = "EquippedArmor",
+	OwnedArmorAttribute = "OwnedArmor",
+	PreferencePrefix = "Pref_", -- saved player preferences, e.g. Pref_HudMode
+	DataStatusAttribute = "DataStatus", -- Loading | Loaded | Unsaved (DataStore unavailable)
 	RunKillsAttribute = "RunKills",
 	RunAuraAttribute = "RunAura",
 	TeamAttribute = "Team", -- "" | Red | Blue
@@ -80,6 +84,7 @@ local Config = {
 	CombatActionRemoteName = "CombatAction",
 	ShieldBlockRemoteName = "ShieldBlock",
 	CombatFeedbackRemoteName = "CombatFeedback",
+	PreferenceRemoteName = "SavePreference",
 }
 
 return table.freeze(Config)

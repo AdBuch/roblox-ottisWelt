@@ -16,6 +16,9 @@
         },
         "CombatFeedback": {
           "$className": "RemoteEvent"
+        },
+        "SavePreference": {
+          "$className": "RemoteEvent"
         }
       }
     },
