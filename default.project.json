@@ -8,7 +8,7 @@
       },
       "Remotes": {
         "$className": "Folder",
-        "WeaponAttack": {
+        "CombatAction": {
           "$className": "RemoteEvent"
         },
         "ShieldBlock": {

@@ -1,9 +1,9 @@
 --!strict
 -- Safety net, checked twice per second (never every frame):
---   fighters outside the arena floor      -> back to the arena start
---   spectators on the arena floor/lost    -> back to the tribune walkway
---   lobby players who fell out of the hall -> back to the lobby spawn
---   zombies outside the arena floor       -> back to a valid spot inside the arena
+--   players in the arena (fighting, countdown, results) outside the floor -> arena start
+--   spectators / waiting co-op players on the arena floor or lost         -> tribune walkway
+--   lobby players who fell out of the complex                             -> lobby spawn
+--   zombies outside the arena floor                                       -> valid spot inside
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
@@ -12,8 +12,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
 local GameStates = require(ReplicatedStorage.Shared.GameStates)
 local Arena = require(script.Parent.Arena)
-local GameStateService = require(script.Parent.GameStateService)
 local LobbyService = require(script.Parent.LobbyService)
+local MatchService = require(script.Parent.MatchService)
 
 local PREFIX = "[OttiArena][Server]"
 local CHECK_INTERVAL = 0.5
@@ -34,19 +34,20 @@ local function checkPlayers()
 			continue
 		end
 		local position = root.Position
-		local state = GameStateService.getState(player)
-		if GameStates.isFighter(state) or state == GameStates.EnteringArena or state == GameStates.Victory then
+		local state = MatchService.getState(player)
+		local location = player:GetAttribute(GameStates.LocationAttribute)
+		if location == "Arena" and (GameStates.isFighter(state) or state == GameStates.Countdown or state == GameStates.Victory or state == GameStates.MatchComplete) then
 			if not Arena.isInside(position, 1) then
 				move(character, root, Arena.getStartCFrame(), player.Name, "arena")
 			end
-		elseif state == GameStates.Spectating then
+		elseif location == "Tribune" then
 			local onArenaFloor = Arena.isInside(position, -1) and position.Y < Arena.Layout.TribuneWalkwayY - 4
 			if onArenaFloor or not Arena.isInTribune(position) then
 				move(character, root, Arena.getTribuneCFrame(), player.Name, "tribune")
 			end
-		elseif state == GameStates.Lobby or state == GameStates.EquipmentSelection then
+		elseif GameStates.isInLobby(state) then
 			if not LobbyService.isInside(position) then
-				move(character, root, GameStateService.getLobbyCFrame(), player.Name, "lobby")
+				move(character, root, MatchService.getLobbyCFrame(), player.Name, "lobby")
 			end
 		end
 	end

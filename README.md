@@ -1,70 +1,66 @@
 # Otti Colosseum
 
-A complete Roblox prototype game loop built with VS Code + Rojo:
+A multiplayer-ready Roblox arena game built with VS Code + Rojo: an underground gladiator complex,
+three game modes (Solo Arena, Co-op Legions, Team Battle), eight weapons with special attacks and combos,
+eight shields, five zombie types with their own AI personalities, healing shells and **Aura Points**.
 
-**underground prison lobby → buy/choose equipment → enter the arena → survive six zombie rounds
-(1, 2, 4, 8, 16, 32) → earn coins → fireworks and victory → back to the lobby.**
+Plain Luau (strict), no packages, no Toolbox assets, no uploaded asset IDs. Everything is generated from Parts,
+built-in materials, built-in SpecialMesh shapes, ParticleEmitters and lights. The server decides every
+gameplay outcome (damage, hits, combos, Aura, ownership, scores, victories).
 
-Plain Luau (strict), no packages, no Toolbox assets, no uploaded asset IDs. Everything is generated
-from Parts, built-in materials, built-in SpecialMesh shapes, ParticleEmitters and lights at runtime.
-The server makes every gameplay decision.
-
-> **One fighter at a time.** This prototype runs one arena run per server. While someone is
-> fighting, the arena gate shows **ARENA BUSY** and other players can watch from the tribune.
-> The code keeps fighter data in a `run` object so multiple runs can be added later.
+> **One arena match per server.** While a match runs, the arena gates are closed. Everyone else can shop,
+> train, visit the Zombie Archive or watch from the TRIBUNES. The code keeps per-match data in one `Match`
+> record, so parallel arenas can be added later.
 
 ## Project structure
 
 ```
-default.project.json                Rojo mapping (+ Remotes, + Health override)
-src/
-  shared/      -> ReplicatedStorage.Shared
-    Config.luau                     names, attributes, remotes, shell healing/respawn
-    CombatConfig.luau               player/shield/crowd tuning, zombie cap (32), sounds, debug switch
-    GameStates.luau                 per-player states (LOBBY, ROUND_ACTIVE, VICTORY, …)
-    WeaponDefinitions.luau          4 weapons: stats and prices
-    ShieldDefinitions.luau          4 shields: reduction and prices
-    ZombieDefinitions.luau          5 zombie types: stats, coins, availability, weights, looks
-    RoundDefinitions.luau           six rounds, countdowns, weighted variant picking
-  server/      -> ServerScriptService.Server
-    Main.server.luau                entry point: builds the world, starts the services
-    Arena.luau                      Colosseum + accessible tribune walkways and stairs
-    LobbyService.luau               underground lobby (cells, torches, gate, tribune door, shop wall)
-    EquipmentShopService.luau       pedestals with models, plaques and BUY/EQUIP prompts
-    EquipmentModels.luau            procedural weapon/shield/arrow models
-    InventoryService.luau           coins, owned/equipped items, purchases (session storage)
-    CoinService.luau                kill rewards (exactly once per zombie death)
-    GameStateService.luau           state machine: lobby/arena/tribune/defeat/victory, run lifecycle
-    WaveService.luau                six fixed rounds, intermissions, victory trigger
-    VictoryService.luau             fireworks and fanfare
-    PlayerCombatService.luau        weapons in hand, melee/bow attacks, blocking, hits on the player
-    ZombieFactory.luau              builds a zombie rig for any type
-    ZombieService.luau              per-zombie AI, specials, damage, death, cleanup
-    ZombieCrowdService.luau         melee slots and the 4-attacker limit around the player
-    ArenaSafetyService.luau         returns anyone/anything out of bounds to a valid place
-    ShellService.luau               healing shells (+3, respawn after 12 s)
-    CombatUtil.luau                 distance, facing, line-of-sight helpers
-    Remotes.luau                    resolves the RemoteEvents
-  client/      -> StarterPlayer.StarterPlayerScripts.Client
-    Main.client.luau                wires everything, HUD state, target bar
-    HudController.luau              HUD built from code
-    InputController.luau            LMB attack / RMB block, touch ATTACK/BLOCK buttons
-    ShopController.luau             per-player shop plaques, prompt text, equipped highlight
-    EffectsController.luau          floating damage numbers
-    ZombieAnimator.luau             client-side walk cycle for all zombies
-  character/   -> StarterPlayer.StarterCharacterScripts
-    Health.server.luau              empty override: no automatic health regeneration
+default.project.json                 Rojo mapping (+ Remotes, + Health override)
+src/shared/   -> ReplicatedStorage.Shared
+  Config                             names, tags, attributes, remotes, shells
+  CombatConfig                       player/crowd/shield/parry/combo tuning, rate limits, feedback kinds
+  GameStates                         player + match states (LOBBY … CLEANUP)
+  GameModeDefinitions                Solo / Co-op / Team Battle rules
+  WeaponDefinitions                  8 weapons (basic + 2 specials each)
+  ShieldDefinitions                  8 shields (reduction, angle, speed, raise time, bash, arrows)
+  SpecialMoveDefinitions             every basic attack and special move as data
+  ComboDefinitions                   2-3 combos per weapon
+  ZombieDefinitions                  5 zombie types (stats, Aura, availability, weights, looks)
+  ZombieAIProfiles                   5 AI personalities for the shared zombie AI
+  RoundDefinitions                   round sizes per mode, weighted variant picking
+src/server/   -> ServerScriptService.Server
+  Main.server                        builds the world, starts services
+  Arena / LobbyService               Colosseum + tribunes / underground complex
+  MatchService                       match state machine, Solo/Co-op flow, cleanup, combat rules, prompts
+  PartyService / TeamBattleService   co-op party lobby / team lobby + PvP match runtime
+  WaveService                        six-round zombie runs (mode-aware, simultaneous cap)
+  InventoryService / AuraService     Aura Points, items, purchases, migration / rewards
+  EquipmentShopService / EquipmentModels   shop pedestals / procedural weapons, shields, arrows, nets
+  PlayerCombatService                hands, blocking/parry, incoming damage, action requests
+  SpecialMoveService / ComboService  move execution / server-side combo recognition
+  CombatTargets / CombatRules        hittable targets (zombies, enemies, dummies) / who may hit whom
+  ProjectileService / CombatEffects  server-simulated arrows / sparkles, glows, rings, nets
+  ZombieService / ZombieFactory      shared zombie AI / zombie models
+  ZombieThreatService / ZombieCrowdService   threat + target distribution / melee slots, 4-attacker cap
+  ZombieDisplayService               ZOMBIE ARCHIVE cages
+  TrainingService                    training dummies
+  ShellService / VictoryService      healing shells / fireworks
+  ArenaSafetyService / PlayerTagService   out-of-bounds safety / overhead name + health tags
+src/client/   -> StarterPlayer.StarterPlayerScripts.Client
+  Main.client                        wiring, header/banners, feedback, target bar
+  CombatHudController                HUD (AURA bar, specials with cooldowns, combo popup, kill feed)
+  InputController                    mouse/keyboard, gamepad and touch input (incl. mobile buttons)
+  PartyController                    co-op / team roster panel, Team Battle scoreboard
+  ShopController                     per-player shop plaques, prompt text, equipped outline
+  EffectsController                  damage numbers, dash/lunge/knockback on your own character
+  ZombieAnimator                     client walk cycle for arena zombies
+src/character/ -> StarterCharacterScripts
+  Health.server                      empty override: no automatic health regeneration
 ```
 
-Remotes (`ReplicatedStorage.Remotes`):
-
-| RemoteEvent | Direction | Payload |
-|---|---|---|
-| `WeaponAttack` | client → server | aim point (only used by the bow; validated) |
-| `ShieldBlock` | client → server | `true` / `false` (a request; the server owns the block state) |
-| `CombatFeedback` | server → client | `Swing`, `Hit`, `Block`, `PlayerHit`, `Heal`, `Coins`, `Shop`, `Slowed` |
-
-Shop and doors use server-side **ProximityPrompts**, no remotes.
+Remotes: `CombatAction` (client → server: action + aim point), `ShieldBlock` (client → server: true/false),
+`CombatFeedback` (server → client: HUD messages). Both client remotes are rate-limited (10/s per player).
+Lobby interactions use server-side ProximityPrompts.
 
 ## Start Rojo and connect Studio
 
@@ -72,170 +68,164 @@ Shop and doors use server-side **ProximityPrompts**, no remotes.
 rojo serve
 ```
 
-1. Run it in this folder; it should print `Rojo server listening` on port `34872`.
-   If the port is in use, a `rojo serve` is already running: reuse it or stop it with Ctrl+C.
-2. Studio: open your place, Plugins → **Rojo** → **Connect**.
-3. Explorer should show `ServerScriptService.Server` (GameStateService, LobbyService, …),
-   `StarterPlayer.StarterPlayerScripts.Client` (HudController, …), `StarterCharacterScripts.Health`
-   and `ReplicatedStorage.Remotes` with `WeaponAttack`, `ShieldBlock`, `CombatFeedback`.
-4. **View → Output**, then **Shift+F5** (stop) and **F5** (play).
+Then in Studio: Plugins → **Rojo** → **Connect**, **View → Output**, **Shift+F5**, **F5**.
+For multiplayer tests: **Test → Clients and Servers → Local Server** with 2 or more players.
 
 ## Controls
 
-| Input | Action |
-|---|---|
-| Left mouse button | Attack with the equipped weapon (the character turns toward the cursor; the bow shoots at the cursor) |
-| Right mouse button (hold) | Block with the shield; you keep facing where the camera looks |
-| E (hold) at a pedestal | Buy or equip that item |
-| E (hold) at a door | ENTER ARENA / TRIBUNE / RETURN TO LOBBY |
-| Touch: **ATTACK** / hold **BLOCK** | Mobile fallback |
-
-Weapon (right hand) and shield (left hand) are always visible together. Attacks only work in the arena.
-Clicking while blocking does nothing. A block lasts at most 4 s (server safeguard): release and press again.
-
-## Game loop
-
-1. **Lobby (spawn and respawn point):** a safe underground hall below the Colosseum. Nothing can hurt you here.
-2. **Equipment wall (west):** 4 weapons and 4 shields on pedestals. Starter items are owned. Buy with coins, then equip.
-3. **ENTER ARENA (north gate):** checks your loadout, closes the gate and puts you on the arena floor. Round 1 starts after a 3 s countdown.
-4. **Rounds:** 1, 2, 4, 8, 16 and 32 zombies. The next round starts only when every zombie is dead: `ROUND COMPLETE` → 4 s countdown.
-   No healing between rounds; shells are the only healing.
-5. **Death:** the run ends, all zombies are removed and you respawn in the lobby. Coins and items are kept.
-6. **Victory (Round 6 cleared):** `COLOSSEUM CONQUERED`, fireworks, fanfare and a summary (kills, coins earned), then `GAME COMPLETE`.
-   After about 12 s you are returned to the lobby and the arena is ready for another run.
-7. **TRIBUNE (east door):** spectator stands with a lower and a middle walkway, two staircases, a railing, two viewing platforms
-   and a RETURN TO LOBBY door. Spectators can't attack and can't be attacked.
-
-## Weapons
-
-| Weapon | Price | Damage | Cooldown | Range | Notes |
-|---|---|---|---|---|---|
-| Rusty Gladius | free | 18 | 0.55 s | 7 | starter |
-| Legion Sword | 80 | 28 | 0.65 s | 7.5 | polished bronze and steel |
-| Hunter Bow | 130 | 24 | 0.9 s | 90 | arrows at 110 studs/s, stopped by walls |
-| Gladiator Morning Star | 190 | 40 | 1.15 s | 8 | wide arc, short stagger |
-
-Melee hits the **closest valid zombie** in range and arc (one target per swing). Range is measured to the zombie's body.
-
-## Shields
-
-| Shield | Price | Frontal reduction | Notes |
+| | Keyboard & mouse | Gamepad | Touch |
 |---|---|---|---|
-| Wooden Buckler | free | 50 % | starter, small |
-| Legion Shield | 60 | 65 % | red wood, bronze rim |
-| Arena Tower Shield | 120 | 78 % | large, slower while blocking |
-| Champion Shield | 200 | 88 % | ornate bronze, double stagger on blocked attackers |
+| Basic attack | Left click | R2 | ATTACK |
+| Block / parry (hold) | Right click | L2 | BLOCK |
+| Special 1 | Q | X | SPECIAL 1 card |
+| Special 2 | E | Y | SPECIAL 2 card |
+| Interact (shop, doors, posts) | **F** | D-pad up | tap prompt |
 
-Blocking only works when the attacker is within 60° in front of you; hits from the side or behind deal full damage.
+The HUD shows the detected control scheme. Interactions use **F** because Q and E are special attacks.
 
-## Zombies
+## The basement (lobby)
 
-| Type | HP | Damage | Speed | Attack cooldown | Coins | From round | Weight |
-|---|---|---|---|---|---|---|---|
-| Legion Remnant (balanced) | 60 | 10 | 12 | 1.4 s | 10 | 1 | 40 |
-| Rotten Velite (fast) | 40 | 7 | 15 | 0.95 s | 8 | 2 | 25 |
-| Arena Brute (strong) | 100 | 18 | 8.5 | 2.1 s | 18 | 3 | 17 |
-| Zombie Net Fighter (tactical) | 55 | 8 | 11.5 | 1.3 s | 14 | 3 | 13 |
-| Zombie Arena Champion (elite) | 130 | 15 | 9 | 1.6 s | 25 | 4 | 5 |
+About twice the old lobby, with wide open floors: arrival hall with the welcome board (spawn), **WEAPONS** wall (west),
+**SHIELDS** wall (south), mode area (north) with **SOLO ARENA**, **CO-OP LEGIONS** and **TEAM BATTLE** gates,
+**ZOMBIE ARCHIVE** gallery (east annex), **TRAINING** yard (south-west), **TRIBUNES** door (east), a barred prison
+corridor and storage corners. The lobby is a safe zone: no damage, no PvP. Attacks only hit the training dummies.
 
-Unavailable types are filtered out and the remaining weights normalized, so Round 1 is only Legion Remnants.
+## Game modes
 
-- **Net Fighter:** every 7 s it may raise its net (0.7 s telegraph) and throw it from up to 13 studs.
-  If it lands, you are 25 % slower for 2 s (refreshes, never stacks).
-- **Arena Champion:** raises its glowing ornate shield for 1.6 s, then must wait 4.5 s. It is also exposed right after attacking.
-  While raised, attacks from the front are **BLOCKED**; attacks from the side or behind (including arrows) still hit.
+| Mode | Players | Rules |
+|---|---|---|
+| **Solo Arena** | 1 | Rounds 1, 2, 4, 8, 16, 32 zombies. Death ends the run. 8 shells. |
+| **Co-op Legions** | 1-4 | Base rounds 2, 4, 8, 12, 20, 32 × 0.75 / 1.0 / 1.25 / 1.5 (1-4 players, rounded up), max 48 active at once. Shared rounds; the dead wait on the tribune and return with 60 % health after a completed round; a full wipe ends the run. Killer +100 %, assists +30 % of the zombie's Aura (once per player per zombie). 4 + 2 per player shells (max 12). |
+| **Team Battle** | 1v1 - 4v4 | Red vs Blue, no zombies, no friendly fire, respawn after 4 s at the team spawn with 2 s protection. First to 20 eliminations, or more eliminations after 8 minutes; a tie goes to sudden death. Winners +80 Aura, losers +25. Shells off by default (`ShellsEnabled`). |
 
-## Fairness and crowd control
+**Co-op lobby:** hold F at **JOIN / LEAVE PARTY**, then **READY** (needs a valid loadout). The leader (★) holds F at
+**START**. Only ready members fight. The roster shows on the board and in the right-side panel.
 
-- Every zombie attack has a visible wind-up (0.3–0.6 s) and is re-checked when it lands: reach, line of sight, target still fighting.
-- At most **4 zombies** attack at the same time, and new wind-ups start at least 0.25 s apart.
-- After a landed zombie hit you are immune for **0.35 s**, so several zombies can't remove your health in one burst.
-- Player health is **120** and never regenerates on its own.
+**Team lobby:** hold F on the **RED** or **BLUE** pad (max 4 each), then **READY**. **AUTO BALANCE** evens the teams,
+**LEAVE TEAM** leaves. With at least one ready player per team, a 15 s countdown starts; it cancels if that stops being true.
 
-## Zombie separation
+## Weapons (8)
 
-- **Solid bodies:** each zombie's HumanoidRootPart is sized to its torso and collides (collision group `Zombies`
-  collides with `Default` and itself). Players can't walk through living zombies and zombies can't overlap.
-- **Melee slots:** `ZombieCrowdService` puts 10 slots on a 4.4-stud ring around the player. A nearby zombie claims the free
-  slot closest to it; zombies without a slot circle on an 11-stud ring and wait for a free one.
-- **Separation steering:** each zombie adds a push away from neighbours closer than 3.8 studs to its movement goal.
-- **Spawn spacing:** zombies spawn spread over 7 gates, offset sideways and in depth, 0.25 s apart.
-- **Stuck detection:** a zombie that wants to move but doesn't first sidesteps, then is moved to a free spot.
-- **Corpses** are anchored, stop colliding, fade for 1 s and are removed.
+| Weapon | Price | Basic | Special 1 (Q) | Special 2 (E) |
+|---|---|---|---|---|
+| Rusty Gladius | free | 18 dmg, 0.55 s, 7 | QUICK THRUST (22, lunge, 4 s) | SHIELD COUNTER (16 + shield bash, 7 s) |
+| Legion Sword | 80 | 28, 0.65 s, 7.5 | LEGION COMBO (3 strikes, 6 s) | RISING SLASH (34, big stagger, 8 s) |
+| Hunter Bow | 130 | arrow 24, 0.9 s, 90 | TRIPLE SHOT (3 × 16, 7 s) | PIERCING ARROW (34, pierces 3, 9 s) |
+| Gladiator Morning Star | 190 | 40, 1.15 s, 8, wide | HEAVY CRUSH (55, 9 s) | CHAIN SWEEP (30, up to 3, 11 s) |
+| Gladiator Trident | 260 | 24, 0.75 s, 10 | TRIDENT RUSH (2 thrusts, 2nd ×1.25, lunge, 6 s) | NET AND STRIKE (net slow + auto thrust 26, 11 s) |
+| Hoplite Spear | 300 | 27, 0.85 s, 12 | PHALANX THRUST (36, big knockback, 7 s) | SPEAR SWEEP (22, up to 3 / 2 PvP, 12 s) |
+| Twin Arena Daggers | 340 | 14, 0.35 s, 5.5 | VIPER FLURRY (4 strikes while a target stays near, 8 s) | SHADOW STEP (dash, never through walls, + 24, 10 s) |
+| Arena Battle Axe | 380 | 44, 1.3 s, 8 | EXECUTION ARC (50, ×2 vs zombies under 30 %, 9 s) | WHIRLWIND (32, up to 4 / 3 PvP at 40 %, 14 s) |
 
-## Coins, items and storage
+**Twin Arena Daggers are two-handed:** no shield, a second dagger in the left hand and a built-in **parry**
+(block button: 0.4 s window, −70 % damage, 1.2 s cooldown). The shop plaque and HUD say so.
 
-- Coins come only from zombie kills, awarded by the server to the killing player exactly once per death
-  (`CoinService` builds a reward event so assists or shared rewards can be added later).
-- `InventoryService` keeps one profile per **UserId** in server memory: coins, owned weapons/shields,
-  equipped weapon/shield. It survives death, returning to the lobby and rejoining the **same** server.
-  There is no DataStore yet; `serialize()` and the profile constructor are the hook points for it.
-- Purchases check ownership and balance (never negative, no duplicates). Equipping requires ownership.
-  The equipment in the hands is always rebuilt from the server inventory, so clients can't fake items.
+**PvP balance:** every move has its own PvP multiplier (0.4-0.75) and target cap, and no single PvP hit removes more
+than 45 % of max health, so nothing one-shots a full-health player. Slow moves have long, glowing wind-ups.
 
-## Expected output (start)
+## Combos (input window 0.8 s after the previous move ends)
 
-```
-[OttiArena][Server] Server script started
-[OttiArena][Server] Disabled 1 SpawnLocation(s) outside the arena for this session
-[OttiArena][Server] Arena ready: Colosseum 140x110 studs, 7 zombie gates, tribune walkways
-[OttiArena][Server] Lobby ready: underground hall, equipment wall, ENTER ARENA gate, TRIBUNE door
-[OttiArena][Server] Combat remotes ready (WeaponAttack, ShieldBlock, CombatFeedback)
-[OttiArena][Server] Ready: one fighter at a time, 6 rounds (1, 2, 4, 8, 16, 32 zombies)
-[OttiArena][Server] Equipment granted to <you>: Rusty Gladius + Wooden Buckler
-[OttiArena][Client] Ready: HUD, LMB attack / RMB block, shop displays
-```
+| Weapon | Combos |
+|---|---|
+| Rusty Gladius | Basic → Basic → Q **GLADIATOR'S POINT** ×1.4 · Block → E **IRON REPLY** ×1.5 · Q → Basic **SAND STEP** ×1.25 |
+| Legion Sword | Basic → Basic → E **TESTUDO BREAKER** ×1.4 · Q → Basic → E **CENTURION'S ORDER** ×1.6 |
+| Hunter Bow | Basic → Basic → Q **VOLLEY** ×1.3 · Block → E **STEADY AIM** ×1.4 |
+| Morning Star | Basic → Q **MACE AND THUNDER** ×1.3 · Basic → E **IRON STORM** ×1.3 |
+| Trident | Basic → Basic → Q **SEA STORM** ×1.3 · E → Basic **CAUGHT IN THE NET** ×1.5 |
+| Hoplite Spear | Block → Q **SHIELD WALL** ×1.4 · Basic → Basic → E **HOPLITE CIRCLE** ×1.3 |
+| Twin Daggers | Basic → Basic → Q **VIPER'S NEST** ×1.2 · Block → E **SHADOW COUNTER** ×1.5 · E → Basic → Basic **TWIN FANGS** ×1.3 |
+| Battle Axe | Basic → Q **HEADSMAN** ×1.3 · Basic → Basic → E **ARENA STORM** ×1.3 |
 
-During a run: `Run 1: <you> entered the arena`, `Round 1/6 started: 1 zombie(s)`, `Round 1 complete…`, …,
-`All rounds complete: COLOSSEUM CONQUERED`, `Run 1 ended: victory`.
-Rejected attacks print a short warning (at most every 2 s per reason); switch off with `DebugRejectedAttacks = false`.
+The client only sends its input; the server records **accepted** actions with server time and recognizes combos itself.
+Inputs during a running move are rejected (macros can't skip attack timing), cooldowns still apply, and the history is
+cleared on death, stun, state changes or after a combo.
+
+## Shields (8)
+
+| Shield | Price | Block | Arrows | Angle | Move while blocking | Raise |
+|---|---|---|---|---|---|---|
+| Wooden Buckler | free | 50 % | 50 % | 60° | 100 % | 0.10 s |
+| Legion Shield | 60 | 65 % | 60 % | 60° | 100 % | 0.12 s |
+| Arena Tower Shield | 120 | 78 % | 85 % | 70° | 80 % | 0.20 s |
+| Parma Equestris | 180 | 60 % | 60 % | 53° | 110 % | 0.05 s |
+| Champion Shield | 200 | 88 % | 80 % | 60° | 100 % | 0.15 s (×2 stagger) |
+| Scutum | 250 | 82 % | 95 % | 76° | 75 % | 0.20 s |
+| Hoplon | 280 | 72 % | 75 % | 66° | 85 % | 0.15 s (strongest bash) |
+| Thraex Shield | 320 | 84 % | 80 % | 49° | 115 % | 0.04 s |
+
+## Zombies and their AI personalities
+
+| Type | HP | Dmg | Aura | From | Weight | Personality |
+|---|---|---|---|---|---|---|
+| Legion Remnant | 60 | 10 | 10 | 1 | 40 | **Disciplined**: direct approach, nearest player, occasionally raises its shield, keeps formation |
+| Rotten Velite | 40 | 7 | 8 | 2 | 25 | **Skirmisher**: circles and changes direction, hunts low-health/exposed players, retreats after attacking, goes around big raised shields |
+| Arena Brute | 100 | 18 | 18 | 3 | 17 | **Tank**: prefers nearby damage dealers, won't chase far, roars before heavy hits, its attacks ignore half of a shield's protection |
+| Zombie Retiarius | 55 | 8 | 14 | 3 | 13 | **Controller**: keeps medium distance until its net is used (slows moving players 25 % for 2 s), steps aside for brutes/champions |
+| Arena Champion | 130 | 15 | 25 | 4 | 5 | **Elite**: glowing guard blocks frontal hits (side/rear and arrows from the side get through), picks dangerous or well-equipped players, shield-bashes blockers, is exposed after a missed attack |
+
+All five run on **one** shared AI with per-type profiles (`ZombieAIProfiles`).
+
+**Multiplayer target distribution:** each zombie scores every living arena fighter: threat (damage dealt to it, blocks,
+nearby healing; decays over time), proximity, missing health, movement, gear value and exposure, weighted by its
+personality. Players already chased by more than their fair share (living zombies ÷ living players) score lower, and the
+current target gets a small bonus. Targets are re-evaluated about every 1.2 s, not every frame.
+
+**Crowd and separation:** each player has 10 melee slots and at most 4 attackers at once. The others circle, wait or
+pick another player. Solid torso-sized collision (`Zombies` group), separation steering, spawn spacing over 7 gates,
+stuck detection, staggered AI ticks and a global pathfinding budget (12 requests/s) keep 48 zombies stable.
+Corpses stop colliding immediately.
+
+## Shells, Aura, archive and training
+
+- **Shells:** 12 symmetric spots. Solo uses 8, Co-op 4 + 2 per player (max 12), Team Battle none by default.
+  Each heals exactly **+3** (never above max, not used at full health), only for the collector, and respawns after 12 s (never right under a player).
+- **Aura Points** replace coins everywhere. `AURA: n` is always shown at the top. Profiles are kept per UserId for
+  the server session. Old profiles with `coins` are migrated once (`coins` is added to `auraPoints` and cleared in the same step).
+- **Zombie Archive:** five barred cages with the real arena models (anchored, tagged `ZombieDisplay`, never targets, no AI)
+  and a plaque each: name, role, health, damage, ability, reward and first round.
+- **Training yard:** two straw dummies with damage numbers. Specials and combos work, there's no Aura or eliminations, and they refill after 3 s.
 
 ## Studio test steps
 
-1. **Spawn:** press F5. You stand in the torch-lit underground hall facing the `OTTI COLOSSEUM` board.
-   HUD: `OTTI COLOSSEUM`, `COINS 0`, `WEAPON Rusty Gladius`, `SHIELD Wooden Buckler`. A sword and buckler are in your hands.
-2. **Shop:** walk to the west wall. 4 weapons + 4 shields on pedestals. The starter items say EQUIPPED (green outline),
-   the rest LOCKED with prices. Holding E on a locked item shows `Not enough coins…`.
-3. **Safety:** left click in the lobby does nothing. Hold right click: the shield rises (`BLOCKING`).
-4. **Tribune:** hold E at the east door. You arrive on the lower walkway. Walk around, take a staircase to the middle walkway,
-   visit a viewing platform. Hold E at `RETURN TO LOBBY` to go back.
-5. **Arena:** hold E at the north `ENTER ARENA` gate. You appear on the arena floor, `GET READY`, then `ROUND 1 / 6 · ZOMBIES 1 / 1`.
-6. **Fight:** left click at the zombie: damage numbers, flash, `+10 COINS` when it dies. Hold right click facing it: hits do 5 instead of 10.
-   Turn your back while blocking: full 10.
-7. **Shells:** when hurt, touch a golden shell: exactly `+3 HEALTH`; it reappears after 12 s. At full health it isn't used.
-8. **Rounds:** check `ZOMBIES 2/2`, `4/4`, `8/8`, `16/16`, `32/32`. Zombies surround you instead of stacking, at most 4 attack at once.
-   From Round 3 Net Fighters (blue-gray, net) and Brutes appear, from Round 4 the rare purple-crested Champion.
-9. **Defeat:** let the zombies win. `DEFEATED`, all zombies vanish, you respawn in the lobby with your coins.
-10. **Buy:** with ≥ 80 coins buy the Legion Sword (coins drop by 80 immediately, it becomes EQUIPPED in your hand).
-11. **Bow:** buy/equip the Hunter Bow; arrows fly to the cursor and stop at walls.
-12. **Victory:** clear Round 6. `COLOSSEUM CONQUERED`, fireworks, summary, `GAME COMPLETE`, back to the lobby after ~12 s.
-    Enter again: a fresh run starts at Round 1.
+**Solo**
+1. F5. You spawn in the arrival hall: `AURA: 0`, Rusty Gladius + Wooden Buckler in your hands, Q/E cards bottom right.
+2. Walk to the TRAINING yard (south-west), hit a dummy, then try Basic → Basic → Q: you should see a `GLADIATOR'S POINT!` popup.
+3. Visit the ZOMBIE ARCHIVE (east): 5 caged zombies with plaques, idling and rattling bars.
+4. Hold F at the SOLO ARENA gate (north-west). GET READY, then ROUND 1 / 6. Kill zombies: `+10 AURA`.
+5. Die or win: you return to the lobby and keep your Aura. Buy something with F at a pedestal (e.g. Legion Sword for 80).
 
-## Troubleshooting
+**Two-player co-op** (Test → Local Server, 2 players)
+1. Both hold F at JOIN / LEAVE PARTY, then READY. The leader (★) holds F at START.
+2. Round 1 has 2 zombies (2 × 100 %). Both players are targeted, damage gives assist Aura (`+3 AURA (ASSIST)`).
+3. Let one player die: they wait on the tribune and return with 72 HP after the round. If both die, the run ends.
 
-- **Plugin can't connect / port in use** – only one `rojo serve` can run; reuse it or stop it.
-- **Old scripts in Explorer** (e.g. `SwordService`, `Hud`, `CombatInput`) – disconnect and reconnect Rojo.
-- **`ReplicatedStorage.Shared.X is missing`** – connect Rojo before pressing Play.
-- **Health regenerates** – `StarterCharacterScripts.Health` must exist (from Rojo); the server also removes any `Health` script.
-- **Attack rejected: invalid facing direction** – aim at the zombie with the mouse; the character turns toward the cursor.
-- **Too hard / too easy** – `ZombieDamageMultiplier`, `MaxSimultaneousAttackers` and `HitImmunitySeconds` in `CombatConfig.luau`.
-- **Build check** – `rojo build -o OttiArena.rbxlx` must succeed.
+**Four-player co-op** (4 players)
+1. Join, ready, start as above. Round 1 = 3 zombies (2 × 1.5), Round 6 = 48. 12 shells are active.
+2. Zombies spread across all four players; no player has more than 4 attackers at once.
+
+**One-versus-one** (2 players)
+1. One holds F on the RED pad, the other on BLUE. Both READY → a 15 s countdown.
+2. In the arena: `RED 0 — 0 BLUE`, `TIME 08:00`. Hits work only on the opponent, with damage caps. The defeated player respawns at their team spawn after 4 s with a force field.
+3. To test sudden death, temporarily set `MatchSeconds` to 30 in `GameModeDefinitions` and leave the score tied.
+
+**Four-versus-four** (8 players)
+1. 4 on each pad (a 5th is told the team is full). Try AUTO BALANCE with 5 v 3.
+2. Ready up, fight: friendly fire does nothing, eliminations/assists/deaths show in the right panel and the kill feed.
+3. First to 20 wins: result screen, fireworks, +80 / +25 Aura, everyone back in the lobby, and a new match can start.
 
 ## Limitations
 
-- One active fighter per server (explicit in the HUD: "Arena busy: … watch from the TRIBUNE").
-- Coins and items are kept only for the current server session (no DataStore yet).
-- Weapon swings, the bow draw and the shield raise move the equipment, not the player's arms (no uploaded animations).
-- Zombie walk cycles are animated on each client; attack, net and guard poses come from the server.
-- Arrows are simulated and moved on the server, so they look slightly less smooth on high-latency clients.
-- Sounds are built-in Studio placeholders (`rbxasset://sounds/...`); the fanfare is a pitched placeholder chime.
-- The tribune is reached by a teleport door (physical stairs in the lobby are decorative), for reliability.
-- Balance hasn't been play-tested yet; tune it in `CombatConfig`, `ZombieDefinitions` and `WeaponDefinitions`.
+- One arena match per server; parallel matches would need a second arena instance.
+- Aura and items are session-only (no DataStore yet; `InventoryService.serialize/migrateProfile` are the hooks).
+- Swings, thrusts, spins and parries move the equipment, not the player's arms (no uploaded animations).
+- Dashes, lunges and knockback on players are applied by the player's own client (Roblox gives it physics ownership); the server validates the hits afterwards.
+- Arrows are simulated on the server and may look slightly choppy on high-latency clients.
+- Team Battle eliminations count every valid kill; Aura is only paid at the end of a match, so farming idle players gives no Aura.
+- Sounds are built-in placeholders. Balance (zombie damage, PvP multipliers) hasn't been play-tested yet; tune it in the shared definitions.
 
-## Optional: VS Code type checking
+## Troubleshooting
 
-With the Luau Language Server extension:
-
-```bash
-rojo sourcemap default.project.json --output sourcemap.json --watch
-```
+- **Old modules still in Explorer** (`GameStateService`, `CoinService`, `HudController`, `WaveConfig`): disconnect and reconnect Rojo.
+- **Prompts don't react to E:** interactions use **F** now (E is Special 2).
+- **"Attack … rejected: …" warnings:** temporary diagnostics, switch off with `DebugRejectedAttacks = false` in `CombatConfig`.
+- **Build check:** `rojo build -o OttiArena.rbxlx` must succeed.

@@ -1,60 +1,70 @@
 --!strict
--- Player equipment and authoritative player combat.
---   * Every character carries its equipped weapon (right hand) and shield (left hand), both
---     welded and visible at once (no Tools). The models come from EquipmentModels and the
---     loadout from InventoryService, so a client can't claim items it doesn't own.
---   * WeaponAttack(aimPoint): only fighters (GameStates.isFighter) can deal damage. The server
---     validates alive, equipment, not blocking and the weapon cooldown, then
---       melee: picks the closest living zombie inside the weapon's range and arc with line of sight
---       bow:   fires an arrow from the character's own position toward the aim point and
---              simulates it on the server (walls stop it; it only damages zombies)
---     Every attack can damage at most one zombie.
---   * ShieldBlock(boolean): a request; the server owns the block state, enforces a maximum
---     block duration and decides whether zombie hits are blocked (applyZombieHit).
---   * Zombie hits: 0.35 s immunity after a landed hit, shield reduction per shield, no regen.
+-- Player equipment, defense and authoritative attack handling.
+--   * Hands: the equipped weapon (right) and shield (left) are welded and visible together.
+--     Twin daggers are two-handed: a second dagger replaces the shield and blocking becomes a
+--     short parry. Models are always rebuilt from InventoryService (no client claims).
+--   * CombatAction(action, aimPoint): action = "Basic" | "Special1" | "Special2". The server
+--     rate-limits, checks the combat context (CombatRules), alive, busy time, per-move cooldowns,
+--     records the input for combos (ComboService) and runs the move (SpecialMoveService).
+--   * ShieldBlock(boolean): request only; the server owns block/parry state, raise time and the
+--     maximum block duration.
+--   * Incoming damage (zombies and PvP) goes through here: spawn protection, immunity, shield
+--     angle/reduction, parry, PvP caps, knockback and slows.
 
-local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
-local Workspace = game:GetService("Workspace")
 
 local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
-local GameStates = require(ReplicatedStorage.Shared.GameStates)
+local ComboDefinitions = require(ReplicatedStorage.Shared.ComboDefinitions)
+local SpecialMoveDefinitions = require(ReplicatedStorage.Shared.SpecialMoveDefinitions)
 local WeaponDefinitions = require(ReplicatedStorage.Shared.WeaponDefinitions)
+local CombatEffects = require(script.Parent.CombatEffects)
+local CombatRules = require(script.Parent.CombatRules)
+local CombatTargets = require(script.Parent.CombatTargets)
 local CombatUtil = require(script.Parent.CombatUtil)
+local ComboService = require(script.Parent.ComboService)
 local EquipmentModels = require(script.Parent.EquipmentModels)
 local InventoryService = require(script.Parent.InventoryService)
 local Remotes = require(script.Parent.Remotes)
-local ZombieService = require(script.Parent.ZombieService)
+local SpecialMoveService = require(script.Parent.SpecialMoveService)
 
-type WeaponDefinition = WeaponDefinitions.WeaponDefinition
-type Zombie = ZombieService.Zombie
+type Anim = SpecialMoveDefinitions.Anim
+type ComboInput = ComboDefinitions.ComboInput
 
 local PREFIX = "[OttiArena][Server]"
-local FACING_RETRY_SECONDS = 0.12 -- the client turns the character just before attacking
 local MAX_AIM_DISTANCE = 400
 
--- Shield poses relative to the left hand's grip attachment (+Y forward when the arm hangs,
--- +Z up the arm, +X to the character's right).
+-- Poses relative to the hand's grip attachment (+Y forward when the arm hangs, +Z up the arm).
 local SHIELD_IDLE = CFrame.new(-0.45, 0.1, 0.7) * CFrame.Angles(0, 0, math.rad(90)) -- on the outer forearm
 local SHIELD_BLOCK = CFrame.new(0.9, 1.4, 1.6) -- raised in front of the chest
+local SHIELD_BASH = CFrame.new(0.9, 2.6, 1.6) -- pushed forward
+local OFFHAND_REST = CFrame.Angles(math.rad(30), 0, 0)
 
 type PlayerState = {
 	weaponId: string?,
-	shieldId: string?,
+	shieldId: string?, -- nil when two-handed
 	weaponWeld: Weld?,
-	shieldWeld: Weld?,
+	offhandWeld: Weld?,
+	weaponModel: Model?,
+	offhandModel: Model?,
 	weaponGrip: CFrame,
-	shieldGrip: CFrame,
-	shieldModel: Model?,
-	lastAttack: number,
+	offhandGrip: CFrame,
+	busyUntil: number,
+	cooldowns: { [string]: number },
 	blocking: boolean,
+	blockStart: number,
 	blockToken: number,
+	parryUntil: number,
+	parryReadyAt: number,
 	lastHitTaken: number,
+	spawnProtectedUntil: number,
 	slowFactor: number,
 	slowToken: number,
+	actionToken: number, -- changes on death/state reset: running moves stop
+	actionBucket: number,
+	blockBucket: number,
+	bucketTime: number,
 	rejectLog: { [string]: number },
 }
 
@@ -69,16 +79,26 @@ local function getState(player: Player): PlayerState
 			weaponId = nil,
 			shieldId = nil,
 			weaponWeld = nil,
-			shieldWeld = nil,
+			offhandWeld = nil,
+			weaponModel = nil,
+			offhandModel = nil,
 			weaponGrip = CFrame.identity,
-			shieldGrip = CFrame.identity,
-			shieldModel = nil,
-			lastAttack = 0,
+			offhandGrip = CFrame.identity,
+			busyUntil = 0,
+			cooldowns = {},
 			blocking = false,
+			blockStart = 0,
 			blockToken = 0,
+			parryUntil = 0,
+			parryReadyAt = 0,
 			lastHitTaken = 0,
+			spawnProtectedUntil = 0,
 			slowFactor = 1,
 			slowToken = 0,
+			actionToken = 0,
+			actionBucket = CombatConfig.ActionRateLimit,
+			blockBucket = CombatConfig.BlockRateLimit,
+			bucketTime = os.clock(),
 			rejectLog = {},
 		}
 		states[player] = state
@@ -86,8 +106,25 @@ local function getState(player: Player): PlayerState
 	return state
 end
 
-local function isFighter(player: Player): boolean
-	return GameStates.isFighter(player:GetAttribute(GameStates.StateAttribute))
+-- Token buckets: at most N requests per second per player for each remote.
+local function allowRequest(state: PlayerState, kind: "action" | "block"): boolean
+	local now = os.clock()
+	local elapsed = now - state.bucketTime
+	state.bucketTime = now
+	state.actionBucket = math.min(CombatConfig.ActionRateLimit, state.actionBucket + elapsed * CombatConfig.ActionRateLimit)
+	state.blockBucket = math.min(CombatConfig.BlockRateLimit, state.blockBucket + elapsed * CombatConfig.BlockRateLimit)
+	if kind == "action" then
+		if state.actionBucket < 1 then
+			return false
+		end
+		state.actionBucket -= 1
+	else
+		if state.blockBucket < 1 then
+			return false
+		end
+		state.blockBucket -= 1
+	end
+	return true
 end
 
 -- Temporary diagnostics: one warning per player and reason every RejectLogInterval seconds.
@@ -112,8 +149,9 @@ local function updateWalkSpeed(player: Player)
 	end
 	local state = getState(player)
 	local speed = CombatConfig.PlayerWalkSpeed
-	if state.blocking then
-		speed = CombatConfig.BlockingWalkSpeed * InventoryService.getEquippedShield(player).BlockSpeedMultiplier
+	local shield = InventoryService.getActiveShield(player)
+	if state.blocking and shield then
+		speed = CombatConfig.BlockingWalkSpeed * shield.BlockSpeedMultiplier
 	end
 	humanoid.WalkSpeed = speed * state.slowFactor
 end
@@ -122,7 +160,6 @@ end
 -- Equipment in the hands
 ------------------------------------------------------------------------------------------
 
--- R15 hands or R6 arms with their grip attachments (fallback: a sensible grip offset).
 local function getGrip(character: Model, r15Name: string, r6Name: string, attachmentName: string): (BasePart?, CFrame)
 	local limb = character:FindFirstChild(r15Name) or character:FindFirstChild(r6Name)
 	if not limb or not limb:IsA("BasePart") then
@@ -142,11 +179,12 @@ local function attach(model: Model, core: BasePart, limb: BasePart, c0: CFrame, 
 	weld.Part1 = core
 	weld.C0 = c0
 	weld.Parent = core
+	model:SetAttribute("OttiEquipment", true)
 	model.Parent = character
 	return weld
 end
 
--- Rebuilds the weapon and shield models in the current character's hands from the inventory.
+-- Rebuilds the weapon and shield (or offhand dagger) in the current character's hands.
 function PlayerCombatService.refreshEquipment(player: Player)
 	local character = player.Character
 	if not character then
@@ -157,13 +195,9 @@ function PlayerCombatService.refreshEquipment(player: Player)
 			child:Destroy()
 		end
 	end
-
 	local state = getState(player)
-	state.weaponWeld = nil
-	state.shieldWeld = nil
-	state.shieldModel = nil
-	state.weaponId = nil
-	state.shieldId = nil
+	state.weaponWeld, state.offhandWeld, state.weaponModel, state.offhandModel = nil, nil, nil, nil
+	state.weaponId, state.shieldId = nil, nil
 
 	local rightHand, rightGrip = getGrip(character, "RightHand", "Right Arm", "RightGripAttachment")
 	local leftHand, leftGrip = getGrip(character, "LeftHand", "Left Arm", "LeftGripAttachment")
@@ -173,29 +207,82 @@ function PlayerCombatService.refreshEquipment(player: Player)
 	end
 
 	local weapon = InventoryService.getEquippedWeapon(player)
-	local shield = InventoryService.getEquippedShield(player)
+	local shield = InventoryService.getActiveShield(player)
 	local weaponModel, weaponCore = EquipmentModels.buildWeapon(weapon.Id)
-	local shieldModel, shieldCore = EquipmentModels.buildShield(shield.Id)
-	weaponModel:SetAttribute("OttiEquipment", true)
-	shieldModel:SetAttribute("OttiEquipment", true)
-
-	local shieldSound = Instance.new("Sound")
-	shieldSound.Name = "BlockSound"
-	shieldSound.SoundId = CombatConfig.ShieldSoundId
-	shieldSound.Volume = 0.6
-	shieldSound.Parent = shieldCore
-
 	state.weaponGrip = rightGrip
-	state.shieldGrip = leftGrip
+	state.offhandGrip = leftGrip
 	state.weaponWeld = attach(weaponModel, weaponCore, rightHand, rightGrip * EquipmentModels.weaponRestPose(weapon.Id), character)
-	state.shieldWeld = attach(shieldModel, shieldCore, leftHand, leftGrip * (if state.blocking then SHIELD_BLOCK else SHIELD_IDLE), character)
-	state.shieldModel = shieldModel
+	state.weaponModel = weaponModel
 	state.weaponId = weapon.Id
-	state.shieldId = shield.Id
+
+	if shield then
+		local shieldModel, shieldCore = EquipmentModels.buildShield(shield.Id)
+		local sound = Instance.new("Sound")
+		sound.Name = "BlockSound"
+		sound.SoundId = CombatConfig.ShieldSoundId
+		sound.Volume = 0.6
+		sound.Parent = shieldCore
+		state.offhandWeld = attach(shieldModel, shieldCore, leftHand, leftGrip * (if state.blocking then SHIELD_BLOCK else SHIELD_IDLE), character)
+		state.offhandModel = shieldModel
+		state.shieldId = shield.Id
+	else
+		local daggerModel, daggerCore = EquipmentModels.buildOffhandDagger()
+		state.offhandWeld = attach(daggerModel, daggerCore, leftHand, leftGrip * OFFHAND_REST, character)
+		state.offhandModel = daggerModel
+	end
 end
 
 ------------------------------------------------------------------------------------------
--- Blocking
+-- Procedural attack motions (weld C0 tweens replicate to everyone)
+------------------------------------------------------------------------------------------
+
+local function tweenWeld(weld: Weld?, goal: CFrame, seconds: number)
+	if weld and weld.Parent then
+		TweenService:Create(weld, TweenInfo.new(seconds, Enum.EasingStyle.Quad), { C0 = goal }):Play()
+	end
+end
+
+local function animate(state: PlayerState, anim: Anim, windUp: number, duration: number)
+	local weld = state.weaponWeld
+	if not weld or not weld.Parent or not state.weaponId then
+		return
+	end
+	local grip = state.weaponGrip
+	local rest = grip * EquipmentModels.weaponRestPose(state.weaponId)
+	local windPose, strikePose = rest, rest
+	if anim == "Slash" or anim == "Flurry" then
+		windPose, strikePose = grip * CFrame.Angles(math.rad(105), 0, 0), grip * CFrame.Angles(math.rad(-25), 0, 0)
+	elseif anim == "Overhead" then
+		windPose, strikePose = grip * CFrame.Angles(math.rad(155), 0, 0), grip * CFrame.Angles(math.rad(-45), 0, 0)
+	elseif anim == "Thrust" then
+		windPose, strikePose = rest * CFrame.new(0, -0.9, 0), rest * CFrame.new(0, 2.2, 0)
+	elseif anim == "Spin" then
+		windPose, strikePose = grip * CFrame.Angles(math.rad(80), 0, math.rad(70)), grip * CFrame.Angles(math.rad(80), 0, math.rad(-150))
+	elseif anim == "Draw" then
+		windPose, strikePose = rest * CFrame.new(0, -0.6, 0), rest * CFrame.new(0, 0.25, 0)
+	elseif anim == "Bash" then
+		tweenWeld(state.offhandWeld, state.offhandGrip * SHIELD_BASH, math.max(0.05, windUp))
+		task.delay(duration * 0.8, function()
+			tweenWeld(state.offhandWeld, state.offhandGrip * (if state.blocking then SHIELD_BLOCK else SHIELD_IDLE), 0.15)
+		end)
+	end
+	tweenWeld(weld, windPose, math.max(0.04, windUp * 0.9))
+	task.delay(windUp, function()
+		tweenWeld(weld, strikePose, 0.1)
+		if anim == "Flurry" and not state.shieldId then
+			tweenWeld(state.offhandWeld, state.offhandGrip * CFrame.Angles(math.rad(-20), 0, 0), 0.08)
+		end
+	end)
+	task.delay(math.max(windUp + 0.15, duration * 0.85), function()
+		tweenWeld(weld, rest, 0.15)
+		if not state.shieldId then
+			tweenWeld(state.offhandWeld, state.offhandGrip * OFFHAND_REST, 0.15)
+		end
+	end)
+end
+
+------------------------------------------------------------------------------------------
+-- Blocking and parrying
 ------------------------------------------------------------------------------------------
 
 local function setBlocking(player: Player, active: boolean)
@@ -205,15 +292,13 @@ local function setBlocking(player: Player, active: boolean)
 	end
 	state.blocking = active
 	state.blockToken += 1
+	state.blockStart = os.clock()
 	updateWalkSpeed(player)
-
-	local weld = state.shieldWeld
-	if weld and weld.Parent then
-		local goal = { C0 = state.shieldGrip * (if active then SHIELD_BLOCK else SHIELD_IDLE) }
-		TweenService:Create(weld, TweenInfo.new(0.1), goal):Play()
+	local shield = InventoryService.getActiveShield(player)
+	if shield then
+		tweenWeld(state.offhandWeld, state.offhandGrip * (if active then SHIELD_BLOCK else SHIELD_IDLE), math.max(0.04, shield.RaiseSeconds))
 	end
 	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Block, active)
-
 	if active then
 		local myToken = state.blockToken
 		task.delay(CombatConfig.ShieldMaxBlockSeconds, function()
@@ -228,32 +313,49 @@ local function onBlockRequest(player: Player, wantsBlock: unknown)
 	if typeof(wantsBlock) ~= "boolean" then
 		return
 	end
-	if wantsBlock then
-		local _, humanoid = CombatUtil.getLivingCharacter(player)
-		local state = getState(player)
-		if not humanoid or not state.shieldWeld or not state.shieldWeld.Parent then
-			return
-		end
-		if state.shieldId ~= InventoryService.getEquippedShield(player).Id then
-			return -- the shield in the hand must be the owned, equipped one
-		end
+	local state = getState(player)
+	if not allowRequest(state, "block") then
+		return
 	end
-	setBlocking(player, wantsBlock)
+	if not wantsBlock then
+		setBlocking(player, false)
+		return
+	end
+	local _, humanoid = CombatUtil.getLivingCharacter(player)
+	if not humanoid or not state.offhandWeld or not state.offhandWeld.Parent then
+		return
+	end
+	local now = os.clock()
+	if state.shieldId == nil then
+		-- Twin daggers: a short parry window on a cooldown instead of a held block
+		if now >= state.parryReadyAt then
+			state.parryUntil = now + CombatConfig.ParryWindowSeconds
+			state.parryReadyAt = now + CombatConfig.ParryCooldownSeconds
+			tweenWeld(state.offhandWeld, state.offhandGrip * CFrame.Angles(math.rad(70), 0, math.rad(40)), 0.05)
+			task.delay(CombatConfig.ParryWindowSeconds, function()
+				tweenWeld(state.offhandWeld, state.offhandGrip * OFFHAND_REST, 0.15)
+			end)
+			ComboService.record(player, "Block", now, now)
+			Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Parry)
+		end
+		return
+	end
+	local activeShield = InventoryService.getActiveShield(player)
+	if activeShield == nil or state.shieldId ~= activeShield.Id then
+		return -- the shield in the hand must be the owned, equipped one
+	end
+	if not state.blocking then
+		ComboService.record(player, "Block", now, now)
+	end
+	setBlocking(player, true)
 end
 
 local function shieldFeedback(state: PlayerState)
-	local shield = state.shieldModel
+	local shield = state.offhandModel
 	if not shield or not shield.Parent then
 		return
 	end
-	local highlight = Instance.new("Highlight")
-	highlight.FillColor = Color3.new(1, 1, 1)
-	highlight.FillTransparency = 0.2
-	highlight.OutlineTransparency = 1
-	highlight.Parent = shield
-	task.delay(0.15, function()
-		highlight:Destroy()
-	end)
+	CombatEffects.glow(shield, Color3.new(1, 1, 1), 0.15)
 	local core = shield.PrimaryPart
 	local sound = core and core:FindFirstChild("BlockSound")
 	if sound and sound:IsA("Sound") then
@@ -261,51 +363,109 @@ local function shieldFeedback(state: PlayerState)
 	end
 end
 
--- True if the player is blocking and the position is in front of them (used by the zombie AI).
 function PlayerCombatService.isBlockingToward(player: Player, position: Vector3): boolean
 	local state = states[player]
+	local shield = InventoryService.getActiveShield(player)
 	local _, _, root = CombatUtil.getLivingCharacter(player)
-	return state ~= nil and state.blocking and root ~= nil and CombatUtil.isFacing(root.CFrame, position, CombatConfig.ShieldFacingDot)
+	return state ~= nil and state.blocking and shield ~= nil and root ~= nil and CombatUtil.isFacing(root.CFrame, position, shield.FacingDot)
 end
 
--- A zombie blow lands: applies immunity, shield reduction and damage.
--- Returns landed, blocked, staggerMultiplier (for pushing the zombie back).
-function PlayerCombatService.applyZombieHit(player: Player, attackerPosition: Vector3, damage: number): (boolean, boolean, number)
-	if not isFighter(player) then
+-- True while the player blocks with a big shield (fast zombies avoid attacking them head-on).
+function PlayerCombatService.isHeavyBlocking(player: Player): boolean
+	local state = states[player]
+	local shield = InventoryService.getActiveShield(player)
+	return state ~= nil and state.blocking and shield ~= nil and shield.Reduction >= 0.75
+end
+
+------------------------------------------------------------------------------------------
+-- Incoming damage
+------------------------------------------------------------------------------------------
+
+type Incoming = {
+	damage: number,
+	fromPosition: Vector3,
+	isProjectile: boolean,
+	blockPierce: number,
+	knockback: number,
+	fromZombie: boolean,
+	attacker: Player?,
+}
+
+-- Returns damage dealt, whether it was blocked/parried, and the stagger multiplier for the attacker.
+local function receiveHit(victim: Player, incoming: Incoming): (number, boolean, number)
+	local _, humanoid, root = CombatUtil.getLivingCharacter(victim)
+	if not humanoid or not root then
+		return 0, false, 1
+	end
+	local state = getState(victim)
+	local now = os.clock()
+	if now < state.spawnProtectedUntil then
+		return 0, true, 1
+	end
+	if incoming.fromZombie and now - state.lastHitTaken < CombatConfig.HitImmunitySeconds then
+		return 0, false, 1 -- brief immunity: no burst damage from several zombies at once
+	end
+
+	local damage = incoming.damage
+	local blocked = false
+	local stagger = 1
+	local shield = InventoryService.getActiveShield(victim)
+	if state.blocking and shield and state.shieldId == shield.Id and now - state.blockStart >= shield.RaiseSeconds then
+		local inRange = incoming.isProjectile or CombatUtil.flatDistance(root.Position, incoming.fromPosition) <= CombatConfig.ShieldBlockDistance
+		if inRange and CombatUtil.isFacing(root.CFrame, incoming.fromPosition, shield.FacingDot) then
+			local reduction = (if incoming.isProjectile then shield.ProjectileReduction else shield.Reduction) * (1 - incoming.blockPierce)
+			damage = math.max(1, math.floor(damage * (1 - reduction) + 0.5))
+			blocked = true
+			stagger = shield.StaggerMultiplier
+			shieldFeedback(state)
+		end
+	elseif state.shieldId == nil and now < state.parryUntil and CombatUtil.isFacing(root.CFrame, incoming.fromPosition, 0) then
+		damage = math.max(1, math.floor(damage * (1 - CombatConfig.ParryReduction) + 0.5))
+		blocked = true
+		stagger = 1.5
+		CombatEffects.burst(root.Position + Vector3.new(0, 1, 0), Color3.fromRGB(200, 230, 255), 0.8)
+		Remotes.CombatFeedback:FireClient(victim, CombatConfig.Feedback.Parry)
+	end
+
+	if not incoming.fromZombie then
+		-- PvP: no single hit may remove more than a share of max health (no one-shots)
+		damage = math.min(damage, math.floor(humanoid.MaxHealth * CombatConfig.PvPMaxDamageFraction))
+	end
+	damage = math.floor(damage + 0.5)
+	if damage <= 0 then
+		return 0, blocked, stagger
+	end
+	state.lastHitTaken = now
+	CombatRules.onPlayerDamaged(victim, incoming.attacker, damage)
+	humanoid:TakeDamage(damage)
+	Remotes.CombatFeedback:FireClient(victim, CombatConfig.Feedback.PlayerHit, damage, blocked)
+	if incoming.knockback > 0 and not blocked then
+		local away = CombatUtil.flat(root.Position - incoming.fromPosition)
+		if away.Magnitude > 0.05 then
+			Remotes.CombatFeedback:FireClient(victim, CombatConfig.Feedback.Knockback, away.Unit * incoming.knockback)
+		end
+	end
+	return damage, blocked, stagger
+end
+
+-- A zombie blow lands. Returns landed, blocked, staggerMultiplier.
+function PlayerCombatService.applyZombieHit(player: Player, attackerPosition: Vector3, damage: number, blockPierce: number, knockback: number): (boolean, boolean, number)
+	if not CombatRules.canZombiesTarget(player) then
 		return false, false, 1 -- lobby players and spectators can't be hurt
 	end
-	local _, humanoid, root = CombatUtil.getLivingCharacter(player)
-	if not humanoid or not root then
-		return false, false, 1
-	end
-	local state = getState(player)
-	local now = os.clock()
-	if now - state.lastHitTaken < CombatConfig.HitImmunitySeconds then
-		return false, false, 1 -- brief immunity: no burst damage from several zombies at once
-	end
-
-	local shield = InventoryService.getEquippedShield(player)
-	local blocked = state.blocking
-		and state.shieldId == shield.Id
-		and CombatUtil.flatDistance(root.Position, attackerPosition) <= CombatConfig.ShieldBlockDistance
-		and CombatUtil.isFacing(root.CFrame, attackerPosition, CombatConfig.ShieldFacingDot)
-	local finalDamage = damage
-	if blocked then
-		finalDamage = math.max(1, math.floor(damage * (1 - shield.Reduction) + 0.5))
-		shieldFeedback(state)
-	end
-
-	state.lastHitTaken = now
-	humanoid:TakeDamage(finalDamage)
-	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.PlayerHit, finalDamage, blocked)
-	return true, blocked, if blocked then shield.StaggerMultiplier else 1
+	local dealt, blocked, stagger = receiveHit(player, {
+		damage = damage,
+		fromPosition = attackerPosition,
+		isProjectile = false,
+		blockPierce = blockPierce,
+		knockback = knockback,
+		fromZombie = true,
+	})
+	return dealt > 0 or blocked, blocked, stagger
 end
 
--- Net slow: sets (never stacks) a speed multiplier for a few seconds.
+-- Slow (nets): sets, never stacks, always expires.
 function PlayerCombatService.applySlow(player: Player, factor: number, seconds: number)
-	if not isFighter(player) then
-		return
-	end
 	local state = getState(player)
 	state.slowFactor = math.clamp(factor, 0.3, 1)
 	state.slowToken += 1
@@ -320,204 +480,49 @@ function PlayerCombatService.applySlow(player: Player, factor: number, seconds: 
 	end)
 end
 
--- Clears blocking and slows (used when entering/leaving the arena).
+function PlayerCombatService.setSpawnProtection(player: Player, seconds: number)
+	getState(player).spawnProtectedUntil = os.clock() + seconds
+	local character = player.Character
+	if character then
+		local field = Instance.new("ForceField")
+		field.Visible = true
+		field.Parent = character
+		task.delay(seconds, function()
+			field:Destroy()
+		end)
+	end
+end
+
+-- Clears blocking, slows, combos, busy time and cooldowns (entering/leaving matches, death).
 function PlayerCombatService.resetCombatState(player: Player)
 	local state = getState(player)
 	setBlocking(player, false)
 	state.slowFactor = 1
 	state.slowToken += 1
-	state.lastAttack = 0
+	state.actionToken += 1
+	state.busyUntil = 0
+	state.parryUntil = 0
+	table.clear(state.cooldowns)
+	ComboService.clear(player)
 	updateWalkSpeed(player)
 end
 
 ------------------------------------------------------------------------------------------
--- Attacks
+-- Attack requests
 ------------------------------------------------------------------------------------------
 
-local function playSwingSound(character: Model)
-	local sound = Instance.new("Sound")
-	sound.SoundId = CombatConfig.SwingSoundId
-	sound.Volume = 0.5
-	sound.PlayOnRemove = true
-	sound.Parent = character.PrimaryPart or character
-	sound:Destroy()
-end
-
-local function playAttackMotion(state: PlayerState, weapon: WeaponDefinition)
-	local weld = state.weaponWeld
-	if not weld or not weld.Parent then
+local function onActionRequest(player: Player, action: unknown, aim: unknown)
+	if action ~= "Basic" and action ~= "Special1" and action ~= "Special2" then
 		return
-	end
-	local grip = state.weaponGrip
-	local rest = grip * EquipmentModels.weaponRestPose(weapon.Id)
-	local windup: CFrame, strike: CFrame, strikeTime: number, returnDelay: number
-	if weapon.Kind == "Bow" then
-		windup = rest * CFrame.new(0, -0.5, 0) -- draw
-		strike = rest * CFrame.new(0, 0.2, 0) -- release
-		strikeTime, returnDelay = 0.06, 0.2
-	elseif weapon.Id == "MorningStar" then
-		windup = grip * CFrame.Angles(math.rad(135), math.rad(35), 0)
-		strike = grip * CFrame.Angles(math.rad(-50), math.rad(-40), 0)
-		strikeTime, returnDelay = 0.18, 0.45
-	else
-		windup = grip * CFrame.Angles(math.rad(105), 0, 0)
-		strike = grip * CFrame.Angles(math.rad(-25), 0, 0)
-		strikeTime, returnDelay = 0.12, 0.3
-	end
-	weld.C0 = windup
-	task.delay(0.08, function()
-		TweenService:Create(weld, TweenInfo.new(strikeTime, Enum.EasingStyle.Quad), { C0 = strike }):Play()
-	end)
-	task.delay(returnDelay, function()
-		TweenService:Create(weld, TweenInfo.new(0.2), { C0 = rest }):Play()
-	end)
-end
-
-local function hitZombie(player: Player, zombie: Zombie, weapon: WeaponDefinition, fromPosition: Vector3)
-	if ZombieService.tryGuardBlock(zombie, fromPosition) then
-		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Hit, zombie.model, 0, true)
-		return
-	end
-	if ZombieService.applyDamage(zombie, player, weapon.Damage, fromPosition, weapon.Stagger, weapon.Knockback) then
-		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Hit, zombie.model, weapon.Damage, false)
-	else
-		reject(player, "target dead")
-	end
-end
-
--- Closest valid living zombie in the weapon's range and arc, or the reason the closest one failed.
-local function findMeleeTarget(character: Model, root: BasePart, weapon: WeaponDefinition): (Zombie?, string?)
-	local best: Zombie? = nil
-	local bestDistance = math.huge
-	local closestReason, closestDistance = "invalid target (no living zombie)", math.huge
-
-	for _, model in CollectionService:GetTagged(CombatConfig.ZombieTag) do
-		local zombie = ZombieService.getByModel(model)
-		local reason: string? = nil
-		local distance = math.huge
-		if not zombie then
-			reason = "target dead"
-		else
-			local target = zombie.root.Position
-			-- Measure to the zombie's body surface, so big zombies are as easy to reach as small ones
-			distance = math.max(0, CombatUtil.flatDistance(root.Position, target) - zombie.root.Size.X / 2)
-			if distance > weapon.Range or math.abs(root.Position.Y - target.Y) > 7 then
-				reason = ("out of range (%.1f studs)"):format(distance)
-			elseif not CombatUtil.isFacing(root.CFrame, target, weapon.FacingDot) then
-				reason = "invalid facing direction"
-			elseif not CombatUtil.hasLineOfSight(root.Position, target, { character, zombie.model.Parent or zombie.model }) then
-				reason = "blocked line of sight"
-			end
-		end
-		if reason == nil then
-			if distance < bestDistance then
-				best, bestDistance = zombie, distance
-			end
-		elseif distance < closestDistance then
-			closestReason, closestDistance = reason, distance
-		end
-	end
-
-	if best then
-		return best, nil
-	end
-	return nil, closestReason
-end
-
-local function meleeAttack(player: Player, character: Model, root: BasePart, weapon: WeaponDefinition)
-	local zombie, reason = findMeleeTarget(character, root, weapon)
-	if not zombie and reason == "invalid facing direction" then
-		-- The client turned the character toward the cursor right before sending; give
-		-- that rotation a moment to replicate, then validate everything again once.
-		task.wait(FACING_RETRY_SECONDS)
-		local newCharacter, _, newRoot = CombatUtil.getLivingCharacter(player)
-		if not newCharacter or not newRoot or not isFighter(player) then
-			return
-		end
-		character, root = newCharacter, newRoot
-		zombie, reason = findMeleeTarget(character, root, weapon)
-	end
-	if not zombie then
-		reject(player, reason or "invalid target")
-		return
-	end
-	hitZombie(player, zombie, weapon, root.Position)
-end
-
--- Server-simulated arrow: moves along a straight line, raycasting each step. Stops at the first
--- solid hit (walls, barrier, zombie body); only living zombies take damage; one hit maximum.
-local function fireArrow(player: Player, character: Model, root: BasePart, weapon: WeaponDefinition, aim: Vector3)
-	local head = character:FindFirstChild("Head")
-	local origin = if head and head:IsA("BasePart") then head.Position else root.Position + Vector3.new(0, 1.5, 0)
-	local offset = aim - origin
-	local direction = if offset.Magnitude > 2 then offset.Unit else root.CFrame.LookVector
-	local flatDirection = CombatUtil.flat(direction)
-	if flatDirection.Magnitude > 0.05 then
-		origin += flatDirection.Unit * 1.2 -- start just in front of the player
-	end
-
-	local arrow, shaft = EquipmentModels.buildArrow()
-	shaft.CFrame = CFrame.lookAt(origin, origin + direction)
-	arrow.Parent = Workspace
-
-	local ignore: { Instance } = { arrow }
-	for _, other in Players:GetPlayers() do
-		if other.Character then
-			table.insert(ignore, other.Character) -- arrows never interact with players
-		end
-	end
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = ignore
-
-	local speed = weapon.ProjectileSpeed or 110
-	local traveled = 0
-	local position = origin
-	local connection: RBXScriptConnection? = nil
-	local finished = false
-
-	local function finish()
-		if finished then
-			return
-		end
-		finished = true
-		if connection then
-			connection:Disconnect()
-		end
-		task.delay(0.15, function()
-			arrow:Destroy()
-		end)
-	end
-
-	connection = RunService.Heartbeat:Connect(function(dt: number)
-		local step = math.min(speed * dt, weapon.Range - traveled)
-		if step <= 0 then
-			finish()
-			return
-		end
-		local result = Workspace:Raycast(position, direction * step, params)
-		if result then
-			shaft.CFrame = CFrame.lookAt(result.Position, result.Position + direction)
-			local model = result.Instance:FindFirstAncestorOfClass("Model")
-			local zombie = if model and CollectionService:HasTag(model, CombatConfig.ZombieTag) then ZombieService.getByModel(model) else nil
-			if zombie and isFighter(player) then
-				hitZombie(player, zombie, weapon, origin)
-			end
-			finish()
-			return
-		end
-		position += direction * step
-		traveled += step
-		shaft.CFrame = CFrame.lookAt(position, position + direction)
-	end)
-	task.delay(weapon.Range / speed + 0.5, finish) -- lifetime safeguard
-end
-
-local function onAttackRequest(player: Player, aim: unknown)
-	if not isFighter(player) then
-		return -- lobby players and spectators can't deal damage (silently ignored)
 	end
 	local state = getState(player)
+	if not allowRequest(state, "action") then
+		return
+	end
+	local context: CombatRules.CombatContext? = CombatRules.getContext(player)
+	if not context then
+		return -- lobby (outside training), spectators, defeated players: silently ignored
+	end
 	local character, _, root = CombatUtil.getLivingCharacter(player)
 	if not character or not root then
 		return
@@ -527,30 +532,73 @@ local function onAttackRequest(player: Player, aim: unknown)
 		reject(player, "weapon not equipped")
 		return
 	end
-	if state.blocking then
-		return -- attacking while blocking is ignored by design
-	end
 	local now = os.clock()
-	if now - state.lastAttack < weapon.Cooldown then
+	if now < state.busyUntil then
+		return -- still performing the previous move (no macro can skip attack timing)
+	end
+	if action == "Basic" and state.blocking then
+		return -- basic attacks while blocking are ignored
+	end
+	local moveId = WeaponDefinitions.moveFor(weapon, action :: string)
+	local move = moveId and SpecialMoveDefinitions[moveId]
+	if not move then
+		return
+	end
+	if now < (state.cooldowns[move.Id] or 0) then
 		reject(player, "cooldown")
 		return
 	end
-	state.lastAttack = now -- the cooldown belongs to the player, not to any zombie
-
-	playAttackMotion(state, weapon)
-	playSwingSound(character)
-	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Swing)
-
-	if weapon.Kind == "Bow" then
-		-- Validate the client's aim point: a finite position within a sane distance
-		local aimPoint = root.Position + root.CFrame.LookVector * 50
-		if typeof(aim) == "Vector3" and aim.X == aim.X and aim.Y == aim.Y and aim.Z == aim.Z and (aim - root.Position).Magnitude <= MAX_AIM_DISTANCE then
-			aimPoint = aim
-		end
-		fireArrow(player, character, root, weapon, aimPoint)
-	else
-		meleeAttack(player, character, root, weapon)
+	if state.blocking then
+		setBlocking(player, false) -- specials lower the shield (enables Block -> special combos)
 	end
+
+	-- Accepted: cooldown, busy time and combo bookkeeping use server time only
+	local input: ComboInput = if action == "Basic" then "Basic" elseif action == "Special1" then "Special1" else "Special2"
+	local combo = ComboService.match(player, weapon.Id, input, now)
+	state.cooldowns[move.Id] = now + move.Cooldown
+	state.busyUntil = now + move.Duration
+	if combo then
+		ComboService.clear(player)
+	else
+		ComboService.record(player, input, now, now + move.Duration)
+	end
+	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Action, action, move.Name, move.Cooldown, if combo then combo.Name else nil)
+
+	local aimPoint = root.Position + root.CFrame.LookVector * 50
+	if typeof(aim) == "Vector3" and aim.X == aim.X and aim.Y == aim.Y and aim.Z == aim.Z and (aim - root.Position).Magnitude <= MAX_AIM_DISTANCE then
+		aimPoint = aim
+	end
+
+	local sound = Instance.new("Sound")
+	sound.SoundId = CombatConfig.SwingSoundId
+	sound.Volume = 0.5
+	sound.PlayOnRemove = true
+	sound.Parent = root
+	sound:Destroy()
+
+	local myToken = state.actionToken
+	local shield = InventoryService.getActiveShield(player)
+	SpecialMoveService.execute(move, {
+		player = player,
+		context = context :: CombatRules.CombatContext,
+		character = character,
+		root = root,
+		aimPoint = aimPoint,
+		comboMultiplier = if combo then combo.DamageMultiplier else 1,
+		bonusStagger = if combo then combo.BonusStagger or 0 else 0,
+		bashMultiplier = if shield then shield.BashMultiplier else 1,
+		weaponModel = state.weaponModel,
+		animate = function(anim: Anim, windUp: number, duration: number)
+			animate(state, anim, windUp, duration)
+		end,
+		stillValid = function()
+			-- Cancelled by death, a state change or leaving the fight
+			return state.actionToken == myToken and CombatRules.getContext(player) == context
+		end,
+		reject = function(reason: string)
+			reject(player, reason)
+		end,
+	})
 end
 
 ------------------------------------------------------------------------------------------
@@ -558,8 +606,8 @@ end
 ------------------------------------------------------------------------------------------
 
 local function removeRegeneration(character: Model)
-	-- Roblox's default "Health" script regenerates players; the project override with the
-	-- same name is empty. Either way, nothing named Health may run in the character.
+	-- Roblox's default "Health" script regenerates players; the project override with the same
+	-- name is empty. Either way, nothing named Health may run in the character.
 	local function check(child: Instance)
 		if child.Name == "Health" and child:IsA("Script") then
 			child:Destroy()
@@ -580,8 +628,11 @@ local function onCharacterAdded(player: Player, character: Model)
 	state.blockToken += 1
 	state.slowFactor = 1
 	state.slowToken += 1
-	state.lastAttack = 0
+	state.actionToken += 1
+	state.busyUntil = 0
 	state.lastHitTaken = 0
+	state.parryUntil = 0
+	ComboService.clear(player)
 	removeRegeneration(character)
 
 	local humanoid = character:WaitForChild("Humanoid", 5)
@@ -593,21 +644,33 @@ local function onCharacterAdded(player: Player, character: Model)
 	humanoid.Health = CombatConfig.PlayerMaxHealth
 	humanoid.WalkSpeed = CombatConfig.PlayerWalkSpeed
 	humanoid.Died:Connect(function()
+		state.actionToken += 1
 		setBlocking(player, false)
+		ComboService.clear(player)
 	end)
 
-	-- Hands may load a moment after the character
 	character:WaitForChild("RightHand", 1)
 	character:WaitForChild("LeftHand", 1)
 	PlayerCombatService.refreshEquipment(player)
-	local weapon = InventoryService.getEquippedWeapon(player)
-	local shield = InventoryService.getEquippedShield(player)
-	print(PREFIX, ("Equipment granted to %s: %s + %s"):format(player.Name, weapon.DisplayName, shield.DisplayName))
 end
 
 function PlayerCombatService.init()
-	Remotes.WeaponAttack.OnServerEvent:Connect(onAttackRequest)
+	Remotes.CombatAction.OnServerEvent:Connect(onActionRequest)
 	Remotes.ShieldBlock.OnServerEvent:Connect(onBlockRequest)
+
+	-- PvP damage and slows from player attacks come through CombatTargets
+	CombatTargets.setPlayerHandlers(function(victim: Player, attacker: Player, damage: number, info: CombatTargets.HitInfo)
+		local dealt, blocked = receiveHit(victim, {
+			damage = damage,
+			fromPosition = info.fromPosition,
+			isProjectile = info.isProjectile,
+			blockPierce = 0,
+			knockback = info.knockback,
+			fromZombie = false,
+			attacker = attacker,
+		})
+		return dealt, blocked
+	end, PlayerCombatService.applySlow)
 
 	local function setup(player: Player)
 		InventoryService.publish(player)
@@ -624,6 +687,7 @@ function PlayerCombatService.init()
 	end
 	Players.PlayerRemoving:Connect(function(player)
 		states[player] = nil
+		ComboService.clear(player)
 	end)
 end
 

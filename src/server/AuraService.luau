@@ -1,0 +1,69 @@
+--!strict
+-- Aura Point rewards. The server decides who is rewarded; clients never report kills.
+--   Zombie kills: the killer gets 100 %, every other player who damaged that zombie gets an
+--   assist share (Co-op). A player is rewarded at most once per zombie.
+--   Team Battle: fixed rewards for the winning and losing team at the end of a match.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
+local Config = require(ReplicatedStorage.Shared.Config)
+local InventoryService = require(script.Parent.InventoryService)
+local Remotes = require(script.Parent.Remotes)
+
+export type RewardEvent = {
+	reason: string,
+	recipients: { { player: Player, amount: number, kind: string } },
+}
+
+local AuraService = {}
+
+local function grant(event: RewardEvent)
+	for _, recipient in event.recipients do
+		local player = recipient.player
+		if player.Parent and recipient.amount > 0 then
+			InventoryService.addAura(player, recipient.amount)
+			player:SetAttribute(Config.RunAuraAttribute, (tonumber(player:GetAttribute(Config.RunAuraAttribute)) or 0) + recipient.amount)
+			Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Aura, recipient.amount, recipient.kind)
+		end
+	end
+end
+
+-- Called exactly once per zombie death. `damagers` are the players who hit it (any order).
+function AuraService.awardZombieKill(reward: number, killer: Player?, damagers: { Player }, assistFraction: number)
+	local event: RewardEvent = { reason = "zombie", recipients = {} }
+	local rewarded: { [Player]: boolean } = {}
+	if killer and killer.Parent then
+		table.insert(event.recipients, { player = killer, amount = reward, kind = "kill" })
+		rewarded[killer] = true
+		killer:SetAttribute(Config.RunKillsAttribute, (tonumber(killer:GetAttribute(Config.RunKillsAttribute)) or 0) + 1)
+	end
+	if assistFraction > 0 then
+		for _, player in damagers do
+			if not rewarded[player] and player.Parent then
+				rewarded[player] = true -- once per zombie
+				table.insert(event.recipients, { player = player, amount = math.max(1, math.floor(reward * assistFraction + 0.5)), kind = "assist" })
+			end
+		end
+	end
+	grant(event)
+end
+
+-- Team Battle result rewards.
+function AuraService.awardMatchResult(winners: { Player }, losers: { Player }, winAmount: number, loseAmount: number)
+	local event: RewardEvent = { reason = "match", recipients = {} }
+	for _, player in winners do
+		table.insert(event.recipients, { player = player, amount = winAmount, kind = "victory" })
+	end
+	for _, player in losers do
+		table.insert(event.recipients, { player = player, amount = loseAmount, kind = "match" })
+	end
+	grant(event)
+end
+
+function AuraService.resetRunStats(player: Player)
+	player:SetAttribute(Config.RunKillsAttribute, 0)
+	player:SetAttribute(Config.RunAuraAttribute, 0)
+end
+
+return AuraService

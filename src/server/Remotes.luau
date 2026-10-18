@@ -35,7 +35,7 @@ local function getRemote(name: string): RemoteEvent
 end
 
 return table.freeze({
-	WeaponAttack = getRemote(Config.WeaponAttackRemoteName),
+	CombatAction = getRemote(Config.CombatActionRemoteName),
 	ShieldBlock = getRemote(Config.ShieldBlockRemoteName),
 	CombatFeedback = getRemote(Config.CombatFeedbackRemoteName),
 })

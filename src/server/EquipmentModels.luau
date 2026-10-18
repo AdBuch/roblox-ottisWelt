@@ -123,6 +123,45 @@ local function morningStar(add: AddFn)
 	end
 end
 
+local function trident(add: AddFn)
+	add("Shaft", Vector3.new(0.22, 6.4, 0.22), CFrame.new(0, 1.2, 0), DARK_WOOD, Enum.Material.Wood)
+	add("Butt", Vector3.one * 0.3, CFrame.new(0, -2.0, 0), BRONZE, Enum.Material.Metal, BALL)
+	add("Collar", Vector3.new(1.3, 0.22, 0.26), CFrame.new(0, 4.45, 0), BRONZE, Enum.Material.Metal)
+	for _, x in { -0.55, 0, 0.55 } do
+		local length = if x == 0 then 1.5 else 1.15
+		add("Prong", Vector3.new(0.14, length, 0.14), CFrame.new(x, 4.55 + length / 2, 0), STEEL, Enum.Material.Metal)
+		add("Barb", Vector3.new(0.12, 0.3, 0.12), CFrame.new(x, 4.6 + length, 0) * CFrame.Angles(0, 0, math.rad(45)), STEEL, Enum.Material.Metal)
+	end
+	add("Grip", Vector3.new(0.3, 0.9, 0.3), CFrame.identity, LEATHER, Enum.Material.Leather)
+end
+
+local function hopliteSpear(add: AddFn)
+	add("Shaft", Vector3.new(0.2, 7.4, 0.2), CFrame.new(0, 1.6, 0), WOOD, Enum.Material.Wood)
+	add("Sauroter", Vector3.new(0.18, 0.7, 0.18), CFrame.new(0, -2.4, 0), BRONZE, Enum.Material.Metal)
+	add("Socket", Vector3.new(0.3, 0.5, 0.3), CFrame.new(0, 5.4, 0), BRONZE, Enum.Material.Metal)
+	add("Head", Vector3.new(0.5, 1.4, 0.1), CFrame.new(0, 6.3, 0), STEEL, Enum.Material.Metal)
+	add("HeadTip", Vector3.new(0.35, 0.35, 0.1), CFrame.new(0, 7.0, 0) * CFrame.Angles(0, 0, math.rad(45)), STEEL, Enum.Material.Metal)
+	add("Grip", Vector3.new(0.28, 0.8, 0.28), CFrame.identity, LEATHER, Enum.Material.Leather)
+end
+
+local function dagger(add: AddFn)
+	add("Grip", Vector3.new(0.24, 0.7, 0.24), CFrame.identity, LEATHER, Enum.Material.Leather)
+	add("Pommel", Vector3.one * 0.3, CFrame.new(0, -0.45, 0), BRONZE, Enum.Material.Metal, BALL)
+	add("Guard", Vector3.new(0.7, 0.16, 0.24), CFrame.new(0, 0.42, 0), BRONZE, Enum.Material.Metal)
+	add("Blade", Vector3.new(0.3, 1.3, 0.1), CFrame.new(0, 1.15, 0), STEEL, Enum.Material.Metal)
+	add("Tip", Vector3.new(0.21, 0.21, 0.1), CFrame.new(0, 1.8, 0) * CFrame.Angles(0, 0, math.rad(45)), STEEL, Enum.Material.Metal)
+end
+
+local function battleAxe(add: AddFn)
+	add("Haft", Vector3.new(0.3, 4.2, 0.3), CFrame.new(0, 1.2, 0), DARK_WOOD, Enum.Material.Wood)
+	add("Grip", Vector3.new(0.34, 1.0, 0.34), CFrame.identity, LEATHER, Enum.Material.Leather)
+	add("Socket", Vector3.new(0.45, 0.8, 0.45), CFrame.new(0, 3.0, 0), BRONZE, Enum.Material.Metal)
+	add("Blade", Vector3.new(1.6, 1.3, 0.14), CFrame.new(0.9, 3.0, 0), STEEL, Enum.Material.Metal)
+	add("Edge", Vector3.new(0.2, 1.8, 0.16), CFrame.new(1.7, 3.0, 0), Color3.fromRGB(230, 230, 225), Enum.Material.Metal)
+	add("Spike", Vector3.new(0.6, 0.3, 0.14), CFrame.new(-0.5, 3.0, 0), BRONZE, Enum.Material.Metal)
+	add("Band", Vector3.new(0.4, 0.15, 0.4), CFrame.new(0, 1.8, 0), BRONZE, Enum.Material.Metal)
+end
+
 function EquipmentModels.buildWeapon(id: string): (Model, BasePart)
 	return build(id, function(add)
 		if id == "LegionSword" then
@@ -131,20 +170,41 @@ function EquipmentModels.buildWeapon(id: string): (Model, BasePart)
 			bow(add)
 		elseif id == "MorningStar" then
 			morningStar(add)
+		elseif id == "Trident" then
+			trident(add)
+		elseif id == "HopliteSpear" then
+			hopliteSpear(add)
+		elseif id == "TwinDaggers" then
+			dagger(add)
+		elseif id == "BattleAxe" then
+			battleAxe(add)
 		else -- RustyGladius
 			sword(add, RUST, Enum.Material.CorrodedMetal, 2.1, Color3.fromRGB(120, 90, 60), false)
 		end
 	end)
 end
 
+-- The second dagger of the Twin Arena Daggers (left hand, replaces the shield).
+function EquipmentModels.buildOffhandDagger(): (Model, BasePart)
+	return build("OffhandDagger", dagger)
+end
+
 -- Resting pose relative to the hand's grip attachment (+Y forward when the arm hangs).
 function EquipmentModels.weaponRestPose(id: string): CFrame
-	if id == "HunterBow" then
-		return CFrame.identity -- limbs vertical, arrow forward
-	elseif id == "MorningStar" then
+	if id == "HunterBow" or id == "Trident" or id == "HopliteSpear" then
+		return CFrame.identity -- pointing forward
+	elseif id == "MorningStar" or id == "BattleAxe" then
 		return CFrame.Angles(math.rad(20), 0, 0)
 	end
 	return CFrame.Angles(math.rad(30), 0, 0)
+end
+
+-- A thrown net (flat square of cords) for NET AND STRIKE.
+function EquipmentModels.buildNet(): BasePart
+	local net = newPart("ThrownNet", Vector3.new(3, 0.15, 3), CFrame.identity, Color3.fromRGB(196, 182, 150), Enum.Material.Fabric, nil :: any)
+	net.Anchored = true
+	net.Transparency = 0.3
+	return net
 end
 
 -- A single arrow (shaft along -Z so CFrame.lookAt points it at the target).
@@ -225,6 +285,51 @@ function EquipmentModels.buildShield(id: string): (Model, BasePart)
 				local angle = i / 8 * 2 * math.pi
 				add("Stud", Vector3.one * 0.22, CFrame.new(math.cos(angle) * 1.3, 0.2, math.sin(angle) * 1.3), GOLD, Enum.Material.Metal, BALL)
 			end
+		elseif id == "Scutum" then
+			-- Tall curved Roman shield: three angled panels, bronze edging, boss and wings motif
+			for i, x in { -0.95, 0, 0.95 } do
+				local angle = if i == 1 then -18 elseif i == 3 then 18 else 0
+				local depth = if i == 2 then 0 else -0.25
+				add("Panel", Vector3.new(1.0, 0.25, 4.2), CFrame.new(x, depth, 0) * CFrame.Angles(0, 0, math.rad(angle)), SHIELD_RED, Enum.Material.WoodPlanks)
+			end
+			for _, z in { -2.1, 2.1 } do
+				add("EdgeEnd", Vector3.new(2.9, 0.3, 0.16), CFrame.new(0, -0.05, z), BRONZE, Enum.Material.Metal)
+			end
+			add("Boss", Vector3.one * 0.85, CFrame.new(0, 0.25, 0), BRONZE, Enum.Material.Metal, BALL)
+			add("Spine", Vector3.new(0.2, 0.05, 3.9), CFrame.new(0, 0.15, 0), GOLD, Enum.Material.Metal)
+			for _, side in { -1, 1 } do
+				add("Wing", Vector3.new(0.7, 0.05, 0.18), CFrame.new(side * 0.55, 0.15, 0.9) * CFrame.Angles(0, side * math.rad(25), 0), GOLD, Enum.Material.Metal)
+				add("Wing", Vector3.new(0.7, 0.05, 0.18), CFrame.new(side * 0.55, 0.15, -0.9) * CFrame.Angles(0, -side * math.rad(25), 0), GOLD, Enum.Material.Metal)
+			end
+		elseif id == "Hoplon" then
+			-- Large round bronze-and-wood shield with a wide rim and a geometric band
+			add("Rim", Vector3.new(0.3, 3.8, 3.8), DISC, BRONZE, Enum.Material.Metal, CYLINDER)
+			add("Face", Vector3.new(0.34, 3.3, 3.3), CFrame.new(0, 0.05, 0) * DISC, Color3.fromRGB(150, 104, 62), Enum.Material.Wood, CYLINDER)
+			add("Band", Vector3.new(0.36, 2.5, 2.5), CFrame.new(0, 0.07, 0) * DISC, Color3.fromRGB(40, 50, 90), Enum.Material.Fabric, CYLINDER)
+			add("Center", Vector3.new(0.38, 1.9, 1.9), CFrame.new(0, 0.08, 0) * DISC, Color3.fromRGB(150, 104, 62), Enum.Material.Wood, CYLINDER)
+			for i = 0, 7 do
+				local angle = i / 8 * 2 * math.pi
+				add("Meander", Vector3.new(0.25, 0.06, 0.25), CFrame.new(math.cos(angle) * 1.1, 0.27, math.sin(angle) * 1.1), Color3.fromRGB(235, 225, 200), Enum.Material.SmoothPlastic)
+			end
+			add("Boss", Vector3.one * 0.7, CFrame.new(0, 0.3, 0), BRONZE, Enum.Material.Metal, BALL)
+		elseif id == "ParmaEquestris" then
+			-- Medium round cavalry shield: cream face, dark-blue ring
+			add("Rim", Vector3.new(0.2, 2.7, 2.7), DISC, BRONZE, Enum.Material.Metal, CYLINDER)
+			add("Face", Vector3.new(0.24, 2.4, 2.4), CFrame.new(0, 0.05, 0) * DISC, Color3.fromRGB(235, 225, 200), Enum.Material.Wood, CYLINDER)
+			add("Ring", Vector3.new(0.26, 1.6, 1.6), CFrame.new(0, 0.06, 0) * DISC, Color3.fromRGB(40, 50, 90), Enum.Material.Fabric, CYLINDER)
+			add("Inner", Vector3.new(0.28, 1.2, 1.2), CFrame.new(0, 0.07, 0) * DISC, Color3.fromRGB(235, 225, 200), Enum.Material.Wood, CYLINDER)
+			add("Boss", Vector3.one * 0.55, CFrame.new(0, 0.22, 0), BRONZE, Enum.Material.Metal, BALL)
+		elseif id == "ThraexShield" then
+			-- Small, high rectangular gladiator shield (parmula-like), weathered bronze trim
+			add("Body", Vector3.new(1.7, 0.25, 2.5), CFrame.identity, Color3.fromRGB(40, 50, 90), Enum.Material.Wood)
+			for _, x in { -0.85, 0.85 } do
+				add("EdgeSide", Vector3.new(0.14, 0.3, 2.55), CFrame.new(x, 0.02, 0), Color3.fromRGB(140, 120, 80), Enum.Material.CorrodedMetal)
+			end
+			for _, z in { -1.25, 1.25 } do
+				add("EdgeEnd", Vector3.new(1.85, 0.3, 0.14), CFrame.new(0, 0.02, z), Color3.fromRGB(140, 120, 80), Enum.Material.CorrodedMetal)
+			end
+			add("Diamond", Vector3.new(0.7, 0.05, 0.7), CFrame.new(0, 0.15, 0) * CFrame.Angles(0, math.rad(45), 0), Color3.fromRGB(235, 225, 200), Enum.Material.SmoothPlastic)
+			add("Boss", Vector3.one * 0.45, CFrame.new(0, 0.2, 0), BRONZE, Enum.Material.Metal, BALL)
 		else -- WoodenBuckler
 			roundShield(add, 2.0, Color3.fromRGB(150, 104, 62), Enum.Material.Wood, true)
 		end

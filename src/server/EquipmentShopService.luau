@@ -13,6 +13,7 @@ local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
 local Config = require(ReplicatedStorage.Shared.Config)
 local GameStates = require(ReplicatedStorage.Shared.GameStates)
 local ShieldDefinitions = require(ReplicatedStorage.Shared.ShieldDefinitions)
+local SpecialMoveDefinitions = require(ReplicatedStorage.Shared.SpecialMoveDefinitions)
 local WeaponDefinitions = require(ReplicatedStorage.Shared.WeaponDefinitions)
 local EquipmentModels = require(script.Parent.EquipmentModels)
 local InventoryService = require(script.Parent.InventoryService)
@@ -77,7 +78,7 @@ local function onTriggered(player: Player, kind: ItemKind, id: string)
 	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Shop, message, ok)
 end
 
-local function buildItem(parent: Instance, slot: CFrame, kind: ItemKind, id: string, name: string, statText: string, price: number)
+local function buildItem(parent: Instance, slot: CFrame, kind: ItemKind, id: string, name: string, statText: string, price: number, note: string)
 	local item = Instance.new("Model")
 	item.Name = "ShopItem_" .. id
 	item:SetAttribute("ItemKind", kind)
@@ -88,7 +89,7 @@ local function buildItem(parent: Instance, slot: CFrame, kind: ItemKind, id: str
 	makePart("PedestalTop", Vector3.new(3.4, 0.3, 3.4), slot * CFrame.new(0, 3.15, 0), Color3.fromRGB(176, 125, 60), Enum.Material.Metal, item)
 
 	-- Plaque on the front face (toward the hall)
-	local plaque = makePart("Plaque", Vector3.new(2.8, 2.4, 0.2), slot * CFrame.new(0, 1.5, -1.6), PLAQUE, Enum.Material.Wood, item)
+	local plaque = makePart("Plaque", Vector3.new(2.9, 2.8, 0.2), slot * CFrame.new(0, 1.5, -1.6), PLAQUE, Enum.Material.Wood, item)
 	plaque.CanCollide = false
 	local gui = Instance.new("SurfaceGui")
 	gui.Name = "PlaqueGui"
@@ -101,10 +102,11 @@ local function buildItem(parent: Instance, slot: CFrame, kind: ItemKind, id: str
 	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	layout.VerticalAlignment = Enum.VerticalAlignment.Center
 	layout.Parent = gui
-	label(gui, "ItemName", name, 1, 0.24, GOLD, Enum.Font.GothamBold)
-	label(gui, "Stat", statText, 2, 0.2, Color3.new(1, 1, 1), Enum.Font.Gotham)
-	label(gui, "Price", if price > 0 then ("%d coins"):format(price) else "FREE", 3, 0.2, Color3.fromRGB(255, 220, 120), Enum.Font.GothamBold)
-	label(gui, "Status", "LOCKED", 4, 0.22, Color3.fromRGB(200, 200, 200), Enum.Font.GothamBlack)
+	label(gui, "ItemName", name, 1, 0.2, GOLD, Enum.Font.GothamBold)
+	label(gui, "Stat", statText, 2, 0.16, Color3.new(1, 1, 1), Enum.Font.Gotham)
+	label(gui, "Note", note, 3, 0.14, Color3.fromRGB(255, 190, 150), Enum.Font.Gotham)
+	label(gui, "Price", if price > 0 then ("%d AURA"):format(price) else "FREE", 4, 0.18, Color3.fromRGB(255, 220, 120), Enum.Font.GothamBold)
+	label(gui, "Status", "LOCKED", 5, 0.2, Color3.fromRGB(200, 200, 200), Enum.Font.GothamBlack)
 
 	-- Physical display model above the pedestal (anchored, no collisions)
 	local display, core
@@ -137,6 +139,8 @@ local function buildItem(parent: Instance, slot: CFrame, kind: ItemKind, id: str
 	prompt.ObjectText = name
 	prompt.HoldDuration = 0.25
 	prompt.MaxActivationDistance = 8
+	prompt.KeyboardKeyCode = Enum.KeyCode.F -- Q/E are special attacks
+	prompt.GamepadKeyCode = Enum.KeyCode.DPadUp
 	prompt.RequiresLineOfSight = false
 	prompt.Parent = pedestal
 	prompt.Triggered:Connect(function(player)
@@ -154,15 +158,22 @@ function EquipmentShopService.build(parent: Instance, weaponSlots: { CFrame }, s
 		local slot = weaponSlots[i]
 		if slot then
 			local stat = if weapon.Kind == "Bow"
-				then ("DMG %d · ranged %d"):format(weapon.Damage, weapon.Range)
-				else ("DMG %d · %.2fs"):format(weapon.Damage, weapon.Cooldown)
-			buildItem(shop, slot, "Weapon", weapon.Id, weapon.DisplayName, stat, weapon.Price)
+				then ("DMG %d · range %d · %.2fs"):format(weapon.Damage, weapon.Range, weapon.Cooldown)
+				else ("DMG %d · range %g · %.2fs"):format(weapon.Damage, weapon.Range, weapon.Cooldown)
+			local q, e = SpecialMoveDefinitions[weapon.Special1], SpecialMoveDefinitions[weapon.Special2]
+			local note = if weapon.TwoHanded
+				then "TWO-HANDED: no shield, built-in parry"
+				else ("Q %s · E %s"):format(q.Name, e.Name)
+			buildItem(shop, slot, "Weapon", weapon.Id, weapon.DisplayName, stat, weapon.Price, note)
 		end
 	end
 	for i, shield in ShieldDefinitions.Ordered do
 		local slot = shieldSlots[i]
 		if slot then
-			buildItem(shop, slot, "Shield", shield.Id, shield.DisplayName, ("BLOCK %d%%"):format(math.round(shield.Reduction * 100)), shield.Price)
+			local angle = math.deg(math.acos(math.clamp(shield.FacingDot, -1, 1)))
+			local stat = ("BLOCK %d%% · arrows %d%% · %d°"):format(math.round(shield.Reduction * 100), math.round(shield.ProjectileReduction * 100), math.round(angle))
+			local note = ("Move %d%% while blocking · raise %.2fs"):format(math.round(shield.BlockSpeedMultiplier * 100), shield.RaiseSeconds)
+			buildItem(shop, slot, "Shield", shield.Id, shield.DisplayName, stat, shield.Price, note)
 		end
 	end
 	shop.Parent = parent

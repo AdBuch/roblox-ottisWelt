@@ -10,7 +10,7 @@ local ShopController = {}
 
 type Names = {
 	tag: string,
-	coins: string,
+	aura: string,
 	equippedWeapon: string,
 	equippedShield: string,
 	ownedWeapons: string,
@@ -40,7 +40,7 @@ function ShopController.start(names: Names)
 		local isWeapon = kind == "Weapon"
 		local owned = splitSet(player:GetAttribute(if isWeapon then names.ownedWeapons else names.ownedShields))[id] == true
 		local equipped = player:GetAttribute(if isWeapon then names.equippedWeapon else names.equippedShield) == id
-		local coins = tonumber(player:GetAttribute(names.coins)) or 0
+		local aura = tonumber(player:GetAttribute(names.aura)) or 0
 
 		local status = item:FindFirstChild("Status", true)
 		if status and status:IsA("TextLabel") then
@@ -51,8 +51,8 @@ function ShopController.start(names: Names)
 				status.Text = "OWNED"
 				status.TextColor3 = Color3.fromRGB(200, 230, 255)
 			else
-				status.Text = if coins >= price then "LOCKED · affordable" else "LOCKED"
-				status.TextColor3 = if coins >= price then Color3.fromRGB(255, 220, 120) else Color3.fromRGB(190, 190, 190)
+				status.Text = if aura >= price then "LOCKED · affordable" else "LOCKED"
+				status.TextColor3 = if aura >= price then Color3.fromRGB(255, 220, 120) else Color3.fromRGB(190, 190, 190)
 			end
 		end
 
@@ -63,7 +63,7 @@ function ShopController.start(names: Names)
 			elseif owned then
 				prompt.ActionText = "EQUIP"
 			else
-				prompt.ActionText = ("BUY (%d coins)"):format(price)
+				prompt.ActionText = ("BUY (%d AURA)"):format(price)
 			end
 		end
 
@@ -92,7 +92,7 @@ function ShopController.start(names: Names)
 	CollectionService:GetInstanceAddedSignal(names.tag):Connect(function(item)
 		task.defer(refreshItem, item) -- wait for descendants to replicate
 	end)
-	for _, attribute in { names.coins, names.equippedWeapon, names.equippedShield, names.ownedWeapons, names.ownedShields } do
+	for _, attribute in { names.aura, names.equippedWeapon, names.equippedShield, names.ownedWeapons, names.ownedShields } do
 		player:GetAttributeChangedSignal(attribute):Connect(refreshAll)
 	end
 	refreshAll()

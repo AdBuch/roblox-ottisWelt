@@ -1,24 +1,26 @@
 --!strict
--- The six fixed rounds and variant selection.
+-- Round counts per zombie mode and weighted variant picking.
 
+local GameModeDefinitions = require(script.Parent.GameModeDefinitions)
 local ZombieDefinitions = require(script.Parent.ZombieDefinitions)
 
 type ZombieDefinition = ZombieDefinitions.ZombieDefinition
 
 local RoundDefinitions = {
-	Counts = table.freeze({ 1, 2, 4, 8, 16, 32 }),
+	TotalRounds = 6,
 	FirstRoundDelay = 3, -- "GET READY" countdown before Round 1
 	IntermissionSeconds = 4, -- countdown between rounds
 	SpawnInterval = 0.25, -- seconds between individual zombie spawns
-	VictoryReturnSeconds = 12, -- fireworks/summary time before returning to the lobby
 }
 
-function RoundDefinitions.totalRounds(): number
-	return #RoundDefinitions.Counts
-end
-
-function RoundDefinitions.zombieCount(round: number, cap: number): number
-	return math.min(RoundDefinitions.Counts[round] or 0, cap)
+-- Zombies in a round for a mode; Co-op scales with the number of participating players.
+function RoundDefinitions.zombieCount(modeId: string, round: number, playerCount: number): number
+	if modeId == "Coop" then
+		local base = GameModeDefinitions.Coop.BaseRoundCounts[round] or 0
+		local scale = GameModeDefinitions.Coop.PlayerScaling[math.clamp(playerCount, 1, 4)]
+		return math.ceil(base * scale)
+	end
+	return GameModeDefinitions.Solo.RoundCounts[round] or 0
 end
 
 -- Picks a variant available in this round; weights of available types are normalized.

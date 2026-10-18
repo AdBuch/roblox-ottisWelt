@@ -55,11 +55,20 @@ Arena.Layout = {
 	TribuneWalkwayY = FLOOR_TOP + PODIUM_HEIGHT + SEAT_RISE,
 	ReturnDoor = nil :: BasePart?,
 	ZombieSpawns = {} :: { CFrame },
+	-- 12 symmetric shell spots; any prefix of 4, 6, 8, 10 or 12 stays point-symmetric
 	ShellPositions = {
 		Vector3.new(35, FLOOR_TOP + 2, 0),
 		Vector3.new(-35, FLOOR_TOP + 2, 0),
 		Vector3.new(0, FLOOR_TOP + 2, 27),
 		Vector3.new(0, FLOOR_TOP + 2, -27),
+		Vector3.new(25, FLOOR_TOP + 2, 19),
+		Vector3.new(-25, FLOOR_TOP + 2, -19),
+		Vector3.new(-25, FLOOR_TOP + 2, 19),
+		Vector3.new(25, FLOOR_TOP + 2, -19),
+		Vector3.new(14, FLOOR_TOP + 2, 0),
+		Vector3.new(-14, FLOOR_TOP + 2, 0),
+		Vector3.new(0, FLOOR_TOP + 2, 12),
+		Vector3.new(0, FLOOR_TOP + 2, -12),
 	},
 }
 
@@ -378,10 +387,19 @@ function Arena.getSafePoint(position: Vector3): Vector3
 	return Vector3.new(p.X, FLOOR_TOP, p.Z)
 end
 
--- Where the fighter is placed when entering the arena.
-function Arena.getStartCFrame(): CFrame
-	local position = Arena.Layout.StartPosition
-	return CFrame.lookAt(position, Vector3.new(0, position.Y, 0))
+-- Where zombie-mode fighters enter the arena (south), spread out for up to four players.
+function Arena.getStartCFrame(index: number?): CFrame
+	local offset = ((index or 1) - 1) % 4 - 1.5
+	local position = Arena.Layout.StartPosition + Vector3.new(if index then offset * 4 else 0, 0, 0)
+	return CFrame.lookAt(position, Vector3.new(position.X, position.Y, 0))
+end
+
+-- Team Battle spawns: Red on the west end, Blue on the east end, facing each other.
+function Arena.getTeamSpawnCFrame(team: string, index: number): CFrame
+	local side = if team == "Red" then -1 else 1
+	local lateral = ((index - 1) % 4 - 1.5) * 4
+	local position = Vector3.new(side * (A - 12), FLOOR_TOP + 3.5, lateral)
+	return CFrame.lookAt(position, Vector3.new(0, position.Y, lateral))
 end
 
 -- Where spectators arrive on the lower tribune walkway (east, in front of the return door).

@@ -1,29 +1,38 @@
 --!strict
--- Healing golden shells. Touch -> server validates -> heals exactly Config.ShellHealAmount
--- (never above MaxHealth, never consumed at full health), hides the shell and respawns it
--- at the same spot after Config.ShellRespawnSeconds. Also counts leaderstats.Shells as score.
+-- Healing golden shells. 12 symmetric spots exist; the active match decides how many are in
+-- play (Solo 8, Co-op 4 + 2 per player up to 12, Team Battle 0 by default).
+-- Touch -> server validates (active, available, fighting player, really there, not at full
+-- health) -> heals exactly Config.ShellHealAmount (never above MaxHealth), hides the shell and
+-- respawns it after Config.ShellRespawnSeconds (not right beneath a player). Healing only
+-- affects the collecting player. Also counts leaderstats.Shells.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
 local Config = require(ReplicatedStorage.Shared.Config)
-local GameStates = require(ReplicatedStorage.Shared.GameStates)
+local CombatEffects = require(script.Parent.CombatEffects)
+local CombatRules = require(script.Parent.CombatRules)
 local CombatUtil = require(script.Parent.CombatUtil)
 local Remotes = require(script.Parent.Remotes)
+local ZombieService = require(script.Parent.ZombieService)
 
 local PREFIX = "[OttiArena][Server]"
 local GOLD = Color3.fromRGB(255, 200, 60)
+local CLEARANCE = 4 -- never respawn a shell this close to a player
 
 type Shell = {
 	id: number,
 	part: BasePart,
 	light: PointLight,
-	burst: ParticleEmitter,
-	available: boolean,
+	active: boolean, -- part of the current match's set
+	available: boolean, -- can be collected right now
+	token: number,
 }
 
 local ShellService = {}
+
+local shells: { Shell } = {}
 
 local function setVisible(shell: Shell, visible: boolean)
 	shell.part.Transparency = if visible then 0 else 1
@@ -36,6 +45,16 @@ local function setVisible(shell: Shell, visible: boolean)
 	end
 end
 
+local function playerNear(position: Vector3): boolean
+	for _, player in Players:GetPlayers() do
+		local _, _, root = CombatUtil.getLivingCharacter(player)
+		if root and CombatUtil.flatDistance(root.Position, position) < CLEARANCE then
+			return true
+		end
+	end
+	return false
+end
+
 local function addScore(player: Player)
 	local leaderstats = player:FindFirstChild("leaderstats")
 	local stat = leaderstats and leaderstats:FindFirstChild("Shells")
@@ -44,48 +63,54 @@ local function addScore(player: Player)
 	end
 end
 
+local function scheduleRespawn(shell: Shell, delay: number)
+	local token = shell.token
+	task.delay(delay, function()
+		if shell.token ~= token or not shell.active then
+			return
+		end
+		if playerNear(shell.part.Position) then
+			scheduleRespawn(shell, 1) -- don't pop up right beneath someone
+			return
+		end
+		shell.available = true
+		setVisible(shell, true)
+	end)
+end
+
 local function tryCollect(shell: Shell, player: Player)
-	if not shell.available then
+	if not shell.active or not shell.available then
 		return
 	end
-	if not GameStates.isFighter(player:GetAttribute(GameStates.StateAttribute)) then
-		return -- shells are part of the fight
+	local context = CombatRules.getContext(player)
+	if context ~= "Zombies" and context ~= "PvP" then
+		return -- only match fighters
 	end
 	local _, humanoid, root = CombatUtil.getLivingCharacter(player)
 	if not humanoid or not root then
 		return
 	end
-	-- Touch events come from client physics; check the player is really there
 	if (root.Position - shell.part.Position).Magnitude > Config.ShellPickupRange then
-		return
+		return -- touch events come from client physics; check the player is really there
 	end
 	if humanoid.Health >= humanoid.MaxHealth then
 		return -- full health: the shell stays for later
 	end
 
-	shell.available = false -- claim it before anything else can
+	shell.available = false -- claimed: can't be collected twice
 	local before = humanoid.Health
 	humanoid.Health = math.min(humanoid.MaxHealth, before + Config.ShellHealAmount)
 	local healed = humanoid.Health - before
 	addScore(player)
 	setVisible(shell, false)
-	shell.burst.Enabled = true
-	task.delay(0.2, function()
-		shell.burst.Enabled = false
-	end)
+	CombatEffects.burst(shell.part.Position, Color3.fromRGB(140, 255, 140), 1)
 	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Heal, healed)
+	ZombieService.onPlayerHealed(player, healed)
 	print(PREFIX, ("%s collected shell %d: +%d health (%d/%d)"):format(player.Name, shell.id, math.round(healed), math.round(humanoid.Health), humanoid.MaxHealth))
-
-	task.delay(Config.ShellRespawnSeconds, function()
-		if shell.part.Parent then
-			shell.available = true
-			setVisible(shell, true)
-		end
-	end)
+	scheduleRespawn(shell, Config.ShellRespawnSeconds)
 end
 
 local function buildShell(id: number, position: Vector3, parent: Instance): Shell
-	-- A flattened golden scallop shell with a small hinge
 	local part = Instance.new("Part")
 	part.Name = Config.ShellNamePrefix .. id
 	part.Size = Vector3.new(2.4, 1.1, 2.4)
@@ -93,7 +118,6 @@ local function buildShell(id: number, position: Vector3, parent: Instance): Shel
 	part.Anchored = true
 	part.CanCollide = false
 	part.CanQuery = false -- never blocks combat line-of-sight raycasts
-	part.CanTouch = true
 	part.Color = GOLD
 	part.Material = Enum.Material.Neon
 	local mesh = Instance.new("SpecialMesh")
@@ -117,27 +141,16 @@ local function buildShell(id: number, position: Vector3, parent: Instance): Shel
 	light.Range = 10
 	light.Parent = part
 
-	local burst = Instance.new("ParticleEmitter")
-	burst.Color = ColorSequence.new(Color3.fromRGB(255, 230, 120), Color3.fromRGB(140, 255, 140))
-	burst.LightEmission = 1
-	burst.Size = NumberSequence.new(0.5, 0)
-	burst.Lifetime = NumberRange.new(0.4, 0.7)
-	burst.Speed = NumberRange.new(6, 12)
-	burst.SpreadAngle = Vector2.new(180, 180)
-	burst.Rate = 150
-	burst.Enabled = false
-	burst.Parent = part
-
 	part.Parent = parent
-	return { id = id, part = part, light = light, burst = burst, available = true }
+	local shell: Shell = { id = id, part = part, light = light, active = false, available = false, token = 0 }
+	setVisible(shell, false)
+	return shell
 end
 
 function ShellService.init(parent: Instance, positions: { Vector3 })
-	if #positions < Config.ShellCount then
-		warn(PREFIX, ("Only %d shell positions for %d shells"):format(#positions, Config.ShellCount))
-	end
-	for id = 1, math.min(Config.ShellCount, #positions) do
-		local shell = buildShell(id, positions[id], parent)
+	for id, position in positions do
+		local shell = buildShell(id, position, parent)
+		table.insert(shells, shell)
 		shell.part.Touched:Connect(function(hit: BasePart)
 			local character = hit:FindFirstAncestorOfClass("Model")
 			local player = character and Players:GetPlayerFromCharacter(character)
@@ -146,6 +159,26 @@ function ShellService.init(parent: Instance, positions: { Vector3 })
 			end
 		end)
 	end
+end
+
+-- Activates the first `count` shell spots (symmetric by construction) and hides the rest.
+function ShellService.setActiveCount(count: number)
+	for index, shell in shells do
+		shell.token += 1
+		shell.active = index <= count
+		shell.available = shell.active
+		setVisible(shell, shell.active)
+	end
+end
+
+function ShellService.activeCount(): number
+	local count = 0
+	for _, shell in shells do
+		if shell.active then
+			count += 1
+		end
+	end
+	return count
 end
 
 return ShellService

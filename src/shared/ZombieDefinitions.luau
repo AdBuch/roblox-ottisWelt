@@ -44,6 +44,9 @@ export type ZombieDefinition = {
 	AvailableFromRound: number,
 	SpawnWeight: number, -- relative; unavailable types are filtered and the rest normalized
 	Special: ZombieSpecial,
+	AIProfile: string, -- personality in ZombieAIProfiles
+	Role: string, -- archive plaque text
+	SpecialText: string, -- archive plaque text
 	-- Net fighter
 	NetRange: number?,
 	NetCooldown: number?,
@@ -77,6 +80,9 @@ local LegionRemnant: ZombieDefinition = {
 	AvailableFromRound = 1,
 	SpawnWeight = 40,
 	Special = "None",
+	AIProfile = "Disciplined",
+	Role = "Balanced fighter",
+	SpecialText = "Sword and shield, blocks now and then",
 	Body = {
 		Scale = 1,
 		Torso = Vector3.new(2.6, 2.4, 1.7),
@@ -116,6 +122,9 @@ local RottenVelite: ZombieDefinition = {
 	AvailableFromRound = 2,
 	SpawnWeight = 25,
 	Special = "None",
+	AIProfile = "Skirmisher",
+	Role = "Fast skirmisher",
+	SpecialText = "Quick spear jabs, then runs off",
 	Body = {
 		Scale = 0.88,
 		Torso = Vector3.new(2.2, 2.1, 1.5),
@@ -155,6 +164,9 @@ local ArenaBrute: ZombieDefinition = {
 	AvailableFromRound = 3,
 	SpawnWeight = 17,
 	Special = "None",
+	AIProfile = "Tank",
+	Role = "Heavy attacker",
+	SpecialText = "Beware the crushing strike",
 	Body = {
 		Scale = 1.18,
 		Torso = Vector3.new(3.4, 2.6, 2.3),
@@ -180,7 +192,7 @@ local ArenaBrute: ZombieDefinition = {
 
 local NetFighter: ZombieDefinition = {
 	Id = "NetFighter",
-	DisplayName = "Zombie Net Fighter",
+	DisplayName = "Zombie Retiarius",
 	Health = 55,
 	Damage = 8,
 	WalkSpeed = 11.5,
@@ -194,6 +206,9 @@ local NetFighter: ZombieDefinition = {
 	AvailableFromRound = 3,
 	SpawnWeight = 13,
 	Special = "Net",
+	AIProfile = "Controller",
+	Role = "Tactical controller",
+	SpecialText = "Throws a net that slows you",
 	NetRange = 13,
 	NetCooldown = 7,
 	NetWindUp = 0.7,
@@ -238,6 +253,9 @@ local ArenaChampion: ZombieDefinition = {
 	AvailableFromRound = 4,
 	SpawnWeight = 5, -- rare
 	Special = "Guard",
+	AIProfile = "Elite",
+	Role = "Rare elite",
+	SpecialText = "Raises a shield that blocks frontal hits",
 	GuardSeconds = 1.6, -- shield raised (visible glow): frontal hits are blocked
 	GuardCooldown = 4.5, -- exposed time before it can guard again
 	Body = {
