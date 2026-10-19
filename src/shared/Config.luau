@@ -1,7 +1,7 @@
 --!strict
 -- Shared names: folders, tags, attributes, remotes, shells.
 -- Combat tuning: CombatConfig. Items: WeaponDefinitions / ShieldDefinitions / SpecialMoveDefinitions /
--- ComboDefinitions. Enemies: ZombieDefinitions / ZombieAIProfiles. Modes: GameModeDefinitions.
+-- WeaponSpecialDefinitions. Enemies: ZombieDefinitions / ZombieAIProfiles. Modes: GameModeDefinitions.
 
 local Config = {
 	ArenaFolderName = "GeneratedArena",

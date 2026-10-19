@@ -128,7 +128,7 @@ function InputController.init(options: Options): Input
 			for _, other in Players:GetPlayers() do
 				local team = other:GetAttribute(Config.TeamAttribute)
 				-- only opposing fighters: never teammates, spectators or lobby players
-				if other ~= player and typeof(team) == "string" and team ~= "" and team ~= myTeam and other:GetAttribute("ArenaRole") == "FIGHTER" and other.Character then
+				if other ~= player and typeof(team) == "string" and team ~= "" and team ~= myTeam and other:GetAttribute(Config.ArenaRoleAttribute) == "FIGHTER" and other.Character then
 					consider(other.Character)
 				end
 			end
@@ -190,7 +190,7 @@ function InputController.init(options: Options): Input
 			return
 		end
 		remotes.combatAction:FireServer("Basic", aimFor(root))
-		options.onInput("A")
+		options.onInput("ATK")
 	end
 
 	local function setBlock(held: boolean)
@@ -204,7 +204,7 @@ function InputController.init(options: Options): Input
 		end
 		remotes.shieldBlock:FireServer(held)
 		if held and options.canAct() then
-			options.onInput("B")
+			options.onInput("BLK")
 		end
 	end
 
@@ -213,7 +213,7 @@ function InputController.init(options: Options): Input
 			return
 		end
 		remotes.combatAction:FireServer("Slide")
-		options.onInput("S")
+		options.onInput("SLD")
 	end
 
 	local function sendGesture(payload: any)
@@ -226,12 +226,13 @@ function InputController.init(options: Options): Input
 		end
 		payload.aim = aimFor(root)
 		remotes.combatAction:FireServer("Gesture", payload)
+		options.onInput(if payload.special then "SPC" else "PAD")
 	end
 
 	local function enterSpecial()
 		if options.canAct() then
 			options.pad.enterSpecial()
-			options.onInput("Q")
+			options.onInput("SPC")
 		end
 	end
 

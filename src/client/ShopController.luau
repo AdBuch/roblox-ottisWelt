@@ -15,10 +15,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local ArmorDefinitions = require(Shared:WaitForChild("ArmorDefinitions"))
-local ComboDefinitions = require(Shared:WaitForChild("ComboDefinitions"))
 local DamageConfig = require(Shared:WaitForChild("DamageConfig"))
 local ShieldDefinitions = require(Shared:WaitForChild("ShieldDefinitions"))
 local SpecialMoveDefinitions = require(Shared:WaitForChild("SpecialMoveDefinitions"))
+local WeaponAttackDefinitions = require(Shared:WaitForChild("WeaponAttackDefinitions"))
+local WeaponSpecialDefinitions = require(Shared:WaitForChild("WeaponSpecialDefinitions"))
 local UiConfig = require(Shared:WaitForChild("UiConfig"))
 local WeaponDefinitions = require(Shared:WaitForChild("WeaponDefinitions"))
 
@@ -74,9 +75,15 @@ local function describe(kind: string, id: string): Card?
 			return nil
 		end
 		local aerial = (SpecialMoveDefinitions :: any)[weapon.Aerial]
-		local combos = {}
-		for _, entry in ((ComboDefinitions :: any).ByWeapon[weapon.Id] or {}) :: { any } do
-			table.insert(combos, entry.Name)
+		-- Special families of this weapon (gesture tiers: 25 / 50 / 75 Momentum, Ultimate 100)
+		local specials = {}
+		local families = WeaponSpecialDefinitions.forPrefix(WeaponAttackDefinitions.prefixOf(weapon.Basic))
+		for _, family in { "Left", "Right", "Up", "Down", "Circle", "Ultimate" } do
+			local moveId = families and (families :: any)[family]
+			local move = moveId and (SpecialMoveDefinitions :: any)[moveId]
+			if move then
+				table.insert(specials, move.Name)
+			end
 		end
 		local stats = { ("DAMAGE  %d"):format(weapon.Damage) }
 		local info = weapon.Description
@@ -94,8 +101,8 @@ local function describe(kind: string, id: string): Card?
 		if aerial then
 			info ..= " · Jump attack: " .. aerial.Name
 		end
-		if #combos > 0 then
-			info ..= " · Combos: " .. table.concat(combos, ", ")
+		if #specials > 0 then
+			info ..= " · Specials: " .. table.concat(specials, ", ")
 		end
 		return { title = weapon.DisplayName, section = ROW_NAMES[weapon.Row] or "WEAPONS", stats = stats, info = info }
 	elseif kind == "Shield" then

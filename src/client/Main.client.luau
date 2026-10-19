@@ -1,6 +1,6 @@
 --!strict
 -- Client entry point: builds the responsive HUD and wires server feedback, attributes and input
--- to it. The client never decides damage, hits, combos, Aura, ownership, scores or victories.
+-- to it. The client never decides damage, hits, Momentum, blocks, parries, slides or victories.
 --   ResponsiveHudController   layout, scale, compact health, round line, hints, hit flash
 --   HudVisibilityController   UI state x Full / Minimal / Hidden (eye button, H key)
 --   HudStateController        Lobby / Solo / Coop / TeamBattle / Boss / Spectator / Results
@@ -9,7 +9,13 @@
 --   TeamStatusController      team score + time, co-op teammate strip, lobby rosters
 --   BossHudController         slim Otti bar + short warnings
 --   AuraDisplayController     lobby Aura counter, "+n" rewards in combat
---   MobileControlsController   touch buttons / desktop special cards
+--   MobileControlsController  touch buttons (ATK, BLOCK, SLIDE, SPECIAL)
+--   GesturePadController      Wild gesture pad, Special Mode drawing, the training trace
+--   CombatSettingsController  CLASSIC / WILD, BLOOD and CAMERA pills (saved preferences)
+--   InputController           Classic / Wild input -> CombatAction / ShieldBlock intents
+--   SlideController           plays an approved slide on the own character
+--   MomentumHudController     the ARENA MOMENTUM bar
+--   CombatEffectsController   hit presentation by category (BloodEffects, SandStains, CombatCamera)
 --   InfoPanelController       optional "i" panel; SpectatorController for the tribunes
 
 local Players = game:GetService("Players")
@@ -45,9 +51,10 @@ local CombatConfig = load(shared, "CombatConfig")
 local GameStates = load(shared, "GameStates")
 local GameModeDefinitions = load(shared, "GameModeDefinitions")
 local WeaponDefinitions = load(shared, "WeaponDefinitions")
+local WeaponAttackDefinitions = load(shared, "WeaponAttackDefinitions")
+local WeaponSpecialDefinitions = load(shared, "WeaponSpecialDefinitions")
 local ShieldDefinitions = load(shared, "ShieldDefinitions")
 local SpecialMoveDefinitions = load(shared, "SpecialMoveDefinitions")
-local ComboDefinitions = load(shared, "ComboDefinitions")
 local ResponsiveHudController = load(script.Parent, "ResponsiveHudController")
 local HudVisibilityController = load(script.Parent, "HudVisibilityController")
 local HudStateController = load(script.Parent, "HudStateController")
@@ -60,6 +67,14 @@ local MobileControlsController = load(script.Parent, "MobileControlsController")
 local InfoPanelController = load(script.Parent, "InfoPanelController")
 local SpectatorController = load(script.Parent, "SpectatorController")
 local InputController = load(script.Parent, "InputController")
+local GesturePadController = load(script.Parent, "GesturePadController")
+local CombatSettingsController = load(script.Parent, "CombatSettingsController")
+local SlideController = load(script.Parent, "SlideController")
+local MomentumHudController = load(script.Parent, "MomentumHudController")
+local CombatEffectsController = load(script.Parent, "CombatEffectsController")
+local BloodEffectsController = load(script.Parent, "BloodEffectsController")
+local SandStainController = load(script.Parent, "SandStainController")
+local CombatCameraController = load(script.Parent, "CombatCameraController")
 local ShopController = load(script.Parent, "ShopController")
 local EffectsController = load(script.Parent, "EffectsController")
 local ZombieAnimator = load(script.Parent, "ZombieAnimator")
@@ -79,12 +94,14 @@ local placeFolder = script.Parent:FindFirstChild("Place")
 local GameModeMenuController = if not isArena then load(placeFolder, "GameModeMenuController") else nil
 local ActiveBattlesController = if not isArena then load(placeFolder, "ActiveBattlesController") else nil
 for _, module in {
-	Config, CombatConfig, GameStates, GameModeDefinitions, WeaponDefinitions, ShieldDefinitions, SpecialMoveDefinitions, ComboDefinitions,
+	Config, CombatConfig, GameStates, GameModeDefinitions, WeaponDefinitions, WeaponAttackDefinitions, WeaponSpecialDefinitions,
+	ShieldDefinitions, SpecialMoveDefinitions,
 	ResponsiveHudController, HudVisibilityController, HudStateController, NotificationController, ContextHealthController,
 	TeamStatusController, BossHudController, AuraDisplayController, MobileControlsController, InfoPanelController,
-	SpectatorController, InputController, ShopController, EffectsController, ZombieAnimator, OttiAnimator,
-	DamageEffectsController, CrowdEffectsController, BowController, ComboFeedbackController, PlayerAnimator,
-	OttiEntranceController, TeleportStatusController,
+	SpectatorController, InputController, GesturePadController, CombatSettingsController, SlideController, MomentumHudController,
+	CombatEffectsController, BloodEffectsController, SandStainController, CombatCameraController,
+	ShopController, EffectsController, ZombieAnimator, OttiAnimator, DamageEffectsController, CrowdEffectsController,
+	BowController, ComboFeedbackController, PlayerAnimator, OttiEntranceController, TeleportStatusController,
 } do
 	if not module then
 		return
@@ -94,8 +111,8 @@ end
 local playerGui = player:WaitForChild("PlayerGui")
 local hud = ResponsiveHudController.create(playerGui)
 
--- Small edge buttons (eye = HUD mode, i = info) on the right edge, below the Aura counter
-local edge = hud.group("EdgeButtons", Vector2.new(1, 0), UDim2.new(1, -8, 0, 40), UDim2.fromOffset(44, if isArena then 96 else 148))
+-- Small edge buttons (eye = HUD mode, i = info) and the combat settings pills on the right edge
+local edge = hud.group("EdgeButtons", Vector2.new(1, 0), UDim2.new(1, -8, 0, 40), UDim2.fromOffset(44, if isArena then 198 else 250))
 local edgeList = Instance.new("UIListLayout")
 edgeList.Padding = UDim.new(0, 8)
 edgeList.SortOrder = Enum.SortOrder.LayoutOrder
@@ -125,41 +142,7 @@ local function arenaAttr(name: string): any
 	return if arena then arena:GetAttribute(name) else nil
 end
 
------------------------------------------------------------------- core HUD elements
-local characterAlive = false
-visibility.register("Health", hud.healthFrame, function()
-	return characterAlive
-end, function()
-	return characterAlive and hud.isLowHealth() and visibility.getState() ~= "Lobby" -- critical warning: never hidden
-end)
-visibility.register("Round", hud.roundFrame, hud.roundVisible)
-visibility.register("Hints", hud.hintFrame, function()
-	return not hud.layout.touch
-end)
-
-local aura = AuraDisplayController.start(hud.group, visibility, notify)
-local controls = MobileControlsController.start(hud.group, visibility, hud.onLayout, function()
-	return hud.layout.touch
-end)
-
-local CONTROL_HINTS = {
-	["Keyboard & Mouse"] = "LMB Attack   RMB Block   Space Jump   Enter Combo   F Interact",
-	["Gamepad"] = "R2 Attack   L2 Block   A Jump   Y Combo   D-pad up Interact",
-	["Touch"] = "",
-}
-
-local function equippedWeapon(): any
-	return WeaponDefinitions.ById[tostring(player:GetAttribute(Config.EquippedWeaponAttribute))] or WeaponDefinitions.ById[WeaponDefinitions.Starter]
-end
-
--- The COMBO TRAINING board shows the equipped weapon's combinations
-local lobbyFolder = if isArena then nil else Workspace:WaitForChild(Config.LobbyFolderName, WAIT_TIMEOUT)
-local comboFeedback = ComboFeedbackController.start(hud.group, visibility, hud.onLayout, lobbyFolder)
-local function refreshSpecials()
-	comboFeedback.showBoard(equippedWeapon())
-end
-
------------------------------------------------------------------- remotes, input and feedback
+------------------------------------------------------------------ remotes and saved preferences
 local remotes = waitFor(ReplicatedStorage, Config.RemotesFolderName)
 local combatActionInstance = remotes and waitFor(remotes, Config.CombatActionRemoteName)
 local shieldBlock = remotes and waitFor(remotes, Config.ShieldBlockRemoteName)
@@ -169,39 +152,103 @@ local matchRequestInstance = remotes and remotes:WaitForChild(Config.MatchReques
 local matchEventInstance = remotes and remotes:WaitForChild(Config.MatchEventRemoteName, WAIT_TIMEOUT)
 local matchRequest: RemoteFunction? = if matchRequestInstance and matchRequestInstance:IsA("RemoteFunction") then matchRequestInstance else nil
 local matchEvent: RemoteEvent? = if matchEventInstance and matchEventInstance:IsA("RemoteEvent") then matchEventInstance else nil
+local preferenceRemote = remotes and remotes:FindFirstChild(Config.PreferenceRemoteName)
+local preferenceEvent: RemoteEvent? = if preferenceRemote and preferenceRemote:IsA("RemoteEvent") then preferenceRemote else nil
 
--- Match menus (Hub) / travel status (both): their own ScreenGui above the HUD
-local menuGui = Instance.new("ScreenGui")
-menuGui.Name = "MatchMenus"
-menuGui.ResetOnSpawn = false
-menuGui.DisplayOrder = 20
-menuGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-menuGui.Parent = playerGui
-TeleportStatusController.start(menuGui, matchRequest, matchEvent, isArena)
-if not isArena and GameModeMenuController and ActiveBattlesController then
-	local modeMenu: any = nil
-	local live = ActiveBattlesController.start(menuGui, matchRequest, matchEvent, function()
-		if modeMenu then
-			modeMenu.open(nil)
-		end
-	end)
-	modeMenu = GameModeMenuController.start(menuGui, edge, matchRequest, matchEvent, function()
-		live.open()
-	end, function(text: string)
-		notify("Info", text)
-	end)
-	-- the overlay's MODE SELECTION button closes it and opens the menu
-	local openMenu = modeMenu.open
-	modeMenu.open = function(tab: string?)
-		live.close()
-		openMenu(tab)
+-- CLASSIC / WILD, BLOOD and CAMERA settings (saved; the mode switch cancels gestures and blocks)
+local settings = CombatSettingsController.start(edge, preferenceEvent, notify)
+
+local aura = AuraDisplayController.start(hud.group, visibility, notify)
+local controls = MobileControlsController.start(hud.group, visibility, hud.onLayout, function()
+	return hud.layout.touch
+end)
+local momentumHud = MomentumHudController.start(hud.group, visibility, hud.onLayout, player)
+
+local function controlHint(): string
+	local mode = settings.getMode()
+	if scheme == "Gamepad" then
+		return if mode == "Wild" then "Pad: R-stick path · hold centre = block · B Slide · X Special" else "R2 Attack   L2 Block   B Slide   X Special   A Jump"
+	elseif scheme == "Touch" then
+		return ""
 	end
+	return if mode == "Wild" then "Gesture pad: swipes · hold centre = block · Shift Slide · Q Special" else "LMB Attack   RMB Block   Shift Slide   Q Special   Space Jump   F Interact"
 end
 
-local context: any = nil -- ContextHealthController, started once the arena exists
+local function equippedWeapon(): any
+	return WeaponDefinitions.ById[tostring(player:GetAttribute(Config.EquippedWeaponAttribute))] or WeaponDefinitions.ById[WeaponDefinitions.Starter]
+end
+
+-- The TRAINING board (lobby training yard) shows Classic / Wild, Momentum and the weapon's specials
+local lobbyFolder = if isArena then nil else Workspace:WaitForChild(Config.LobbyFolderName, WAIT_TIMEOUT)
+local comboFeedback = ComboFeedbackController.start(hud.group, visibility, hud.onLayout, lobbyFolder)
+local function refreshSpecials()
+	comboFeedback.showBoard(equippedWeapon(), settings.getMode())
+end
+
+------------------------------------------------------------------ effects (shared by every fight)
+local stains = SandStainController.start()
+local bloodFx = BloodEffectsController.start(stains)
+local cameraFx = CombatCameraController.start()
+cameraFx.setShake(settings.getCameraShake())
+settings.onChanged(function()
+	cameraFx.setShake(settings.getCameraShake())
+end)
+local combatEffects = CombatEffectsController.start({
+	gui = hud.gui,
+	blood = bloodFx,
+	camera = cameraFx,
+	bloodPreference = settings.getBlood,
+	device = function()
+		return hud.layout.device
+	end,
+	userId = function()
+		return player.UserId
+	end,
+})
+hud.onLayout(function(layout: any)
+	-- smaller sand stain budget on phones (BloodConfig.Quality)
+	bloodFx.setQuality(if layout.device == "Phone" then "Low" elseif layout.device == "Tablet" then "Medium" else "High")
+end)
+
+------------------------------------------------------------------ input: gesture pad, combat input
+local input: any = nil -- InputController, created below (the pad reports into it)
+local pad = GesturePadController.start({
+	gui = hud.gui,
+	onGesture = function(payload: any)
+		if input then
+			input.sendGesture(payload)
+		end
+	end,
+	onBlock = function(held: boolean)
+		if input then
+			input.setBlock(held)
+		end
+	end,
+	isTouch = function()
+		return hud.layout.touch
+	end,
+	device = function()
+		return hud.layout.device
+	end,
+	showTrace = function()
+		return visibility.getState() == "Lobby" -- the training area only
+	end,
+})
+pad.setWild(settings.getMode() == "Wild")
+controls.setMode(settings.getMode())
+
+settings.onModeChanged(function(mode: string)
+	pad.setWild(mode == "Wild")
+	controls.setMode(mode)
+	if input then
+		input.onModeChanged(mode)
+	end
+	hud.setHint(controlHint())
+	refreshSpecials()
+end)
 
 if combatAction and shieldBlock and shieldBlock:IsA("RemoteEvent") then
-	InputController.init({
+	input = InputController.init({
 		remotes = { combatAction = combatAction, shieldBlock = shieldBlock },
 		canAct = function()
 			local state = gameState()
@@ -209,11 +256,14 @@ if combatAction and shieldBlock and shieldBlock:IsA("RemoteEvent") then
 		end,
 		attackButton = controls.attackButton,
 		blockButton = controls.blockButton,
-		comboButton = controls.comboButton,
+		slideButton = controls.slideButton,
+		specialButton = controls.specialButton,
+		pad = pad,
+		getMode = settings.getMode,
 		onInput = comboFeedback.input,
 		onSchemeChanged = function(newScheme: string)
 			scheme = newScheme
-			hud.setHint(CONTROL_HINTS[newScheme] or "")
+			hud.setHint(controlHint())
 			refreshSpecials()
 		end,
 	})
@@ -221,13 +271,15 @@ else
 	warn(PREFIX, "CombatAction/ShieldBlock RemoteEvents not found; combat input is disabled")
 end
 
+------------------------------------------------------------------ HUD and match feedback
+local context: any = nil -- ContextHealthController, started once the arena exists
+
 if feedback and feedback:IsA("RemoteEvent") then
 	local F = CombatConfig.Feedback
-	feedback.OnClientEvent:Connect(function(kind: string, a: any, b: any, c: any, d: any)
+	feedback.OnClientEvent:Connect(function(kind: string, a: any, b: any, c: any, d: any, e: any)
 		if kind == F.Action then
-			if a == "Combo" and typeof(d) == "string" then
-				-- In the training yard: explicit success feedback; in combat just the move name
-				notify("Info", if visibility.getState() == "Lobby" then "COMBO SUCCESS · " .. d else d .. "!")
+			if a == "Special" and typeof(b) == "string" then
+				notify("Info", b .. "!") -- the move name of your special
 			end
 			hud.fadeHint() -- the control hint fades once you start fighting
 		elseif kind == F.Hit then
@@ -241,6 +293,15 @@ if feedback and feedback:IsA("RemoteEvent") then
 			controls.setBlocking(a == true)
 		elseif kind == F.Parry then
 			notify("Info", "PARRY!")
+		elseif kind == F.Dodge then
+			notify("Info", "DODGE!")
+		elseif kind == F.PerfectBlock then
+			combatEffects.perfectBlock()
+			notify("Info", "PERFECT BLOCK · COUNTER")
+		elseif kind == F.Slide then
+			if typeof(a) == "Vector3" then
+				SlideController.play(player, a, tonumber(b) or 12, tonumber(c) or 0.55)
+			end
 		elseif kind == F.PlayerHit then
 			hud.flashHit(b == true)
 			local from = if typeof(c) == "Vector3" then c else nil
@@ -271,8 +332,9 @@ if feedback and feedback:IsA("RemoteEvent") then
 		elseif kind == F.Elimination then
 			notify("Info", tostring(a))
 		elseif kind == F.DamageFx then
+			-- (position, kind, scale, direction, extra): routed by CombatEffectsController
 			if typeof(a) == "Vector3" then
-				DamageEffectsController.burst(a, tostring(b), tonumber(c) or 1, if typeof(d) == "Vector3" then d else nil)
+				combatEffects.damageFx(a, tostring(b), tonumber(c) or 1, if typeof(d) == "Vector3" then d else nil, e)
 			end
 		elseif kind == F.Knockdown then
 			EffectsController.knockdown(tonumber(a) or 1)
@@ -294,6 +356,17 @@ else
 end
 
 ------------------------------------------------------------------ health, Aura, loadout
+local characterAlive = false
+visibility.register("Health", hud.healthFrame, function()
+	return characterAlive
+end, function()
+	return characterAlive and hud.isLowHealth() and visibility.getState() ~= "Lobby" -- critical warning: never hidden
+end)
+visibility.register("Round", hud.roundFrame, hud.roundVisible)
+visibility.register("Hints", hud.hintFrame, function()
+	return not hud.layout.touch
+end)
+
 local function watchCharacter(character: Model)
 	controls.setBlocking(false)
 	local humanoid = character:WaitForChild("Humanoid", WAIT_TIMEOUT)
@@ -323,6 +396,7 @@ for _, attribute in { Config.AuraAttribute, Config.EquippedWeaponAttribute, Conf
 	player:GetAttributeChangedSignal(attribute):Connect(refreshInventory)
 end
 refreshInventory()
+hud.setHint(controlHint())
 
 ShopController.start({
 	tag = Config.ShopItemTag,
@@ -337,7 +411,6 @@ ShopController.start({
 }, hud.group)
 
 -- Saved preferences: the HUD mode follows the server-stored value and is sent back on change
-local preferenceRemote = remotes and remotes:FindFirstChild(Config.PreferenceRemoteName)
 local hudPreference = Config.PreferencePrefix .. "HudMode"
 local function applyHudPreference()
 	local saved = player:GetAttribute(hudPreference)
@@ -348,8 +421,8 @@ end
 player:GetAttributeChangedSignal(hudPreference):Connect(applyHudPreference)
 applyHudPreference()
 visibility.onModeChanged(function(mode: string)
-	if preferenceRemote and preferenceRemote:IsA("RemoteEvent") and player:GetAttribute(hudPreference) ~= mode then
-		preferenceRemote:FireServer("HudMode", mode)
+	if preferenceEvent and player:GetAttribute(hudPreference) ~= mode then
+		preferenceEvent:FireServer("HudMode", mode)
 	end
 end)
 
@@ -483,6 +556,15 @@ task.spawn(function()
 	} do
 		arenaFolder:GetAttributeChangedSignal(name):Connect(refreshMatch)
 	end
+	-- Each match starts a new stain epoch: older sand stains fade out
+	local function syncEpoch()
+		local epoch = tonumber(arenaFolder:GetAttribute(Config.StainEpochAttribute))
+		if epoch then
+			stains.setEpoch(epoch)
+		end
+	end
+	arenaFolder:GetAttributeChangedSignal(Config.StainEpochAttribute):Connect(syncEpoch)
+	syncEpoch()
 
 	local teamStatus = TeamStatusController.start(hud.group, visibility, arenaFolder, lobby, function()
 		return hud.layout.device == "Phone"
@@ -521,11 +603,11 @@ task.spawn(function()
 			table.insert(lines, ("Round %d / %d · %d zombies left · players %d / %d"):format(round, tonumber(arenaFolder:GetAttribute(Config.RoundMaxAttribute)) or 7, tonumber(arenaFolder:GetAttribute(Config.ZombiesAliveAttribute)) or 0, tonumber(arenaFolder:GetAttribute(Config.PlayersAliveAttribute)) or 0, tonumber(arenaFolder:GetAttribute(Config.PlayersTotalAttribute)) or 0))
 		end
 		table.insert(lines, "")
-		table.insert(lines, "<b>CONTROLS</b>")
-		table.insert(lines, "Keyboard: LMB attack · RMB block (tap = B, hold = guard) · Space jump · Enter combo · F interact · H HUD mode")
-		table.insert(lines, "Gamepad: R2 attack · L2 block · A jump · Y combo · D-pad up interact")
-		table.insert(lines, "Touch: ATK · BLOCK · jump button · COMBO · tap prompts · eye button = HUD mode")
-		table.insert(lines, "Combos: tap the inputs (A attack, B block, J jump), then EXECUTE. Attack while airborne = aerial attack.")
+		table.insert(lines, ("<b>CONTROLS</b>  ·  %s"):format(settings.getMode()))
+		table.insert(lines, "Classic: LMB attack · RMB block (hold) · Shift / C slide · Space jump · Q special, then draw (mouse drag)")
+		table.insert(lines, "Wild: gesture pad, swipes Left / Right / Up / Down, circle · hold centre = block · quick tap = parry")
+		table.insert(lines, "Gamepad: R2 attack · L2 block · B slide · X special · A jump   ·   Touch: ATK · BLOCK · SLIDE · SPECIAL")
+		table.insert(lines, "Switch CLASSIC / WILD on the right edge (saved). F interact · H HUD mode")
 		table.insert(lines, "")
 		table.insert(lines, ("<b>WEAPON</b>  %s"):format(weapon.DisplayName))
 		for _, moveId in { weapon.Basic, weapon.Aerial } do
@@ -536,13 +618,16 @@ task.spawn(function()
 		end
 		local shieldText = if weapon.TwoHanded then "none (two-handed: parry with block)" elseif shield then shield.DisplayName else "–"
 		table.insert(lines, ("<b>SHIELD</b>  %s"):format(shieldText))
-		local combos = ComboDefinitions.ByWeapon[weapon.Id]
-		if combos then
+		local families = WeaponSpecialDefinitions.forPrefix(WeaponAttackDefinitions.prefixOf(weapon.Basic))
+		if families then
 			table.insert(lines, "")
-			table.insert(lines, "<b>COMBOS</b>")
-			for _, combo in combos do
-				local move = SpecialMoveDefinitions[combo.Move]
-				table.insert(lines, ("  %s%s: %s (%.0f s)"):format(if combo.Advanced then "★ " else "", combo.Name, ComboDefinitions.describe(combo.Sequence), if move then move.Cooldown else 0))
+			table.insert(lines, "<b>SPECIALS</b>  Momentum 0-100: vary attacks, slide-dodge, perfect-block to build it")
+			for _, family in { "Left", "Right", "Up", "Down", "Circle", "Ultimate" } do
+				local moveId = (families :: any)[family]
+				local move = moveId and (SpecialMoveDefinitions :: any)[moveId]
+				if move then
+					table.insert(lines, ("  %s  %s"):format(family:upper(), move.Name))
+				end
 			end
 		end
 		table.insert(lines, "")
@@ -558,9 +643,9 @@ task.spawn(function()
 		info.onStateChanged(state, hud.layout)
 		spectator.onStateChanged(state)
 		if state == "Lobby" then
-			hud.setHint(CONTROL_HINTS[scheme] or "")
+			hud.setHint(controlHint())
 		elseif state ~= "Results" and state ~= "Spectator" then
-			hud.setHint(CONTROL_HINTS[scheme] or "")
+			hud.setHint(controlHint())
 			hud.fadeHint()
 		end
 		refreshMatch()
@@ -577,4 +662,4 @@ BowController.start(hud.gui, Config.EquippedWeaponAttribute, function()
 	return GameStates.isFighter(state) or GameStates.isInLobby(state)
 end)
 
-print(PREFIX, "Ready: responsive HUD (Full / Minimal / Hidden), touch + gamepad + keyboard")
+print(PREFIX, "Ready: responsive HUD (Full / Minimal / Hidden), Classic + Wild controls, touch + gamepad + keyboard")

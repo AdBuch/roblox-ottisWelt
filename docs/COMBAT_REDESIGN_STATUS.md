@@ -76,46 +76,35 @@ not yet wired to the new combat API.
   - `InputController`: rewritten for Classic and Wild, Soft Targeting, slide, Special Mode and
     gamepad stick gestures. Its new `init(options)` signature is not yet called by `Main.client`.
 
-## Still to do (client and finish)
+## Client side (done, analysis clean for both places)
 
-1. **`Main.client` wiring:**
-   - create CombatSettings, GesturePad and the new InputController options (the `slideButton`,
-     `specialButton`, `pad` and `getMode` callbacks)
-   - set the edge frame size to about 198 in the arena and 250 in the hub
-   - handle the Feedback events `Dodge`, `PerfectBlock` and `Slide` and the Action label `"Special"`
-   - route `DamageFx(position, kind, scale, direction, extra)`
-   - update the info-panel control texts
-2. **`SlideController`:**
-   - on `Feedback.Slide`, move the own character with raycast stops and small steering, with no upward velocity
-   - lower the camera by `SlideDefinitions.CameraLower`
-3. **`MomentumHudController`:** a narrow bar in the UiState group `"Momentum"`. Tier marks sit at
-   25, 50 and 75, plus Ultimate; the bar turns red when a special is unaffordable.
-4. **`PlayerAnimator`:**
-   - new anim poses with footwork, matching the server sweep paths
-   - a block pose layer (Front, Left, Right, High, Low), the slide posture and hit reactions
-5. **Effects:** `CombatEffectsController`, `BloodEffectsController`, `SandStainController` and `CombatCameraController`.
-   - category effects (Blade, Blunt, Heavy, Pierce, Bow)
-   - zombie-only blood following the `BloodConfig` mode
-   - pooled, capped and merging sand stains at FloorTop, which fade by `StainEpoch`
-   - block sparks, embedded arrows (pooled, max 12), a perfect-block flash and camera impulses
-     scaled by the CameraShake setting
-6. **`MobileControlsController`:**
-   - SLIDE and SPECIAL replace COMBO; the code still uses `positions.Combo`, which was removed
-     from `UiConfig`, so switch it to `positions.Slide` and `positions.Special`
-   - in Wild mode, hide ATK and BLOCK and show the pad
-7. **`ComboFeedbackController`:**
-   - rewrite it as the training board with Classic and Wild tutorials, Momentum and specials
-   - show the gesture trace only in the training area
-8. **`ShopController`:** list specials instead of combos.
-9. **Remove `shared/ComboDefinitions.luau`:**
-   - delete its references in `ComboFeedbackController`, `ShopController` and `Main.client`, and
-     in the required list in the arena `Main.server`
-   - fix the comments in `WeaponDefinitions`, `Config` and `SpecialMoveDefinitions`
-10. **Checks:** run the hub, arena and default Rojo builds and strict analysis for both places, and fix every error.
-11. **Docs:** update the README, then write the final report:
-    - the crowd-centre root cause: the client cached `GetPivot()` before PrimaryPart replicated,
-      which returned the arena centre
-    - the files changed, the controls and the Studio test instructions
-    - the known limitations
+- `Main.client` wires CombatSettings, GesturePad, the new InputController, SlideController, MomentumHudController and the
+  effects chain (CombatEffects, BloodEffects, SandStains, CombatCamera). Dispatches `DamageFx(position, kind, scale,
+  direction, extra)`, `Dodge`, `PerfectBlock`, `Slide` and the `Special` label.
+- `InputController` rewritten (Classic / Wild, Soft Targeting, slide, Special Mode, gamepad stick gestures); it sends
+  intent only (`Basic`, `Gesture`, `Slide`, block hold).
+- `PlayerAnimator`: aliases for the new anim names, a block pose layer (Front / Left / Right / High / Low) with impact
+  recoil, slide posture and hit reactions, all summed into one write per joint.
+- `SandStainController`: pooled, capped by quality, merging, epoch fade, lifetime fade.
+- `BloodEffectsController`, `CombatCameraController`, `CombatEffectsController` (sparks / dust by category, bow arrows
+  pooled in shields, perfect-block flash, camera impulses scaled by the CameraShake preference).
+- `MobileControlsController`: ATK / BLOCK / SLIDE / SPECIAL; ATK and BLOCK hidden in Wild.
+- `ComboFeedbackController` is now the TRAINING board (both modes, Momentum, specials); `ShopController` lists specials.
+- `ComboDefinitions` removed; comments and lobby texts updated; `README.md` controls, combat and structure sections updated.
 
-Related document: `docs/CHARACTER_DESIGN.md` contains the zombie and Otti appearance brief for an external redesign.
+## Builds and analysis
+
+- `rojo build` succeeded for `places/hub.project.json`, `places/arena.project.json` and `default.project.json`.
+- luau-lsp strict analysis: 0 errors, 0 warnings for the Hub and the Arena place.
+
+## Not verified yet (needs Roblox Studio playtest)
+
+- Feel and tuning: slide distance and steering, Soft Targeting turn, Wild gesture thresholds, Momentum rates.
+- Animation look: footwork poses, block layers and hit reactions on real R15 rigs.
+- Mobile layout of the new buttons and the pad on phone and tablet; the edge column height (198 arena / 250 hub).
+- Blood and stains: performance with many zombies, stain cap per quality, cleanup between matches.
+- Tribune zones and the crowd centre after the fix.
+
+## Not committed
+
+Nothing is committed for the client part. The last pushed commit is `5943307`.

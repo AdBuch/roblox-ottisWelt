@@ -1,18 +1,20 @@
 --!strict
--- Small, temporary combo feedback (display only; the server decides what a sequence does):
---   * tiny input chips (A B J E) near the combat controls that fade after a moment
---   * the COMBO TRAINING board in the basement training yard lists the equipped weapon's
---     combinations, its aerial attack and the input mapping (local SurfaceGui per player)
--- Nothing large stays on screen during combat.
+-- Training feedback (display only; the server decides what every action does):
+--   * tiny input chips (ATK, BLK, SLD, SPC, PAD) near the combat controls that fade after a moment
+--   * the TRAINING board in the lobby training yard: Classic and Wild in short steps, Momentum and
+--     the equipped weapon's Special families with their costs (local SurfaceGui per player)
+-- Nothing large stays on screen during combat. The gesture trace is drawn by GesturePadController
+-- and only shown in the training area.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
-local ComboDefinitions = require(Shared:WaitForChild("ComboDefinitions"))
-local InputDefinitions = require(Shared:WaitForChild("InputDefinitions"))
+local MomentumConfig = require(Shared:WaitForChild("MomentumConfig"))
 local SpecialMoveDefinitions = require(Shared:WaitForChild("SpecialMoveDefinitions"))
 local UiConfig = require(Shared:WaitForChild("UiConfig"))
+local WeaponAttackDefinitions = require(Shared:WaitForChild("WeaponAttackDefinitions"))
+local WeaponSpecialDefinitions = require(Shared:WaitForChild("WeaponSpecialDefinitions"))
 
 type Visibility = {
 	register: (group: string, element: GuiObject, wanted: (() -> boolean)?, forced: (() -> boolean)?) -> (),
@@ -20,22 +22,27 @@ type Visibility = {
 type Layout = { device: string, touch: boolean }
 
 export type ComboFeedback = {
-	input: (letter: string) -> (),
+	input: (label: string) -> (),
 	clear: () -> (),
-	showBoard: (weapon: any) -> (),
+	showBoard: (weapon: any, mode: string) -> (),
 }
 
 local ComboFeedbackController = {}
 
+local CHIP_LIMIT = 6
+local CHIP_GAP = 1.1 -- seconds of silence before a new chip row starts
 local COLORS: { [string]: Color3 } = {
-	A = Color3.fromRGB(230, 90, 60),
-	B = Color3.fromRGB(80, 140, 230),
-	J = Color3.fromRGB(110, 210, 120),
-	E = UiConfig.Gold,
+	ATK = Color3.fromRGB(230, 90, 60),
+	BLK = Color3.fromRGB(80, 140, 230),
+	SLD = Color3.fromRGB(120, 200, 255),
+	SPC = UiConfig.Gold,
+	PAD = Color3.fromRGB(150, 220, 150),
 }
 
+local FAMILY_ORDER = { "Left", "Right", "Up", "Down", "Circle", "Ultimate" }
+
 function ComboFeedbackController.start(group: (string, Vector2, UDim2, UDim2?) -> Frame, visibility: Visibility, onLayout: ((Layout) -> ()) -> (), lobby: Instance?): ComboFeedback
-	local frame = group("ComboInputs", Vector2.new(0.5, 1), UDim2.new(0.5, 0, 1, -34), UDim2.fromOffset(6 * 26, 22))
+	local frame = group("ComboInputs", Vector2.new(0.5, 1), UDim2.new(0.5, 0, 1, -34), UDim2.fromOffset(CHIP_LIMIT * 46, 22))
 	local list = Instance.new("UIListLayout")
 	list.FillDirection = Enum.FillDirection.Horizontal
 	list.HorizontalAlignment = Enum.HorizontalAlignment.Center
@@ -44,12 +51,12 @@ function ComboFeedbackController.start(group: (string, Vector2, UDim2, UDim2?) -
 	list.Parent = frame
 	-- Pooled chips (never created per input)
 	local chips: { TextLabel } = {}
-	for i = 1, InputDefinitions.MaxLength do
+	for i = 1, CHIP_LIMIT do
 		local chip = Instance.new("TextLabel")
-		chip.Size = UDim2.fromOffset(22, 22)
+		chip.Size = UDim2.fromOffset(42, 22)
 		chip.BackgroundTransparency = 0.15
 		chip.Font = Enum.Font.GothamBlack
-		chip.TextSize = 13
+		chip.TextSize = 11
 		chip.TextColor3 = Color3.new(1, 1, 1)
 		chip.Visible = false
 		chip.LayoutOrder = i
@@ -78,8 +85,9 @@ function ComboFeedbackController.start(group: (string, Vector2, UDim2, UDim2?) -
 	onLayout(function(layout: Layout)
 		-- Touch: above the combat buttons on the right; otherwise just above the bottom hint
 		if layout.touch then
+			local positions = if layout.device == "Phone" then UiConfig.TouchLayoutPhone else UiConfig.TouchLayoutTablet
 			frame.AnchorPoint = Vector2.new(1, 1)
-			frame.Position = UDim2.new(1, -16, 1, -(if layout.device == "Phone" then 270 else 430))
+			frame.Position = UDim2.new(1, -16, 1, -(positions.Attack.Y + 60))
 		else
 			frame.AnchorPoint = Vector2.new(0.5, 1)
 			frame.Position = UDim2.new(0.5, 0, 1, -34)
@@ -102,7 +110,7 @@ function ComboFeedbackController.start(group: (string, Vector2, UDim2, UDim2?) -
 		label.Size = UDim2.fromScale(1, 1)
 		label.BackgroundTransparency = 1
 		label.Font = Enum.Font.GothamBold
-		label.TextSize = 15
+		label.TextSize = 14
 		label.TextColor3 = Color3.new(1, 1, 1)
 		label.RichText = true
 		label.TextWrapped = true
@@ -117,16 +125,16 @@ function ComboFeedbackController.start(group: (string, Vector2, UDim2, UDim2?) -
 	end
 
 	return {
-		input = function(letter: string)
+		input = function(label: string)
 			local now = os.clock()
-			if now - lastInput > InputDefinitions.MaxGap or count >= #chips then
+			if now - lastInput > CHIP_GAP or count >= #chips then
 				clear()
 			end
 			lastInput = now
 			count += 1
 			local chip = chips[count]
-			chip.Text = letter
-			chip.BackgroundColor3 = COLORS[letter] or UiConfig.Panel
+			chip.Text = label
+			chip.BackgroundColor3 = COLORS[label] or UiConfig.Panel
 			chip.TextTransparency = 0
 			chip.BackgroundTransparency = 0.15
 			chip.Visible = true
@@ -143,31 +151,35 @@ function ComboFeedbackController.start(group: (string, Vector2, UDim2, UDim2?) -
 					end
 				end
 			end)
-			if letter == "E" then
-				task.delay(0.4, function()
-					if token == myToken then
-						clear()
-					end
-				end)
-			end
 		end,
 		clear = clear,
-		showBoard = function(weapon: any)
+		showBoard = function(weapon: any, mode: string)
 			local label = boardText
 			if not label or not weapon then
 				return
 			end
-			local lines = { ('<font size="22" color="#FFD246"><b>COMBO TRAINING</b></font>'), ("<b>%s</b>"):format(weapon.DisplayName:upper()) }
-			local aerial = SpecialMoveDefinitions[weapon.Aerial]
-			table.insert(lines, ("JUMP → ATTACK: %s"):format(if aerial then aerial.Name else "-"))
-			local combos: { any } = ComboDefinitions.ByWeapon[weapon.Id] or {}
-			for _, entry in combos do
-				local color = if entry.Advanced then "#FFD246" else "#DDDDDD"
-				table.insert(lines, ('<font color="%s">%s</font>  %s'):format(color, entry.Name, ComboDefinitions.describe(entry.Sequence)))
+			local lines = { '<font size="22" color="#FFD246"><b>TRAINING</b></font>', ("<b>%s</b>  ·  %s"):format(weapon.DisplayName:upper(), mode:upper()) }
+			if mode == "Wild" then
+				table.insert(lines, "Swipe the pad: Left / Right / Up / Down, or a circle for the spin.")
+				table.insert(lines, "Hold the pad centre = block · quick tap = parry · SLIDE for mobility.")
+			else
+				table.insert(lines, "LMB / R2 / ATK: attack chain (moving changes the move).")
+				table.insert(lines, "RMB / L2 / BLOCK hold = block · Shift / C / SLIDE · Space / A jump.")
 			end
-			local d, t = InputDefinitions.Desktop, InputDefinitions.Touch
+			table.insert(lines, ('<font color="#BBBBBB">MOMENTUM 0-100: vary your attacks, slide-dodge, perfect-block. Start: %d in Elimination rounds.</font>'):format(MomentumConfig.Start.EliminationRound))
 			table.insert(lines, "")
-			table.insert(lines, ('<font color="#BBBBBB">A %s / %s · B %s · J %s · ENTER %s</font>'):format(d.Attack, t.Attack, "block tap", d.Jump, t.Execute))
+			local prefix = WeaponAttackDefinitions.prefixOf(weapon.Basic)
+			local families = WeaponSpecialDefinitions.forPrefix(prefix)
+			if families then
+				table.insert(lines, '<font color="#FFD246"><b>SPECIALS</b></font>  Q / X / SPECIAL, then draw: tier by length (25 / 50 / 75)')
+				for _, family in FAMILY_ORDER do
+					local moveId = (families :: any)[family]
+					local move = moveId and (SpecialMoveDefinitions :: any)[moveId]
+					if move then
+						table.insert(lines, ("%s  %s"):format(family:upper(), move.Name))
+					end
+				end
+			end
 			table.insert(lines, '<font color="#BBBBBB">Practise on the dummies: no Aura here.</font>')
 			label.Text = table.concat(lines, "\n")
 		end,

@@ -1,7 +1,7 @@
 --!strict
 -- Every player move as data: basic attacks (instant, no charging), one aerial attack per weapon
--- (Jump -> Attack) and the combination moves (ComboDefinitions: Attack / Block / Jump inputs
--- resolved with Execute). The server's SpecialMoveService executes them generically by Kind;
+-- (Jump -> Attack) and the Special gesture moves (WeaponSpecialDefinitions: families and tiers).
+-- The server's SpecialMoveService executes them generically by Kind;
 -- the client only reads names for the HUD and the info panel. Nothing here is ever charged:
 -- wind-ups are short fixed telegraphs, cooldowns only start after a move ran.
 --

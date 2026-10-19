@@ -1,10 +1,11 @@
 --!strict
--- Procedural attack body motion for every R15 player character (display only). The server
--- publishes WHAT is played (character attributes AttackAnim, AttackStart, AttackWind,
--- AttackLength); this layers torso twist, shoulder swing, a lunge step and recovery ON TOP of the
--- normal walk animation (Motor6D.Transform after the Animator ran), so attacks use the whole body
--- instead of only the weapon. Authored animations can replace this module later without any
--- server change (same attributes).
+-- Procedural body motion for every R15 player character (display only). The server publishes WHAT
+-- is played (character attributes): attacks (AttackAnim, AttackStart, AttackWind, AttackLength),
+-- blocks (Blocking, BlockPose, BlockImpactAt, BlockImpactHeavy, BlockPerfect), slides (SlideStart,
+-- SlideLength) and hit reactions (HitReactAt, HitReactScale, HitReactSide). This layers all of them
+-- ON TOP of the normal walk animation (Motor6D.Transform after the Animator ran). All layers are
+-- summed per frame and written once per joint, so they never overwrite each other.
+-- Authored animations can replace this module later without any server change (same attributes).
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -38,19 +39,48 @@ local POSES: { [string]: { Pose } } = {
 	Bash = { pose(Vector3.new(4, -20, 0), nil, Vector3.new(40, 0, 0)), pose(Vector3.new(-14, 24, 0), nil, Vector3.new(80, 0, 0), nil, Vector3.new(-25, 0, 0), 0.2) },
 }
 
-local function angles(v: Vector3, k: number): CFrame
-	return CFrame.Angles(rad(v.X) * k, rad(v.Y) * k, rad(v.Z) * k)
+-- New server anim names reuse the closest authored pose until each gets its own
+local ALIAS: { [string]: string } = {
+	SlashRL = "Slash",
+	SlashLR = "Backhand",
+	RetreatCut = "Low",
+	ParryCounter = "Thrust",
+	Wide = "Spin",
+	Cross = "Flurry",
+	AirSpinL = "Spin",
+	AirSpinR = "Spin",
+}
+
+-- Block poses: the shield arm (left) comes up in front, across, over the head or down low
+local BLOCK: { [string]: Pose } = {
+	Front = pose(Vector3.new(-8, 10, 0), nil, Vector3.new(60, 0, 10), nil, Vector3.new(-10, 0, 0), 0.3),
+	Left = pose(Vector3.new(-6, -22, 0), nil, Vector3.new(70, 0, 28), nil, Vector3.new(-6, 0, 0), 0.2),
+	Right = pose(Vector3.new(-6, 22, 0), nil, Vector3.new(68, -14, -12), nil, Vector3.new(-6, 0, 0), 0.25),
+	High = pose(Vector3.new(-4, 0, 0), nil, Vector3.new(120, 0, 0), nil, Vector3.new(-6, 0, 0), 0),
+	Low = pose(Vector3.new(12, 0, 0), nil, Vector3.new(28, 0, 0), nil, Vector3.new(12, 0, 0), 0.4),
+}
+local BLOCK_RISE = 8 -- 1 / seconds to fully raise the block
+local IMPACT_SECONDS = 0.3
+local IMPACT: Pose = pose(Vector3.new(-9, 0, 0), Vector3.new(0, 0, -8))
+local SLIDE_BLEND = 0.1
+local SLIDE_POSE: Pose = pose(Vector3.new(-22, 0, 8), Vector3.new(10, 0, -18), Vector3.new(10, 0, 18), Vector3.new(-30, 0, 0), Vector3.new(55, 0, 0), 0.75)
+local HIT_SECONDS = 0.35
+local HIT_POSE: Pose = pose(Vector3.new(-8, 0, 14), Vector3.new(0, 0, -6), Vector3.new(0, 0, 6))
+
+local function angles(v: Vector3): CFrame
+	return CFrame.Angles(rad(v.X), rad(v.Y), rad(v.Z))
+end
+
+local function scaled(p: Pose, k: number): Pose
+	return { waist = p.waist * k, rightShoulder = p.rightShoulder * k, leftShoulder = p.leftShoulder * k, rightHip = p.rightHip * k, leftHip = p.leftHip * k, crouch = p.crouch * k }
+end
+
+local function add(a: Pose, b: Pose): Pose
+	return { waist = a.waist + b.waist, rightShoulder = a.rightShoulder + b.rightShoulder, leftShoulder = a.leftShoulder + b.leftShoulder, rightHip = a.rightHip + b.rightHip, leftHip = a.leftHip + b.leftHip, crouch = a.crouch + b.crouch }
 end
 
 local function blend(a: Pose, b: Pose, t: number): Pose
-	return {
-		waist = a.waist:Lerp(b.waist, t),
-		rightShoulder = a.rightShoulder:Lerp(b.rightShoulder, t),
-		leftShoulder = a.leftShoulder:Lerp(b.leftShoulder, t),
-		rightHip = a.rightHip:Lerp(b.rightHip, t),
-		leftHip = a.leftHip:Lerp(b.leftHip, t),
-		crouch = a.crouch + (b.crouch - a.crouch) * t,
-	}
+	return add(scaled(a, 1 - t), scaled(b, t))
 end
 
 local function ease(t: number): number
@@ -60,7 +90,7 @@ end
 
 -- The pose at time `elapsed` of an attack: anticipation -> fast strike -> recovery.
 local function sample(anim: string, elapsed: number, wind: number, length: number): Pose?
-	local set = POSES[anim]
+	local set = POSES[ALIAS[anim] or anim]
 	if not set or elapsed < 0 or elapsed > length + 0.25 then
 		return nil
 	end
@@ -75,6 +105,7 @@ local function sample(anim: string, elapsed: number, wind: number, length: numbe
 end
 
 type Motors = { waist: Motor6D?, root: Motor6D?, rightShoulder: Motor6D?, leftShoulder: Motor6D?, rightHip: Motor6D?, leftHip: Motor6D? }
+type BlockState = { alpha: number, pose: string }
 
 local function find(character: Model, partName: string, motorName: string): Motor6D?
 	local part = character:FindFirstChild(partName)
@@ -87,20 +118,20 @@ end
 type Written = { written: CFrame, base: CFrame }
 local written: { [Motor6D]: Written } = setmetatable({}, { __mode = "k" }) :: any
 
-local function applyAdditive(motor: Motor6D?, add: CFrame?)
+local function applyAdditive(motor: Motor6D?, offset: CFrame?)
 	if not motor then
 		return
 	end
 	local entry = written[motor]
 	local current = motor.Transform
 	local base = if entry and current == entry.written then entry.base else current
-	if add then
-		local result = base * add
+	if offset then
+		local result = base * offset
 		motor.Transform = result
 		written[motor] = { written = result, base = base }
 	elseif entry then
 		if current == entry.written then
-			motor.Transform = entry.base -- attack over: back to the untouched pose
+			motor.Transform = entry.base -- layers ended: back to the untouched pose
 		end
 		written[motor] = nil
 	end
@@ -108,40 +139,110 @@ end
 
 function PlayerAnimator.start()
 	local cache: { [Model]: Motors } = setmetatable({}, { __mode = "k" }) :: any
-	RunService.Stepped:Connect(function()
+	local blocks: { [Model]: BlockState } = setmetatable({}, { __mode = "k" }) :: any
+	RunService.Stepped:Connect(function(_, dt)
 		local now = Workspace:GetServerTimeNow()
 		for _, player in Players:GetPlayers() do
 			local character = player.Character
-			local anim = character and character:GetAttribute("AttackAnim")
-			if character and typeof(anim) == "string" then
-				local elapsed = now - (tonumber(character:GetAttribute("AttackStart")) or 0)
-				local p = sample(anim, elapsed, tonumber(character:GetAttribute("AttackWind")) or 0.1, tonumber(character:GetAttribute("AttackLength")) or 0.5)
-				local motors = cache[character]
-				if p or motors then
-					if not motors then
-						motors = {
-							waist = find(character, "UpperTorso", "Waist"),
-							root = find(character, "LowerTorso", "Root"),
-							rightShoulder = find(character, "RightUpperArm", "RightShoulder"),
-							leftShoulder = find(character, "LeftUpperArm", "LeftShoulder"),
-							rightHip = find(character, "RightUpperLeg", "RightHip"),
-							leftHip = find(character, "LeftUpperLeg", "LeftHip"),
-						}
-						cache[character] = motors
-					end
-					local m = motors :: Motors
-					-- Additive on top of whatever the Animator set this frame (nil = release)
-					applyAdditive(m.waist, if p then angles(p.waist, 1) else nil)
-					applyAdditive(m.root, if p and p.crouch > 0 then CFrame.new(0, -p.crouch, 0) else nil)
-					applyAdditive(m.rightShoulder, if p then angles(p.rightShoulder, 1) else nil)
-					applyAdditive(m.leftShoulder, if p then angles(p.leftShoulder, 1) else nil)
-					applyAdditive(m.rightHip, if p then angles(p.rightHip, 1) else nil)
-					applyAdditive(m.leftHip, if p then angles(p.leftHip, 1) else nil)
-					if not p then
-						cache[character] = nil
-					end
+			if not character then
+				continue
+			end
+
+			local total: Pose = ZERO
+			local active = false
+
+			-- Attack
+			local anim = character:GetAttribute("AttackAnim")
+			if typeof(anim) == "string" then
+				local p = sample(anim, now - (tonumber(character:GetAttribute("AttackStart")) or 0), tonumber(character:GetAttribute("AttackWind")) or 0.1, tonumber(character:GetAttribute("AttackLength")) or 0.5)
+				if p then
+					total = add(total, p)
+					active = true
 				end
 			end
+
+			-- Block layer (eased in and out) plus the impact recoil on every blocked hit
+			local state = blocks[character]
+			if not state then
+				state = { alpha = 0, pose = "Front" }
+				blocks[character] = state
+			end
+			local blocking = character:GetAttribute("Blocking") == true
+			if blocking then
+				local chosen = character:GetAttribute("BlockPose")
+				if typeof(chosen) == "string" and BLOCK[chosen] then
+					state.pose = chosen
+				end
+			end
+			local target = if blocking then 1 else 0
+			state.alpha += math.clamp(target - state.alpha, -dt * BLOCK_RISE, dt * BLOCK_RISE)
+			if state.alpha > 0.001 then
+				total = add(total, scaled(BLOCK[state.pose] or BLOCK.Front, ease(state.alpha)))
+				active = true
+			end
+			local impactAt = tonumber(character:GetAttribute("BlockImpactAt")) or 0
+			local sinceImpact = now - impactAt
+			if sinceImpact >= 0 and sinceImpact < IMPACT_SECONDS then
+				local k = if character:GetAttribute("BlockImpactHeavy") == true then 1.7 elseif character:GetAttribute("BlockPerfect") == true then 1.3 else 0.9
+				total = add(total, scaled(IMPACT, k * (1 - sinceImpact / IMPACT_SECONDS)))
+				active = true
+			end
+
+			-- Slide posture: low lean with the legs spread, faded in and out
+			local slideStart = tonumber(character:GetAttribute("SlideStart")) or 0
+			local slideLength = tonumber(character:GetAttribute("SlideLength")) or 0
+			local slideElapsed = now - slideStart
+			if slideLength > 0 and slideElapsed >= 0 and slideElapsed <= slideLength then
+				local w = math.min(1, slideElapsed / SLIDE_BLEND, (slideLength - slideElapsed) / SLIDE_BLEND)
+				total = add(total, scaled(SLIDE_POSE, ease(w)))
+				active = true
+			end
+
+			-- Hit reaction: a short lean away from the hit, strength by damage share
+			local hitAt = tonumber(character:GetAttribute("HitReactAt")) or 0
+			local sinceHit = now - hitAt
+			if sinceHit >= 0 and sinceHit < HIT_SECONDS then
+				local scale = tonumber(character:GetAttribute("HitReactScale")) or 0.5
+				local side = tonumber(character:GetAttribute("HitReactSide")) or 0
+				local w = scale * (1 - sinceHit / HIT_SECONDS)
+				local lean = scaled(HIT_POSE, w)
+				total = add(total, pose(lean.waist + Vector3.new(0, 0, side * 10 * w), nil, nil, nil, nil, 0))
+				active = true
+			end
+
+			local motors = cache[character]
+			if not active then
+				-- Nothing to add: release the joints this character had written
+				if motors then
+					local m = motors :: Motors
+					applyAdditive(m.waist, nil)
+					applyAdditive(m.root, nil)
+					applyAdditive(m.rightShoulder, nil)
+					applyAdditive(m.leftShoulder, nil)
+					applyAdditive(m.rightHip, nil)
+					applyAdditive(m.leftHip, nil)
+					cache[character] = nil
+				end
+				continue
+			end
+			if not motors then
+				motors = {
+					waist = find(character, "UpperTorso", "Waist"),
+					root = find(character, "LowerTorso", "Root"),
+					rightShoulder = find(character, "RightUpperArm", "RightShoulder"),
+					leftShoulder = find(character, "LeftUpperArm", "LeftShoulder"),
+					rightHip = find(character, "RightUpperLeg", "RightHip"),
+					leftHip = find(character, "LeftUpperLeg", "LeftHip"),
+				}
+				cache[character] = motors
+			end
+			local m = motors :: Motors
+			applyAdditive(m.waist, angles(total.waist))
+			applyAdditive(m.root, if total.crouch > 0 then CFrame.new(0, -total.crouch, 0) else nil)
+			applyAdditive(m.rightShoulder, angles(total.rightShoulder))
+			applyAdditive(m.leftShoulder, angles(total.leftShoulder))
+			applyAdditive(m.rightHip, angles(total.rightHip))
+			applyAdditive(m.leftHip, angles(total.leftHip))
 		end
 	end)
 end

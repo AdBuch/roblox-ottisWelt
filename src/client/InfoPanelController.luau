@@ -1,6 +1,6 @@
 --!strict
 -- The optional information panel behind the small "i" button: mode, full controls, weapon,
--- shield, special moves, combos, round details, rosters and Aura rewards. Closed by default in
+-- shield, special moves, Specials, round details, rosters and Aura rewards. Closed by default in
 -- combat and closed automatically when a phone enters combat; a close button and a tap outside
 -- close it; the content scrolls. When closed, nothing of it remains on screen or catches input.
 -- It only pauses local presentation; the server game keeps running.

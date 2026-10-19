@@ -13,7 +13,7 @@ print(PREFIX, "Arena server script started")
 local shared = ReplicatedStorage:FindFirstChild("Shared")
 local required = {
 	"Config", "CombatConfig", "GameStates", "GameModeDefinitions", "WeaponDefinitions", "ShieldDefinitions", "ArmorDefinitions",
-	"SpecialMoveDefinitions", "ComboDefinitions", "ZombieDefinitions", "ZombieAIProfiles", "RoundDefinitions",
+	"SpecialMoveDefinitions", "ZombieDefinitions", "ZombieAIProfiles", "RoundDefinitions",
 	"DamageEffectsConfig", "AudioConfig", "ProjectileDefinitions", "OttiBossConfig", "OttiMoveDefinitions", "BossPhaseDefinitions",
 	"ExperienceConfig", "EnvironmentConfig", "GameProtocol", "MatchDefinitions", "TeamModeDefinitions", "MatchTypes", "PlayerDataSchema",
 }

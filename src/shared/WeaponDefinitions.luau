@@ -1,7 +1,7 @@
 --!strict
 -- The eight player weapons. Exactly one is equipped (right hand). Each weapon names its basic
--- attack and its aerial attack (Jump -> Attack) in SpecialMoveDefinitions; combination moves live
--- in ComboDefinitions (Attack / Block / Jump inputs + Execute).
+-- attack and its aerial attack (Jump -> Attack) in SpecialMoveDefinitions; contextual chains and
+-- Special gesture families live in WeaponAttackDefinitions / WeaponSpecialDefinitions.
 -- Shop stats (Damage/Cooldown/Range) are read from the basic move, so there is one source of truth.
 
 local SpecialMoveDefinitions = require(script.Parent.SpecialMoveDefinitions)
@@ -94,7 +94,7 @@ local WeaponDefinitions = {
 	Ordered = table.freeze(ordered),
 }
 
--- The move id for "Basic" or "Aerial" of a weapon (combination moves: ComboDefinitions).
+-- The move id for "Basic" or "Aerial" of a weapon (chains and specials: WeaponAttackDefinitions / WeaponSpecialDefinitions).
 function WeaponDefinitions.moveFor(weapon: WeaponDefinition, action: string): string?
 	if action == "Basic" then
 		return weapon.Basic

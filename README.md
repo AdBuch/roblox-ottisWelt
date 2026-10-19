@@ -62,8 +62,10 @@ src/shared/   -> ReplicatedStorage.Shared
   ArmorDefinitions                   4 armor sets (damage reduction, movement penalty, price)
   DamageConfig                       player damage pipeline: minimum damage, PvE / PvP armor effectiveness
   SpecialMoveDefinitions             every basic, aerial and combination move as data (nothing charged)
-  ComboDefinitions                   5 shared A/B/J patterns + 2 named combos per weapon
-  InputDefinitions / PvPBalanceConfig   combo buffer timing, input mapping / PvP caps for combos and aerials
+  WeaponAttackDefinitions / WeaponSpecialDefinitions   contextual attack chains / Special gesture families and tiers
+  GestureDefinitions / ControlModeDefinitions / MomentumConfig / SlideDefinitions / BlockDefinitions   gesture recognition / Classic and Wild / Momentum / slide / blocks
+  BloodConfig / CombatEffectsConfig / ZombieAttackDefinitions / SpectatorZoneDefinitions / CrowdQualityConfig   blood and effects / zombie attack sequences / tribune zones and quality
+  InputDefinitions / PvPBalanceConfig   input timing and mapping / PvP caps for specials and aerials
   OttiEntranceConfig                 imperial box behaviour and the jump into the arena
   ZombieDefinitions                  6 zombie types (stats, Aura, availability, weights, looks)
   ZombieAIProfiles                   6 AI personalities + Wounded/Critical behaviour modifiers
@@ -99,7 +101,9 @@ src/server/   -> ServerScriptService.Server   (shared server library: both place
   EquipmentShopService / EquipmentModels   Gladiator Armory displays / procedural weapons, shields, armor, arrows, nets
   PlayerCombatService                hands, blocking/parry, incoming damage, action requests
   SpecialMoveService                 move execution (melee steps, projectiles, aerials, arrow rain)
-  ComboValidationService / JumpAttackService   server combo buffer / server-side jump detection, one aerial per jump
+  AttackSequenceService / GestureValidationService / SlideService / MomentumService   contextual moves / gesture re-classification / slides / Arena Momentum
+  ZombieAttackSequenceService / SpectatorPlacementService   zombie attack sequences / tribune zones and groups
+  JumpAttackService                  server-side jump detection, one aerial per jump
   OttiSpectatorService / OttiEntranceService   Otti in the imperial box / his jump into the arena
   CombatTargets / CombatRules        hittable targets (zombies, Otti, enemies, dummies) / who may hit whom
   ProjectileService / CombatEffects  server-simulated player + enemy arrows / sparkles, glows, rings, nets, markers
@@ -117,11 +121,15 @@ src/client/   -> StarterPlayer.StarterPlayerScripts.Client
   ContextHealthController            contextual world-space health bars (pooled BillboardGuis)
   TeamStatusController               team score + time, co-op teammate strip, lobby rosters
   AuraDisplayController              lobby Aura counter, +n rewards in combat
-  MobileControlsController           touch buttons around the jump button, desktop special cards
+  MobileControlsController           touch ATK / BLOCK / SLIDE / SPECIAL around the jump button (Wild hides ATK / BLOCK)
+  GesturePadController               Wild gesture pad, Special Mode drawing, the training trace
+  CombatSettingsController           CLASSIC / WILD, BLOOD and CAMERA pills (saved preferences)
+  SlideController / MomentumHudController   own-character slide / the ARENA MOMENTUM bar
+  CombatEffectsController / BloodEffectsController / SandStainController / CombatCameraController   hit presentation by category, zombie blood, pooled sand stains, camera impulses
   InfoPanelController / SpectatorController   optional i panel / Arena spectator bar + camera modes
   TeleportStatusController           travel / queue chip, START WITH CURRENT PARTY, emergency RETURN TO HUB
-  InputController                    mouse/keyboard, gamepad and touch input (Attack, Block, Jump, Execute)
-  ComboFeedbackController            tiny input chips, COMBO TRAINING board
+  InputController                    Classic and Wild input for mouse/keyboard, gamepad and touch (attack, block, slide, special, gestures); sends intent only
+  ComboFeedbackController            tiny input chips, TRAINING board (both modes, Momentum, specials)
   PlayerAnimator                     procedural whole-body attack motion (additive, replaceable)
   OttiEntranceController             local camera for the entrance, landing shake, skip
   ShopController                     armory info card (BUY / EQUIP / EQUIPPED, INFO), focus highlight, equipped outline
@@ -167,19 +175,55 @@ powershell -File scripts/build-places.ps1
 
 ## Controls
 
+Two control modes with identical combat and damage; the choice is a saved preference (**CLASSIC / WILD** pill on the right
+edge). Switching waits until the current attack ends, cancels an unfinished gesture and ends an active block.
+
 | | Keyboard & mouse | Gamepad | Touch |
 |---|---|---|---|
-| Basic attack | Left click | R2 | ATK |
-| Block / parry (hold) | Right click | L2 | BLOCK |
-| Jump (also the combo input J) | Space | A | Roblox jump button |
-| Aerial attack | Space, then left click | A, then R2 | jump, then ATK |
-| Execute combo | Enter | Y | COMBO |
+| **Classic** attack (contextual chain) | Left click | R2 | ATK |
+| Classic block (hold) | Right click | L2 | BLOCK |
+| Jump | Space | A | Roblox jump button |
+| Slide (dodge + attack, see below) | Left Shift or C | B | SLIDE |
+| Special (Classic: draw with the mouse) | **Q**, then drag | **X**, then right stick | SPECIAL, then the pad |
+| **Wild** gesture pad | drag inside the pad (lower right) | pad + right stick | the pad (above jump) |
+| Wild block / parry | hold pad centre / quick tap | hold / tap centre | hold / tap centre |
 | Interact (shop, doors, posts) | **F** | D-pad up | tap prompt |
 | HUD mode (Full / Minimal / Hidden) | **H** or eye button | eye button | eye button |
 | Info panel | i button | i button | i button |
 
-A **block tap** (press and release) also counts as the combo input **B**; holding Block keeps defending. Nothing is
-charged: every attack starts when its input arrives. Interactions use **F**.
+**Wild gestures:** swipe Left / Right / Up / Down or draw a circle on the pad. The server re-classifies every gesture from
+its normalized samples; the pad's preview is never trusted. **Soft Targeting** turns the player at most 40° toward an
+enemy in a 75° cone in front (visible line of sight, never teammates, spectators or lobby players) and aims there.
+
+**Nothing is charged:** every attack starts when its input arrives; the server decides what happens.
+
+## Combat (redesign)
+
+- **Contextual attack chains:** a basic attack's move depends on the situation (standing, moving, after a previous
+  attack, in the air, sliding). Chains reset after 1.1 s without input. No input codes or combos to memorize.
+- **Slide:** about 12 studs in 0.55 s, cooldown 1.3 s, ground only, stops at walls and solid enemies, never launches
+  upward. A short dodge window (0.15 s) lets an incoming attack miss. A slide can end in one weapon-specific slide
+  attack. Client: `SlideController` moves the own character; the server approves every slide.
+- **Blocks:** poses Front / Left / Right / High / Low chosen from the incoming attack. A **perfect block** (raised at most
+  0.2 s before a valid hit) deals no damage, recoils the attacker and opens a 1 s **counter** window (big Momentum gain).
+  Heavy attacks (Brute, Otti's tail slam, Axe, Morning Star) push the blocker back and briefly prevent slides.
+- **Arena Momentum (0-100):** gained by varied attacks, aerial hits, slide dodges, blocks, perfect blocks, counter hits and
+  varied kills. Repeats give less; it decays after 4 s without meaningful action (5 per second). Elimination rounds start
+  at 20. The server owns it (`MomentumService`).
+- **Specials (gesture families):** direction picks the family per weapon (Left, Right, Up, Down, Circle, Ultimate); the
+  length of the drawn gesture picks the tier. Tier I costs 25 Momentum (100 % damage), tier II 50 (155 %), tier III 75
+  (205 %), the Ultimate 100. PvP uses flatter multipliers (1 / 1.2 / 1.35) and every move keeps its PvP cap.
+- **Sword animations:** each basic attack has its own footwork (lunge, retreat cut, diagonal, flurry, spin); hitboxes
+  sweep along the same path the animation uses (time slices on the server).
+- **Zombie attack sequences:** each type has its own sequence. Heavy blows of zombies are spaced apart so they never land
+  in sync. The archer draws visibly before every shot (single, double or aimed).
+
+**Server validation:** every request is rate limited and validated against the server state. Hits, damage, direction,
+targets, Momentum, block / parry and combo success are decided on the server only; clients send intent (an aim point,
+a gesture's normalized samples, a slide request) and never results.
+
+**Presentation settings** (saved): **BLOOD** Auto / Stylized / Reduced / Off (zombies only, arena only, stylized particles
+and sand stains, no gore), **CAMERA** shake Full / Reduced / Off. They never change combat.
 
 ## HUD (responsive, mobile first)
 
@@ -291,35 +335,18 @@ weapon trails, sand on strong landings) through a procedural animation layer tha
 100 studs, 90 % to 125, 75 % to 150. A short fixed draw, no holding, consistent arrow power; a subtle crosshair shows
 while the bow is equipped (no aim assistance). Its special shots come from combos (ARROW RAIN, EAGLE SHOT).
 
-## Combos (Attack A · Block tap B · Jump J, then Execute)
+## Specials and PvP balance
 
-Tap the inputs, then press **Enter** (gamepad **Y**, touch **COMBO**). Gaps of at most 0.65 s, the whole sequence within
-2.8 s, at most 6 inputs. No match: a tiny `NO COMBO`, nothing else happens. On cooldown: `NOT READY`. Basic attacks never
-need a combo.
-
-| Pattern | Shared move (any weapon) | Weapon moves (replace the shared one) |
-|---|---|---|
-| B → A → B → A | COUNTER COMBINATION (0.35 s counter window, 3 strikes) | Gladius REBELLION COMBO · Trident RETIARIUS FURY · Axe COLOSSEUM BREAKER |
-| A → A → J → A | JUMP FINISHER (aerial finisher, small shockwave) | Gladius SAND VIPER · Trident SEA EAGLE DIVE · Axe THUNDER OF MARS |
-| B → B → A | GUARD BREAK (breaks a raised guard, heavy stagger) | Spear PHALANX BREAKER |
-| A → B → A → A | ARENA SPIN (two full spins, up to 4 zombies / 2 players) | Legion LEGION'S FURY · Morning Star CHAIN TEMPEST · Daggers VIPER DANCE |
-| B → J → A | RISING ATTACK (rising strike + landing) | Legion EAGLE OF ROME · Morning Star FALLING METEOR · Daggers RIVER SHADOW |
-| B → A → A | – | Bow ARROW RAIN (marked circle, arrows from above, roofs protect) |
-| A → J → A | – | Bow EAGLE SHOT (jump + fast accurate arrow) · Spear SPARTAN VAULT |
-
-**Server validation:** only accepted inputs are recorded with server time (A = attack request, B = block press,
-J = jump request that the server confirms as a real jump). Execute checks the timing, the equipped weapon, the cooldown
-(it starts when the move executes), alive / not knocked down / not spawn-protected; every hit phase checks a legal target
-(opponent team, never teammates, spectators or lobby players), range, arc and line of sight, once per target per phase.
-The buffer clears after Execute, on death, knockdown, leaving combat and weapon changes.
+Each weapon's Special families (Left, Right, Up, Down, Circle, Ultimate) are listed in `WeaponSpecialDefinitions`; the
+Momentum cost and damage tiers are described in *Combat (redesign)* above.
 
 **PvP balance** (`PvPBalanceConfig`): per-move PvP multipliers (0.35-0.75) and target caps, no single hit above 45 % and
-no whole combo or aerial move above 50 % of a player's max health, knockdowns capped, no repeated combo stagger within
+no whole special or aerial move above 50 % of a player's max health, knockdowns capped, no repeated stagger within
 2.5 s, guard breaks drop the shield for 1.2 s (half protection) instead of ignoring it, counter windows only for the
 first 0.3-0.35 s.
 
-**Training:** the COMBO TRAINING board in the training yard lists the equipped weapon's moves; hits on the dummies show
-`COMBO SUCCESS · name`; no Aura there.
+**Training:** the TRAINING board in the training yard explains both modes, Momentum and the equipped weapon's special
+families; the sparring dummy answers attacks; no Aura there.
 
 ## Shields (8)
 

@@ -272,7 +272,7 @@ local function buildArrival(folder: Folder): CFrame
 		{ text = "Gear up in the GLADIATOR ARMORY (west)", color = WHITE, scale = 0.15 },
 		{ text = "Pick SOLO, CO-OP or TEAM BATTLE (north)", color = WHITE, scale = 0.15 },
 		{ text = "Learn your foes in the ZOMBIE ARCHIVE (east)", color = WHITE, scale = 0.15 },
-		{ text = "Interact: F · Combos: attack, block and jump", color = Color3.fromRGB(255, 210, 120), scale = 0.13 },
+		{ text = "Interact: F · Classic or Wild · Specials: Q / X", color = Color3.fromRGB(255, 210, 120), scale = 0.13 },
 	}, DARK_WOOD)
 	for _, x in { -11, 11 } do
 		makePart("BoardChain", Vector3.new(0.2, HEIGHT - 18.5, 0.2), at(x, 18.5 + (HEIGHT - 18.5) / 2, 2), IRON, Enum.Material.Metal, area, DECOR)
@@ -626,9 +626,9 @@ local function buildTraining(folder: Folder): ({ CFrame }, CFrame, Vector3)
 	end
 	sign(yard, "TrainingSign", Vector3.new(12, 3, 0.4), facing(center.X, 8.5, HALF_Z - 1, NORTH), {
 		{ text = "TRAINING", color = GOLD, scale = 0.6 },
-		{ text = "Test attacks, jump attacks and combos", color = WHITE, scale = 0.3 },
+		{ text = "Test attacks, slides, blocks and specials", color = WHITE, scale = 0.3 },
 	}, RED)
-	-- COMBO TRAINING board: the client writes the equipped weapon's combinations onto it
+	-- COMBO TRAINING board: the client writes the training guide and the weapon's specials onto it
 	local board = makePart("ComboTrainingBoard", Vector3.new(9, 7, 0.4), facing(center.X - 11.3, 4.5, center.Z - 1, EAST), Color3.fromRGB(60, 40, 26), Enum.Material.Wood, yard)
 	board.CanCollide = false
 	local slots = { facing(center.X - 5, 0.2, center.Z + 2, NORTH), facing(center.X + 5, 0.2, center.Z + 2, NORTH) }
