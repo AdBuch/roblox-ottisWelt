@@ -21,6 +21,7 @@ export type WeaponDefinition = {
 	Aerial: string,
 	Description: string,
 	Row: DisplayRow,
+	Category: string, -- Blade | Blunt | Heavy | Pierce | Bow (hit effects, CombatEffectsConfig)
 	-- derived from the basic move (display only)
 	Damage: number,
 	Cooldown: number,
@@ -50,6 +51,17 @@ local specs: { WeaponSpec } = {
 	{ Id = "BattleAxe", DisplayName = "Arena Battle Axe", Kind = "Melee", Price = 380, TwoHanded = false, Basic = "Axe_Basic", Aerial = "Axe_Aerial", Description = "Slow, heavy, devastating", Row = "Heavy" },
 }
 
+local CATEGORY: { [string]: string } = {
+	RustyGladius = "Blade",
+	LegionSword = "Blade",
+	TwinDaggers = "Blade",
+	MorningStar = "Blunt",
+	BattleAxe = "Heavy",
+	Trident = "Pierce",
+	HopliteSpear = "Pierce",
+	HunterBow = "Bow",
+}
+
 local byId: { [string]: WeaponDefinition } = {}
 local ordered: { WeaponDefinition } = {}
 for order, spec in specs do
@@ -66,6 +78,7 @@ for order, spec in specs do
 		Aerial = spec.Aerial,
 		Description = spec.Description,
 		Row = spec.Row or (if spec.Kind == "Bow" then "Ranged" elseif basic.Range >= 9 then "Heavy" else "Blades"),
+		Category = CATEGORY[spec.Id] or "Blade",
 		Damage = basic.Damage,
 		Cooldown = basic.Cooldown,
 		Range = basic.Range,

@@ -3,11 +3,13 @@
 --   * Hands: the equipped weapon (right) and shield (left) are welded and visible together.
 --     Twin daggers are two-handed: a second dagger replaces the shield and blocking becomes a
 --     short parry. Models are always rebuilt from InventoryService (no client claims).
---   * CombatAction(action, aimPoint): action = "Basic" (instant attack; airborne -> the weapon's
---     aerial attack, once per jump), "Jump" (J combo input) or "Execute" (resolves the combo
---     buffer). The server rate-limits, checks the combat context (CombatRules), alive, spawn
---     protection, knockdown, busy time and per-move cooldowns, records A/B/J inputs
---     (ComboValidationService) and runs the move (SpecialMoveService). Nothing is charged.
+--   * CombatAction(action, payload): "Basic" (Classic: the contextual chain, AttackSequenceService),
+--     "Gesture" (Wild swipes / circles and Special gestures, re-classified by
+--     GestureValidationService), "Slide" (SlideService). The server rate-limits, checks the combat
+--     context (CombatRules), alive, spawn protection, knockdown, busy time, cooldowns and Momentum
+--     (MomentumService) and runs the move (SpecialMoveService). Nothing is charged; moves start
+--     when the input arrives. Contextual combinations (Slide -> Attack, Block -> Slide -> Attack,
+--     Slide -> Jump -> Attack, Perfect Block -> (Slide ->) Counter) need no input codes.
 --   * ShieldBlock(boolean): request only; the server owns block/parry state, raise time and the
 --     maximum block duration.
 --   * Incoming damage (zombies and PvP) goes through here: spawn protection, immunity, shield
@@ -21,22 +23,30 @@ local Workspace = game:GetService("Workspace")
 local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
 local Config = require(ReplicatedStorage.Shared.Config)
 local DamageConfig = require(ReplicatedStorage.Shared.DamageConfig)
-local InputDefinitions = require(ReplicatedStorage.Shared.InputDefinitions)
+local BlockDefinitions = require(ReplicatedStorage.Shared.BlockDefinitions)
 local PvPBalanceConfig = require(ReplicatedStorage.Shared.PvPBalanceConfig)
+local SlideDefinitions = require(ReplicatedStorage.Shared.SlideDefinitions)
 local SpecialMoveDefinitions = require(ReplicatedStorage.Shared.SpecialMoveDefinitions)
+local WeaponAttackDefinitions = require(ReplicatedStorage.Shared.WeaponAttackDefinitions)
+local WeaponSpecialDefinitions = require(ReplicatedStorage.Shared.WeaponSpecialDefinitions)
+local AttackSequenceService = require(script.Parent.AttackSequenceService)
 local CombatEffects = require(script.Parent.CombatEffects)
+local CrowdReactionService = require(script.Parent.CrowdReactionService)
 local CombatRules = require(script.Parent.CombatRules)
 local CombatTargets = require(script.Parent.CombatTargets)
 local CombatUtil = require(script.Parent.CombatUtil)
 local DamageEffectsService = require(script.Parent.DamageEffectsService)
-local ComboValidationService = require(script.Parent.ComboValidationService)
+local GestureValidationService = require(script.Parent.GestureValidationService)
 local EquipmentModels = require(script.Parent.EquipmentModels)
 local InventoryService = require(script.Parent.InventoryService)
 local JumpAttackService = require(script.Parent.JumpAttackService)
+local MomentumService = require(script.Parent.MomentumService)
 local OttiBossService = require(script.Parent.OttiBossService)
 local OttiSpectatorService = require(script.Parent.OttiSpectatorService)
 local Remotes = require(script.Parent.Remotes)
 local SpecialMoveService = require(script.Parent.SpecialMoveService)
+local SlideService = require(script.Parent.SlideService)
+local TrainingService = require(script.Parent.TrainingService)
 
 type Anim = SpecialMoveDefinitions.Anim
 
@@ -75,6 +85,10 @@ type PlayerState = {
 	blockLockedUntil: number, -- guard broken: can't raise the shield again yet
 	lastComboStagger: number, -- PvP: no repeated stun-lock from combos
 	knockedUntil: number, -- knocked down: no actions
+	counterReadyUntil: number, -- after a perfect block: the next attack is a PARRY COUNTER
+	committedUntil: number, -- a committed special: no slide out of it
+	heavyReactUntil: number, -- pushed back by a heavy blow on the shield
+	lastHitReact: number,
 	trail: Trail?, -- weapon trail during strikes
 	slowFactor: number,
 	slowToken: number,
@@ -116,6 +130,10 @@ local function getState(player: Player): PlayerState
 			blockLockedUntil = 0,
 			lastComboStagger = -100,
 			knockedUntil = 0,
+			counterReadyUntil = 0,
+			committedUntil = 0,
+			heavyReactUntil = 0,
+			lastHitReact = 0,
 			trail = nil,
 			slowFactor = 1,
 			slowToken = 0,
@@ -242,7 +260,7 @@ function PlayerCombatService.refreshEquipment(player: Player)
 	state.weaponModel = weaponModel
 	state.weaponId = weapon.Id
 	state.trail = EquipmentModels.addTrail(weaponModel, weaponCore)
-	ComboValidationService.clear(player) -- weapon changes clear the combo buffer
+	AttackSequenceService.reset(player) -- weapon changes reset the attack chain
 
 	if shield then
 		local shieldModel, shieldCore = EquipmentModels.buildShield(shield.Id)
@@ -298,13 +316,14 @@ end
 -- AttackStart, AttackWind, AttackLength; PlayerAnimator on every client adds torso twist,
 -- shoulders, steps and recovery on top of the walk animation) and moves the weapon/shield welds
 -- (replicated). Authored Roblox animations can later replace both behind this one function.
-local function animate(player: Player, state: PlayerState, anim: Anim, windUp: number, duration: number)
+local function animate(player: Player, state: PlayerState, anim: Anim, windUp: number, duration: number, tier: number?)
 	local character = player.Character
 	if character then
 		character:SetAttribute("AttackAnim", anim)
 		character:SetAttribute("AttackStart", Workspace:GetServerTimeNow())
 		character:SetAttribute("AttackWind", windUp)
 		character:SetAttribute("AttackLength", duration)
+		character:SetAttribute("AttackTier", tier or 0)
 	end
 	local weld = state.weaponWeld
 	if not weld or not weld.Parent or not state.weaponId then
@@ -313,7 +332,26 @@ local function animate(player: Player, state: PlayerState, anim: Anim, windUp: n
 	local grip = state.weaponGrip
 	local rest = grip * EquipmentModels.weaponRestPose(state.weaponId)
 	local windPose, strikePose = rest, rest
-	if anim == "Slash" or anim == "Flurry" then
+	-- The weapon travels the same path as the validated sweep (SpecialMoveService.sweepStrike)
+	if anim == "SlashRL" or anim == "SlideCut" then
+		windPose, strikePose = grip * CFrame.Angles(math.rad(120), 0, math.rad(-55)), grip * CFrame.Angles(math.rad(-20), 0, math.rad(70)) -- upper right -> lower left
+	elseif anim == "SlashLR" or anim == "Wide" or anim == "AirSpinR" then
+		windPose, strikePose = grip * CFrame.Angles(math.rad(85), 0, math.rad(80)), grip * CFrame.Angles(math.rad(80), 0, math.rad(-85)) -- left -> right at torso height
+	elseif anim == "AirSpinL" then
+		windPose, strikePose = grip * CFrame.Angles(math.rad(85), 0, math.rad(-80)), grip * CFrame.Angles(math.rad(80), 0, math.rad(85))
+	elseif anim == "RetreatCut" then
+		windPose, strikePose = grip * CFrame.Angles(math.rad(100), 0, math.rad(-40)), grip * CFrame.Angles(math.rad(10), 0, math.rad(45))
+	elseif anim == "ParryCounter" or anim == "SlideThrust" then
+		windPose, strikePose = rest * CFrame.new(0, -0.8, 0), rest * CFrame.Angles(math.rad(-10), 0, 0) * CFrame.new(0, 2.6, 0)
+	elseif anim == "Cross" or anim == "SlideCross" then
+		windPose, strikePose = grip * CFrame.Angles(math.rad(110), 0, math.rad(45)), grip * CFrame.Angles(math.rad(-15), 0, math.rad(-50))
+	elseif anim == "SlideRise" then
+		windPose, strikePose = grip * CFrame.Angles(math.rad(-40), 0, math.rad(20)), grip * CFrame.Angles(math.rad(150), 0, 0)
+	elseif anim == "SlideReaper" then
+		windPose, strikePose = grip * CFrame.Angles(math.rad(40), 0, math.rad(95)), grip * CFrame.Angles(math.rad(30), 0, math.rad(-100))
+	elseif anim == "Ultimate" then
+		windPose, strikePose = grip * CFrame.Angles(math.rad(175), 0, 0), grip * CFrame.Angles(math.rad(-60), 0, 0)
+	elseif anim == "Slash" or anim == "Flurry" then
 		windPose, strikePose = grip * CFrame.Angles(math.rad(105), 0, math.rad(25)), grip * CFrame.Angles(math.rad(-25), 0, math.rad(-35))
 	elseif anim == "Backhand" then
 		windPose, strikePose = grip * CFrame.Angles(math.rad(90), 0, math.rad(-80)), grip * CFrame.Angles(math.rad(60), 0, math.rad(90))
@@ -375,6 +413,14 @@ local function setBlocking(player: Player, active: boolean)
 		tweenWeld(state.offhandWeld, state.offhandGrip * (if active then SHIELD_BLOCK else SHIELD_IDLE), math.max(0.04, shield.RaiseSeconds))
 	end
 	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Block, active)
+	local character = player.Character
+	if character then
+		-- Every client shows the block pose (BlockAnimation layer in PlayerAnimator)
+		character:SetAttribute("Blocking", active)
+		if active then
+			character:SetAttribute("BlockPose", "Front")
+		end
+	end
 	if active then
 		local myToken = state.blockToken
 		task.delay(CombatConfig.ShieldMaxBlockSeconds, function()
@@ -402,9 +448,8 @@ local function onBlockRequest(player: Player, wantsBlock: unknown)
 		return
 	end
 	local now = os.clock()
-	-- Every block PRESS is also a "B" combo input (holding keeps defending normally)
-	if CombatRules.getContext(player) then
-		ComboValidationService.record(player, "B")
+	if now < state.heavyReactUntil then
+		return -- pushed back by a heavy blow: the guard comes up again a moment later
 	end
 	if state.shieldId == nil then
 		-- Twin daggers: a short parry window on a cooldown instead of a held block
@@ -476,7 +521,38 @@ type Incoming = {
 	guardBreak: boolean?, -- combo GUARD BREAK: a raised shield only stops half and drops
 	fromCombo: boolean?, -- PvP combo / aerial: stagger lock applies
 	pvpCap: number?, -- PvP: whole-move damage cap left for this victim
+	height: string?, -- Low | Mid | High: block pose (and what a slide can duck under)
+	heavy: boolean?, -- heavy blow: heavy block reaction, pushes through the guard a little
+	training: boolean?, -- training dummy swing: evaluate block / parry / dodge, never damage
+	undodgeable: boolean?,
 }
+
+-- Which block pose meets this attack (BlockDefinitions).
+local function blockPose(root: BasePart, incoming: Incoming): string
+	if incoming.height == "High" then
+		return "High"
+	elseif incoming.height == "Low" then
+		return "Low"
+	end
+	local toAttacker = CombatUtil.flat(incoming.fromPosition - root.Position)
+	if toAttacker.Magnitude > 0.1 then
+		local side = toAttacker.Unit:Dot(CombatUtil.flat(root.CFrame.RightVector))
+		if side > BlockDefinitions.SideThresholdDot then
+			return "Right"
+		elseif side < -BlockDefinitions.SideThresholdDot then
+			return "Left"
+		end
+	end
+	return "Front"
+end
+
+-- Replicated block presentation for every client (pose + impact).
+local function publishBlockImpact(character: Model, pose: string, heavy: boolean, perfect: boolean)
+	character:SetAttribute("BlockPose", pose)
+	character:SetAttribute("BlockImpactAt", Workspace:GetServerTimeNow())
+	character:SetAttribute("BlockImpactHeavy", heavy)
+	character:SetAttribute("BlockPerfect", perfect)
+end
 
 -- Armor share removed from this hit (step 5): full in PvE, reduced in PvP (DamageConfig).
 local function armorReduction(victim: Player, incoming: Incoming): number
@@ -511,12 +587,26 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 	if incoming.fromZombie and now - state.lastHitTaken < CombatConfig.HitImmunitySeconds then
 		return 0, false, 1 -- brief immunity: no burst damage from several zombies at once
 	end
+	local character = root.Parent :: Model
+
+	-- Slide dodge: only the short window at the start of a slide (never the whole slide)
+	if not incoming.undodgeable then
+		local dodged, first = SlideService.tryDodge(victim)
+		if dodged then
+			if first and not incoming.training then
+				MomentumService.onDefense(victim, "SlideDodge")
+			end
+			Remotes.CombatFeedback:FireClient(victim, CombatConfig.Feedback.Dodge)
+			return 0, false, 1
+		end
+	end
 
 	-- 2./3. Base damage (mode multipliers were applied by the attack itself)
 	local baseDamage = math.max(0, incoming.damage)
 	local shieldMultiplier = 1
-	local stopped = false -- a facing shield stops everything (Otti's bite)
+	local stopped = false -- a facing shield stops everything (Otti's bite, a perfect block)
 	local blocked = false
+	local perfect = false
 	local stagger = 1
 	local shield = InventoryService.getActiveShield(victim)
 	-- 4. Shield block / parry
@@ -532,20 +622,66 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 				setBlocking(victim, false)
 				state.blockLockedUntil = now + PvPBalanceConfig.GuardBreakShieldLock
 				CombatEffects.burst(root.Position + Vector3.new(0, 1, 0), Color3.fromRGB(255, 150, 80), 1)
+			elseif now - state.blockStart <= BlockDefinitions.PerfectWindow + shield.RaiseSeconds then
+				-- PERFECT BLOCK: raised just before the blow (server time only)
+				perfect = true
 			end
 			shieldMultiplier = 1 - reduction
-			stopped = incoming.blockStops == true
+			stopped = incoming.blockStops == true or perfect
 			blocked = not incoming.guardBreak
-			stagger = shield.StaggerMultiplier
+			stagger = if perfect then 2.5 else shield.StaggerMultiplier
 			shieldFeedback(state)
 		end
 	elseif state.shieldId == nil and now < state.parryUntil and CombatUtil.isFacing(root.CFrame, incoming.fromPosition, 0) then
+		-- Twin daggers: the parry is timing-based, so it counts as a perfect deflection
 		shieldMultiplier = 1 - CombatConfig.ParryReduction
 		stopped = incoming.blockStops == true
 		blocked = true
-		stagger = 1.5
+		perfect = true
+		stagger = 1.8
 		CombatEffects.burst(root.Position + Vector3.new(0, 1, 0), Color3.fromRGB(200, 230, 255), 0.8)
 		Remotes.CombatFeedback:FireClient(victim, CombatConfig.Feedback.Parry)
+	end
+	if blocked then
+		local heavy = incoming.heavy == true and not perfect
+		publishBlockImpact(character, blockPose(root, incoming), heavy, perfect)
+		local shieldPoint = root.Position + CombatUtil.flat(incoming.fromPosition - root.Position).Unit * 1.4 + Vector3.new(0, 0.6, 0)
+		DamageEffectsService.hit("Block", shieldPoint, if heavy then 1.3 elseif perfect then 1.1 else 0.7, CombatUtil.flat(root.Position - incoming.fromPosition), {
+			perfect = perfect,
+			heavy = heavy,
+			projectile = incoming.isProjectile,
+			victimId = victim.UserId,
+		})
+		if perfect then
+			state.counterReadyUntil = now + BlockDefinitions.CounterWindow
+			Remotes.CombatFeedback:FireClient(victim, CombatConfig.Feedback.PerfectBlock)
+			if not incoming.training then
+				MomentumService.onDefense(victim, "PerfectBlock")
+			end
+			-- The attacker recoils (players: a short forced pause; zombies: the returned stagger)
+			local attacker = incoming.attacker
+			local attackerState = attacker and states[attacker]
+			if attacker and attackerState then
+				attackerState.busyUntil = math.max(attackerState.busyUntil, now + BlockDefinitions.PerfectRecoil)
+				Remotes.CombatFeedback:FireClient(attacker, CombatConfig.Feedback.ComboFail, "PARRIED")
+			end
+		else
+			if not incoming.training then
+				MomentumService.onDefense(victim, "Block")
+			end
+			if heavy then
+				-- Heavy blow on the shield: pushed back a step, no slide / attack / re-raise for a moment
+				state.heavyReactUntil = now + BlockDefinitions.HeavyReactionSeconds
+				incoming.knockback = math.max(incoming.knockback, BlockDefinitions.HeavyKnockback)
+				incoming.knockbackIfBlocked = true
+			end
+		end
+	end
+	if incoming.training then
+		-- Training dummy swing: show the result, never deal damage
+		local text = if perfect then "PERFECT BLOCK!" elseif blocked then "BLOCKED" else "HIT — raise the shield just before the swing"
+		Remotes.CombatFeedback:FireClient(victim, CombatConfig.Feedback.Shop, text, blocked)
+		return 0, blocked, stagger
 	end
 	local afterBlock = if stopped then 0 else baseDamage * shieldMultiplier
 
@@ -599,7 +735,22 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 	-- 9. Feedback
 	Remotes.CombatFeedback:FireClient(victim, CombatConfig.Feedback.PlayerHit, damage, blocked, incoming.fromPosition)
 	if not blocked then
-		DamageEffectsService.hit("Player", root.Position + Vector3.new(0, 0.8, 0), math.clamp(damage / 15, 0.4, 1.4), CombatUtil.flat(root.Position - incoming.fromPosition))
+		DamageEffectsService.hit("Player", root.Position + Vector3.new(0, 0.8, 0), math.clamp(damage / 15, 0.4, 1.4), CombatUtil.flat(root.Position - incoming.fromPosition), { victimId = victim.UserId })
+		-- Hit reaction for every client: strength by damage share, weaker when hits come in quickly
+		-- (frequent small zombie hits never lock the player's controls)
+		local share = damage / math.max(1, humanoid.MaxHealth)
+		if share >= 0.02 then
+			local scale = math.clamp(share * 9, 0.2, 1)
+			if now - state.lastHitReact < 0.6 then
+				scale *= 0.5
+			end
+			state.lastHitReact = now
+			local toAttacker = CombatUtil.flat(incoming.fromPosition - root.Position)
+			local side = if toAttacker.Magnitude > 0.1 then toAttacker.Unit:Dot(CombatUtil.flat(root.CFrame.RightVector)) else 0
+			character:SetAttribute("HitReactAt", Workspace:GetServerTimeNow())
+			character:SetAttribute("HitReactScale", scale)
+			character:SetAttribute("HitReactSide", side)
+		end
 	end
 	if incoming.knockdownSeconds and incoming.knockdownSeconds > 0 and not blocked then
 		PlayerCombatService.knockdown(victim, incoming.knockdownSeconds)
@@ -611,7 +762,7 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 end
 
 -- A zombie blow lands. Returns landed, blocked, staggerMultiplier.
-function PlayerCombatService.applyZombieHit(player: Player, attackerPosition: Vector3, damage: number, blockPierce: number, knockback: number): (boolean, boolean, number)
+function PlayerCombatService.applyZombieHit(player: Player, attackerPosition: Vector3, damage: number, blockPierce: number, knockback: number, info: { height: string?, heavy: boolean? }?): (boolean, boolean, number)
 	if not CombatRules.canZombiesTarget(player) then
 		return false, false, 1 -- lobby players and spectators can't be hurt
 	end
@@ -625,6 +776,8 @@ function PlayerCombatService.applyZombieHit(player: Player, attackerPosition: Ve
 		blockPierce = blockPierce,
 		knockback = knockback,
 		fromZombie = true,
+		height = info and info.height,
+		heavy = info and info.heavy,
 	})
 	return dealt > 0 or blocked, blocked, stagger
 end
@@ -691,7 +844,8 @@ function PlayerCombatService.knockdown(player: Player, seconds: number)
 	setBlocking(player, false)
 	local state = getState(player)
 	state.knockedUntil = os.clock() + duration
-	ComboValidationService.clear(player) -- a knockdown cancels any combo in progress
+	AttackSequenceService.reset(player) -- a knockdown resets the attack chain
+	SlideService.cancel(player)
 	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Knockdown, duration)
 	PlayerCombatService.grantImmunity(player, duration + 1)
 end
@@ -747,7 +901,11 @@ function PlayerCombatService.resetCombatState(player: Player)
 	state.busyUntil = 0
 	state.parryUntil = 0
 	table.clear(state.cooldowns)
-	ComboValidationService.clear(player)
+	AttackSequenceService.reset(player)
+	SlideService.cancel(player)
+	state.counterReadyUntil = 0
+	state.committedUntil = 0
+	state.heavyReactUntil = 0
 	updateWalkSpeed(player)
 end
 
@@ -755,22 +913,45 @@ end
 -- Attack requests
 ------------------------------------------------------------------------------------------
 
+type RunKind = "Basic" | "Aerial" | "Slide" | "Counter" | "Special"
+
+type RunOptions = {
+	kind: RunKind,
+	slot: string, -- Momentum variety
+	tier: number?, -- Specials: 1-3, 4 = Ultimate
+	pvpScale: number?,
+	cooldownKey: string?,
+	cooldown: number?,
+	extraRecovery: number?,
+	label: string?, -- Specials: "GLADIATOR CLEAVE II"
+}
+
 -- Runs a validated move: cooldown/busy bookkeeping (server time only), feedback, execution.
-local function runMove(player: Player, state: PlayerState, context: CombatRules.CombatContext, weapon: any, move: any, aim: unknown, comboName: string?, advanced: boolean)
+local function runMove(player: Player, state: PlayerState, context: CombatRules.CombatContext, weapon: any, move: any, aim: unknown, options: RunOptions)
 	local character, _, root = CombatUtil.getLivingCharacter(player)
 	if not character or not root then
 		return
 	end
 	local now = os.clock()
-	state.cooldowns[move.Id] = now + move.Cooldown -- the cooldown starts when the move executes
-	state.busyUntil = now + move.Duration
+	local tier = options.tier or 0
+	state.cooldowns[options.cooldownKey or move.Id] = now + (options.cooldown or move.Cooldown) -- starts when the move executes
+	state.busyUntil = now + move.Duration + (options.extraRecovery or 0)
+	if options.kind == "Special" then
+		state.committedUntil = state.busyUntil -- no slide out of a committed special
+	end
 	if state.blocking then
 		setBlocking(player, false) -- a move lowers the shield
 	end
 	if move.CounterWindow then
 		state.counterUntil = now + move.CounterWindow -- only the opening counter window, never the whole move
 	end
-	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Action, if comboName then "Combo" else "Basic", move.Name, move.Cooldown, comboName)
+	local isSpecial = options.kind == "Special"
+	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Action, if isSpecial then "Special" else options.kind, move.Name, move.Cooldown, options.label)
+	if move.Ultimate then
+		-- Strong, readable telegraph: everyone sees where the Ultimate will land
+		local feet = root.Position - Vector3.new(0, 2.6, 0)
+		CombatEffects.groundMarker(feet + CombatUtil.flat(root.CFrame.LookVector) * 4, 10, move.WindUp + 0.6, Color3.fromRGB(255, 170, 60))
+	end
 
 	local aimPoint = root.Position + root.CFrame.LookVector * 50
 	if typeof(aim) == "Vector3" and aim.X == aim.X and aim.Y == aim.Y and aim.Z == aim.Z and (aim - root.Position).Magnitude <= MAX_AIM_DISTANCE then
@@ -787,6 +968,7 @@ local function runMove(player: Player, state: PlayerState, context: CombatRules.
 	local basic = SpecialMoveDefinitions[weapon.Basic]
 	local myToken = state.actionToken
 	local shield = InventoryService.getActiveShield(player)
+	local momentumKind: "Basic" | "Aerial" | "Slide" | "Counter" | "Special" = options.kind
 	local landed = SpecialMoveService.execute(move, {
 		player = player,
 		context = context,
@@ -794,18 +976,19 @@ local function runMove(player: Player, state: PlayerState, context: CombatRules.
 		character = character,
 		root = root,
 		aimPoint = aimPoint,
-		comboMultiplier = 1,
+		comboMultiplier = if isSpecial then WeaponSpecialDefinitions.TierDamage[tier] or 1 else 1,
+		pvpScale = options.pvpScale,
 		bonusStagger = 0,
 		bashMultiplier = if shield then shield.BashMultiplier else 1,
 		basicDamage = if basic then basic.Damage else 20,
 		basicRange = if basic then basic.Range else 7,
-		fromCombo = comboName ~= nil or move.Kind == "Aerial",
+		fromCombo = isSpecial or move.Kind == "Aerial" or options.kind == "Slide",
 		weaponModel = state.weaponModel,
 		animate = function(anim: Anim, windUp: number, duration: number)
-			animate(player, state, anim, windUp, duration)
+			animate(player, state, anim, windUp, duration, tier)
 		end,
 		extendBusy = function(seconds: number)
-			state.busyUntil = math.max(state.busyUntil, os.clock() + seconds) -- landing recovery
+			state.busyUntil = math.max(state.busyUntil, os.clock() + seconds) -- landing recovery / missed heavy move
 		end,
 		stillValid = function()
 			-- Cancelled by death, a state change, a knockdown or leaving the fight
@@ -814,18 +997,116 @@ local function runMove(player: Player, state: PlayerState, context: CombatRules.
 		reject = function(reason: string)
 			reject(player, reason)
 		end,
+		onLanded = function(_target, dealt: number, blocked: boolean, killed: boolean)
+			-- Momentum only from server-validated contact (never from misses or invalid targets)
+			if dealt > 0 and not blocked then
+				MomentumService.onHit(player, options.slot, momentumKind)
+			end
+			if killed then
+				MomentumService.onKill(player)
+			end
+		end,
 	})
-	if comboName and landed then
-		-- Meaningful moments only: Otti reacts from the imperial box, and as a boss he learns patterns
-		OttiSpectatorService.react(if advanced then "AdvancedCombo" else "Combo")
-		OttiBossService.onPlayerCombo(player, comboName)
+	if isSpecial and landed then
+		-- Meaningful moments only: Otti reacts from the imperial box, as a boss he learns patterns,
+		-- and the crowd cheers for the big ones (with cooldowns)
+		OttiSpectatorService.react(if tier >= 3 then "AdvancedCombo" else "Combo")
+		OttiBossService.onPlayerCombo(player, move.Name)
+		if tier >= 3 then
+			CrowdReactionService.majorMove(if tier == 4 then "Ultimate" else "Special")
+		end
+	elseif options.kind == "Counter" and landed then
+		CrowdReactionService.majorMove("Counter")
 	elseif move.Kind == "Aerial" and landed and (move.Shockwave or 0) >= 7 then
 		OttiSpectatorService.react("BigAerial")
 	end
 end
 
-local function onActionRequest(player: Player, action: unknown, aim: unknown)
-	if action ~= "Basic" and action ~= "Jump" and action ~= "Execute" then
+-- The next normal attack from the context (AttackSequenceService). nil = nothing allowed now.
+local function chooseNormal(player: Player, state: PlayerState, weapon: any, root: BasePart, gesture: string?): (any?, RunOptions?)
+	local now = os.clock()
+	local counter = now < state.counterReadyUntil
+	local sliding = SlideService.isSliding(player)
+	local slide = sliding and not counter and SlideService.consumeAttack(player)
+	if sliding and counter then
+		SlideService.consumeAttack(player) -- Perfect Block -> Slide -> Counter uses the slide's attack
+	end
+	local airborne = not counter and not slide and JumpAttackService.tryAerial(player)
+	local choice = AttackSequenceService.choose(player, {
+		weaponBasic = weapon.Basic,
+		weaponAerial = weapon.Aerial,
+		root = root,
+		counter = counter,
+		slide = slide,
+		airborne = airborne,
+		gesture = gesture,
+	})
+	if not choice then
+		return nil, nil
+	end
+	local move = SpecialMoveDefinitions[choice.moveId]
+	if not move then
+		return nil, nil
+	end
+	if move.RequiresAir and not airborne then
+		return nil, nil
+	end
+	if choice.kind == "Counter" then
+		state.counterReadyUntil = 0 -- one counter per perfect block
+	end
+	return move, { kind = choice.kind, slot = choice.slot }
+end
+
+-- Special: Momentum cost by tier, family cooldown, then the weapon's move for that family.
+local function trySpecial(player: Player, state: PlayerState, context: CombatRules.CombatContext, weapon: any, gesture: GestureValidationService.Validated, aim: unknown)
+	local specials = WeaponSpecialDefinitions.forPrefix(WeaponAttackDefinitions.prefixOf(weapon.Basic))
+	if not specials then
+		return
+	end
+	local kind = gesture.kind
+	local family: WeaponSpecialDefinitions.Family
+	if kind == "CircleDown" then
+		family = "Ultimate"
+	elseif kind == "Left" or kind == "Right" or kind == "Up" or kind == "Down" or kind == "Circle" then
+		family = kind :: any
+	else
+		return
+	end
+	local tier = if family == "Ultimate" then 4 elseif family == "Circle" then WeaponSpecialDefinitions.CircleTier else math.clamp(gesture.tier, 1, 3)
+	local move = SpecialMoveDefinitions[specials[family]]
+	if not move then
+		return
+	end
+	local now = os.clock()
+	local key = "Special:" .. family
+	if now < (state.cooldowns[key] or 0) then
+		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.ComboFail, "NOT READY")
+		return
+	end
+	local cost = WeaponSpecialDefinitions.TierCost[tier]
+	if not MomentumService.trySpend(player, cost) then
+		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.ComboFail, "NOT ENOUGH MOMENTUM")
+		return -- nothing deducted, nothing started, the player is not stuck
+	end
+	runMove(player, state, context, weapon, move, aim, {
+		kind = "Special",
+		slot = "Special" .. family,
+		tier = tier,
+		pvpScale = WeaponSpecialDefinitions.TierPvPDamage[tier],
+		cooldownKey = key,
+		cooldown = WeaponSpecialDefinitions.FamilyCooldown,
+		extraRecovery = WeaponSpecialDefinitions.TierRecovery[tier],
+		label = if tier == 4 then move.Name else ("%s %s"):format(move.Name, WeaponSpecialDefinitions.TierNames[tier]),
+	})
+end
+
+-- CombatAction(action, payload):
+--   "Basic"   (aim point)        Classic attack: the contextual chain
+--   "Gesture" ({ points, seconds, special, aim })  Wild swipe / circle, or a Special gesture
+--   "Slide"                      start a slide (direction from the replicated movement)
+--   "Jump"                       legacy jump report (ignored: jumps are measured server-side)
+local function onActionRequest(player: Player, action: unknown, payload: unknown)
+	if action ~= "Basic" and action ~= "Gesture" and action ~= "Slide" and action ~= "Jump" then
 		return
 	end
 	local state = getState(player)
@@ -842,13 +1123,28 @@ local function onActionRequest(player: Player, action: unknown, aim: unknown)
 	end
 	local now = os.clock()
 	if state.controlLocked or now < state.knockedUntil then
-		ComboValidationService.clear(player) -- held by Otti or knocked down: no inputs count
+		AttackSequenceService.reset(player) -- held by Otti or knocked down: the chain resets
 		return
 	end
 	if action == "Jump" then
-		ComboValidationService.record(player, "J") -- only counts later if the server saw a real jump
 		return
 	end
+
+	if action == "Slide" then
+		if now < state.busyUntil - 0.05 or now < state.committedUntil or now < state.heavyReactUntil then
+			reject(player, "slide not possible right now")
+			return
+		end
+		local direction, reason = SlideService.tryStart(player, JumpAttackService.isAirborne(player))
+		if not direction then
+			reject(player, "slide: " .. tostring(reason))
+			return
+		end
+		setBlocking(player, false) -- Block -> Slide -> Attack: the guard drops for the slide
+		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Slide, direction, SlideDefinitions.Distance, SlideDefinitions.Duration)
+		return
+	end
+
 	local weapon = InventoryService.getEquippedWeapon(player)
 	if state.weaponId ~= weapon.Id or not state.weaponWeld or not state.weaponWeld.Parent then
 		reject(player, "weapon not equipped")
@@ -858,47 +1154,52 @@ local function onActionRequest(player: Player, action: unknown, aim: unknown)
 		return -- spawn protection: no attacks either
 	end
 
-	if action == "Basic" then
-		ComboValidationService.record(player, "A") -- every attack press is an A input
-		if now < state.busyUntil or state.blocking then
-			return -- still performing a move (no macro can skip attack timing) / shield raised
-		end
-		-- In the air (a real jump, once per jump): the weapon's aerial attack
-		local moveId = if JumpAttackService.tryAerial(player) then weapon.Aerial else weapon.Basic
-		local move = SpecialMoveDefinitions[moveId]
-		if not move or now < (state.cooldowns[move.Id] or 0) then
+	local aim: unknown = payload
+	local gestureKind: string? = nil
+	if action == "Gesture" then
+		local gesture, why = GestureValidationService.validate(player, payload)
+		if not gesture then
+			reject(player, "gesture: " .. tostring(why))
 			return
 		end
-		runMove(player, state, context :: CombatRules.CombatContext, weapon, move, aim, nil, false)
-		return
+		aim = if typeof(payload) == "table" then (payload :: any).aim else nil
+		if gesture.kind == "Tap" then
+			return -- a pad tap is a block press (parry timing comes from ShieldBlock)
+		end
+		if gesture.special then
+			if now < state.busyUntil - 0.1 then
+				Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.ComboFail, "BUSY")
+				return
+			end
+			trySpecial(player, state, context :: CombatRules.CombatContext, weapon, gesture, aim)
+			return
+		end
+		gestureKind = if gesture.kind == "CircleDown" then "Circle" else gesture.kind
 	end
 
-	-- Execute: resolve the buffered A / B / J sequence (waits briefly for a finishing move)
-	local wait = state.busyUntil - now
-	if wait > InputDefinitions.ExecuteGrace then
-		ComboValidationService.clear(player)
-		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.ComboFail, "BUSY")
+	if now < state.busyUntil or state.blocking then
+		return -- still performing a move (no macro can skip attack timing) / shield raised
+	end
+	local move, options = chooseNormal(player, state, weapon, root, gestureKind)
+	if not move or not options or now < (state.cooldowns[move.Id] or 0) then
 		return
 	end
-	local combo, reason = ComboValidationService.resolve(player, weapon.Id)
-	if not combo then
-		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.ComboFail, if reason == "expired" then "TOO SLOW" else "NO COMBO")
-		return
-	end
-	local move = SpecialMoveDefinitions[combo.Move]
-	if not move then
-		return
-	end
-	if now < (state.cooldowns[move.Id] or 0) then
-		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.ComboFail, "NOT READY")
-		return
-	end
-	local myToken = state.actionToken
-	task.delay(math.max(0, wait), function()
-		if state.actionToken == myToken and CombatRules.getContext(player) == context and os.clock() >= state.busyUntil - 0.02 then
-			runMove(player, state, context :: CombatRules.CombatContext, weapon, move, aim, combo.Name, combo.Advanced)
-		end
-	end)
+	runMove(player, state, context :: CombatRules.CombatContext, weapon, move, aim, options)
+end
+
+-- Training dummy swing at a player (TrainingService): evaluates block / perfect block / dodge
+-- exactly like a real attack, but never deals damage, Momentum or statistics.
+function PlayerCombatService.trainingSwing(player: Player, fromPosition: Vector3, height: string?)
+	receiveHit(player, {
+		damage = 10,
+		fromPosition = fromPosition,
+		isProjectile = false,
+		blockPierce = 0,
+		knockback = 0,
+		fromZombie = true,
+		height = height,
+		training = true,
+	})
 end
 
 ------------------------------------------------------------------------------------------
@@ -933,7 +1234,11 @@ local function onCharacterAdded(player: Player, character: Model)
 	state.lastHitTaken = 0
 	state.parryUntil = 0
 	state.controlLocked = false
-	ComboValidationService.clear(player)
+	AttackSequenceService.reset(player)
+	SlideService.cancel(player)
+	state.counterReadyUntil = 0
+	state.committedUntil = 0
+	state.heavyReactUntil = 0
 	removeRegeneration(character)
 
 	local humanoid = character:WaitForChild("Humanoid", 5)
@@ -947,7 +1252,7 @@ local function onCharacterAdded(player: Player, character: Model)
 	humanoid.Died:Connect(function()
 		state.actionToken += 1
 		setBlocking(player, false)
-		ComboValidationService.clear(player)
+		AttackSequenceService.reset(player)
 	end)
 
 	character:WaitForChild("RightHand", 1)
@@ -998,8 +1303,12 @@ function PlayerCombatService.init()
 	end
 	Players.PlayerRemoving:Connect(function(player)
 		states[player] = nil
-		ComboValidationService.clear(player)
+		AttackSequenceService.forget(player)
+		SlideService.forget(player)
+		GestureValidationService.forget(player)
 	end)
+	MomentumService.init()
+	TrainingService.setSparringHandler(PlayerCombatService.trainingSwing)
 end
 
 return PlayerCombatService

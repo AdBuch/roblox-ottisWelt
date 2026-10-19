@@ -339,7 +339,7 @@ local function buildTribune(folder: Folder)
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.fromScale(1, 1)
 	label.BackgroundTransparency = 1
-	label.Text = "RETURN TO LOBBY"
+	label.Text = "RETURN TO HUB"
 	label.Font = Enum.Font.GothamBold
 	label.TextScaled = true
 	label.TextColor3 = GOLD
@@ -403,6 +403,8 @@ function Arena.build(): Folder
 	buildSign(folder)
 	Arena.buildImperialBox(folder)
 	Arena.buildSpawnBarriers(folder)
+	Arena.buildEliminationBox(folder)
+	Arena.buildSpectatorCameras(folder)
 
 	local zombies = Instance.new("Folder")
 	zombies.Name = Config.ZombiesFolderName
@@ -582,9 +584,87 @@ function Arena.getTeamSpawnCFrame(team: string, index: number): CFrame
 	return CFrame.lookAt(position, Vector3.new(0, position.Y, lateral))
 end
 
--- Where spectators arrive on the lower tribune walkway (east, in front of the return door).
-function Arena.getTribuneCFrame(): CFrame
-	return frameAt(0, PODIUM_THICKNESS + 3.5, Arena.Layout.TribuneWalkwayY + 3)
+-- Spectator spots on the LOWER (close view) and MIDDLE (overview) walkways. The north side
+-- (imperial box, Otti's entrance) and the two staircases are never used. `seed` spreads players.
+local TRIBUNE_SPOTS: { { degrees: number, middle: boolean } } = {
+	{ degrees = 0, middle = false }, { degrees = 60, middle = false }, { degrees = 120, middle = false },
+	{ degrees = 180, middle = false }, { degrees = 150, middle = false }, { degrees = 330, middle = false },
+	{ degrees = 90, middle = true }, { degrees = 0, middle = true }, { degrees = 180, middle = true },
+	{ degrees = 120, middle = true }, { degrees = 60, middle = true }, { degrees = 330, middle = true },
+}
+
+function Arena.getTribuneCFrame(seed: number?): CFrame
+	local spot = TRIBUNE_SPOTS[((seed or 0) % #TRIBUNE_SPOTS) + 1]
+	local theta = math.rad(spot.degrees)
+	if spot.middle then
+		local middleY = Arena.Layout.TribuneWalkwayY + 2 * SEAT_RISE
+		return frameAt(theta, PODIUM_THICKNESS + 2 * SEAT_DEPTH + 2, middleY + 3)
+	end
+	return frameAt(theta, PODIUM_THICKNESS + 3.5, Arena.Layout.TribuneWalkwayY + 3)
+end
+
+-- Elimination waiting box: a closed room far below the arena (nothing of the fight is visible
+-- from inside; eliminated players watch through their teammates' cameras only).
+local ELIMINATION_CENTER = Vector3.new(0, FLOOR_TOP - 80, 0)
+
+function Arena.getEliminationCFrame(seed: number?): CFrame
+	local offset = (((seed or 0) % 8) - 3.5) * 2.2
+	local position = ELIMINATION_CENTER + Vector3.new(offset, 3.5, 0)
+	return CFrame.lookAt(position, position + Vector3.zAxis)
+end
+
+function Arena.isInEliminationBox(position: Vector3): boolean
+	local d = position - ELIMINATION_CENTER
+	return math.abs(d.X) <= 14 and math.abs(d.Z) <= 14 and d.Y >= -4 and d.Y <= 14
+end
+
+function Arena.buildEliminationBox(folder: Folder)
+	local box = Instance.new("Model")
+	box.Name = "EliminationBox"
+	local c = ELIMINATION_CENTER
+	makePart("Floor", Vector3.new(26, 2, 26), CFrame.new(c - Vector3.new(0, 1, 0)), STONE_DARK, Enum.Material.Cobblestone, box)
+	makePart("Ceiling", Vector3.new(26, 2, 26), CFrame.new(c + Vector3.new(0, 11, 0)), STONE_DARK, Enum.Material.Slate, box)
+	for _, wall in { { Vector3.new(0, 5, 13), Vector3.new(26, 12, 1) }, { Vector3.new(0, 5, -13), Vector3.new(26, 12, 1) }, { Vector3.new(13, 5, 0), Vector3.new(1, 12, 26) }, { Vector3.new(-13, 5, 0), Vector3.new(1, 12, 26) } } do
+		makePart("Wall", wall[2], CFrame.new(c + wall[1]), SANDSTONE, Enum.Material.Sandstone, box)
+	end
+	local lamp = makePart("Lamp", Vector3.one * 0.8, CFrame.new(c + Vector3.new(0, 9, 0)), Color3.fromRGB(255, 160, 80), Enum.Material.Neon, box, DECOR)
+	local light = Instance.new("PointLight")
+	light.Range = 30
+	light.Brightness = 1.5
+	light.Color = Color3.fromRGB(255, 190, 130)
+	light.Parent = lamp
+	box.Parent = folder
+	game:GetService("CollectionService"):AddTag(box, Config.EliminatedBoxTag)
+end
+
+-- Fixed overview camera points for spectators (client: SpectatorController "Overview" mode).
+function Arena.buildSpectatorCameras(folder: Folder)
+	local cameras = Instance.new("Folder")
+	cameras.Name = "SpectatorCameras"
+	local center = Vector3.new(0, FLOOR_TOP, 0)
+	local points = {
+		{ name = "High South", position = Vector3.new(0, FLOOR_TOP + 46, B + 30) },
+		{ name = "High East", position = Vector3.new(A + 32, FLOOR_TOP + 40, 0) },
+		{ name = "High West", position = Vector3.new(-A - 32, FLOOR_TOP + 40, 0) },
+		{ name = "Imperial View", position = Vector3.new(0, FLOOR_TOP + 36, -B - 26) },
+		{ name = "Top Down", position = Vector3.new(0, FLOOR_TOP + 110, 1) },
+	}
+	for i, point in points do
+		local part = Instance.new("Part")
+		part.Name = "Camera_" .. i
+		part.Anchored = true
+		part.CanCollide = false
+		part.CanQuery = false
+		part.CanTouch = false
+		part.Transparency = 1
+		part.Size = Vector3.one
+		part.CFrame = CFrame.lookAt(point.position, center)
+		part:SetAttribute("Order", i)
+		part:SetAttribute("Label", point.name)
+		part.Parent = cameras
+		game:GetService("CollectionService"):AddTag(part, "SpectatorCamera")
+	end
+	cameras.Parent = folder
 end
 
 -- True if a position is somewhere on the spectator stands (between barrier and outer wall).

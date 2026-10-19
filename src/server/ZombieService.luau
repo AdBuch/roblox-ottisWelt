@@ -28,13 +28,16 @@ local TweenService = game:GetService("TweenService")
 local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
 local DamageEffectsConfig = require(ReplicatedStorage.Shared.DamageEffectsConfig)
 local ZombieAIProfiles = require(ReplicatedStorage.Shared.ZombieAIProfiles)
+local ZombieAttackDefinitions = require(ReplicatedStorage.Shared.ZombieAttackDefinitions)
 local ZombieDefinitions = require(ReplicatedStorage.Shared.ZombieDefinitions)
+local WeaponDefinitions = require(ReplicatedStorage.Shared.WeaponDefinitions)
 local Arena = require(script.Parent.Arena)
 local CombatEffects = require(script.Parent.CombatEffects)
 local CombatRules = require(script.Parent.CombatRules)
 local CombatUtil = require(script.Parent.CombatUtil)
 local DamageEffectsService = require(script.Parent.DamageEffectsService)
 local ZombieArcherAI = require(script.Parent.ZombieArcherAI)
+local ZombieAttackSequenceService = require(script.Parent.ZombieAttackSequenceService)
 local ZombieCrowdService = require(script.Parent.ZombieCrowdService)
 local ZombieDamageStateService = require(script.Parent.ZombieDamageStateService)
 local ZombieDismembermentService = require(script.Parent.ZombieDismembermentService)
@@ -92,6 +95,9 @@ export type Zombie = {
 	burstUntil: number,
 	restUntil: number,
 	archer: any, -- ZombieArcherAI state (Undead Sagittarius only)
+	recentSequences: { string }, -- last attack sequences (variety)
+	sequenceReadyAt: { [string]: number },
+	guardBlockedAt: number, -- when the raised guard last stopped a player attack (counters)
 }
 
 export type DamageExtra = {
@@ -111,7 +117,7 @@ export type EnemyArrow = {
 }
 
 export type Handlers = {
-	hitPlayer: (player: Player, attackerPosition: Vector3, damage: number, blockPierce: number, knockback: number) -> (boolean, boolean, number),
+	hitPlayer: (player: Player, attackerPosition: Vector3, damage: number, blockPierce: number, knockback: number, info: { height: string?, heavy: boolean? }?) -> (boolean, boolean, number),
 	isBlockingToward: (player: Player, position: Vector3) -> boolean,
 	isHeavyBlocking: (player: Player) -> boolean,
 	slowPlayer: (player: Player, factor: number, seconds: number) -> (),
@@ -481,100 +487,220 @@ local function pushBack(z: Zombie, fromPosition: Vector3, speed: number, stagger
 	z.root.AssemblyLinearVelocity = away.Unit * speed * z.definition.KnockbackMultiplier + Vector3.new(0, 6, 0)
 end
 
-type AttackStyle = "Normal" | "Bash"
+-- Zombie attack poses (degrees on the rest pose: x = raise forward, y = torso twist (+ = turn left),
+-- z = arm roll (+ = toward the zombie's right)). wind = telegraph, strike = impact. The validated
+-- hit arc of a step points the same way the swing travels.
+type Angles3 = { number }
+type ZPose = { rs: Angles3?, ls: Angles3?, root: Angles3? }
+local ZOMBIE_POSES: { [string]: { wind: ZPose, strike: ZPose } } = {
+	SlashR = { wind = { rs = { 140, 0, 35 }, root = { 0, -25, 0 } }, strike = { rs = { 35, 0, -35 }, root = { 0, 25, 0 } } },
+	SlashL = { wind = { rs = { 110, 0, -50 }, root = { 0, 25, 0 } }, strike = { rs = { 80, 0, 45 }, root = { 0, -30, 0 } } },
+	Thrust = { wind = { rs = { 60, 0, 0 }, root = { -6, 0, 0 } }, strike = { rs = { 95, 0, 0 }, root = { 12, 0, 0 } } },
+	Overhead = { wind = { rs = { 175, 0, 0 }, ls = { 150, 0, 0 }, root = { -12, 0, 0 } }, strike = { rs = { 30, 0, 0 }, ls = { 30, 0, 0 }, root = { 22, 0, 0 } } },
+	Wide = { wind = { rs = { 100, 0, 55 }, root = { 0, -45, 0 } }, strike = { rs = { 95, 0, -60 }, root = { 0, 50, 0 } } },
+	Low = { wind = { rs = { 40, 0, 30 }, root = { 18, -20, 0 } }, strike = { rs = { 15, 0, -40 }, root = { 18, 25, 0 } } },
+	Rise = { wind = { rs = { 10, 0, 0 }, root = { 20, 0, 0 } }, strike = { rs = { 165, 0, 0 }, root = { -10, 0, 0 } } },
+	Bash = { wind = { ls = { 40, 0, 0 }, root = { 0, 15, 0 } }, strike = { ls = { 95, 0, 0 }, root = { 10, -15, 0 } } },
+	Shove = { wind = { rs = { 60, 0, 0 }, ls = { 60, 0, 0 }, root = { -8, 0, 0 } }, strike = { rs = { 95, 0, 0 }, ls = { 95, 0, 0 }, root = { 15, 0, 0 } } },
+	Charge = { wind = { rs = { 60, 0, 0 }, root = { 25, 0, 0 } }, strike = { rs = { 60, 0, 0 }, root = { 25, 0, 0 } } },
+	Stomp = { wind = { rs = { 90, 0, 0 }, ls = { 90, 0, 0 }, root = { -15, 0, 0 } }, strike = { rs = { 20, 0, 0 }, ls = { 20, 0, 0 }, root = { 20, 0, 0 } } },
+	Roar = { wind = { rs = { 120, 0, 0 }, ls = { 120, 0, 0 } }, strike = { rs = { 120, 0, 0 }, ls = { 120, 0, 0 } } },
+	Guard = { wind = { ls = { 75, 0, 0 } }, strike = { ls = { 75, 0, 0 } } },
+	Bite = { wind = { root = { 15, 0, 0 } }, strike = { root = { -35, 0, 0 } } },
+}
 
-local function performAttack(z: Zombie, player: Player, style: AttackStyle)
+local function applyPose(z: Zombie, pose: ZPose?, seconds: number)
+	local rig = z.rig
+	local function cf(angles: Angles3?): CFrame
+		if not angles then
+			return CFrame.identity
+		end
+		return CFrame.Angles(math.rad(angles[1]), math.rad(angles[2]), math.rad(angles[3]))
+	end
+	local info = TweenInfo.new(math.max(0.05, seconds), Enum.EasingStyle.Quad)
+	TweenService:Create(rig.rightShoulder, info, { C0 = rig.rightShoulderRest * cf(pose and pose.rs) }):Play()
+	if z.canBlock or (pose and pose.ls) then
+		TweenService:Create(rig.leftShoulder, info, { C0 = rig.leftShoulderRest * cf(if z.guarding then { 75, 0, 0 } else pose and pose.ls) }):Play()
+	end
+	TweenService:Create(rig.rootJoint, info, { C0 = restPose(z) * cf(pose and pose.root) }):Play()
+end
+
+local function resetPose(z: Zombie)
+	if z.alive then
+		applyPose(z, nil, 0.3)
+	end
+end
+
+local function throwNet(z: Zombie, player: Player): boolean -- the throw itself (busy handled by the caller)
+	local def = z.definition
+	z.netReadyAt = os.clock() + (def.NetCooldown or 7) * z.mods.NetCooldownMultiplier
+	setPose(z.rig.leftShoulder, z.rig.leftShoulderRest, 160, (def.NetWindUp or 0.7) * 0.8)
+	task.wait(def.NetWindUp or 0.7)
+	if not z.alive then
+		return false
+	end
+	setPose(z.rig.leftShoulder, z.rig.leftShoulderRest, 40, 0.12)
+	local thrown = false
+	local character, _, targetRoot = CombatUtil.getLivingCharacter(player)
+	if character and targetRoot and isValidTarget(player) then
+		local from = z.root.Position + Vector3.new(0, 1.5, 0)
+		local inRange = (targetRoot.Position - z.root.Position).Magnitude <= (def.NetRange or 13) + 1
+		if inRange and CombatUtil.hasLineOfSight(from, targetRoot.Position, ignoreList(character)) then
+			CombatEffects.netThrow(from, targetRoot.Position + Vector3.new(0, 1.5, 0))
+			getHandlers().slowPlayer(player, def.NetSlowFactor or 0.75, def.NetSlowSeconds or 2)
+			thrown = true
+		end
+	end
+	task.wait(0.3)
+	if z.alive then
+		setPose(z.rig.leftShoulder, z.rig.leftShoulderRest, 0, 0.3)
+	end
+	return thrown
+end
+
+-- One validated blow of a sequence step. Returns (landed, blocked).
+local function performStep(z: Zombie, player: Player, step: ZombieAttackDefinitions.Step): (boolean, boolean)
+	local def = z.definition
+	local profile = z.profile
+	local now = os.clock()
+	local heavy = step.Heavy == true and not z.unarmed
+	local multiplier = step.Damage * (if z.unarmed then 0.55 else 1)
+	if heavy and not ZombieAttackSequenceService.claimHeavy(player, now) then
+		-- another zombie just landed a heavy blow on this player: this one is a normal swing
+		heavy = false
+		multiplier *= 0.8
+	end
+	local poses = ZOMBIE_POSES[step.Anim] or ZOMBIE_POSES.SlashR
+	local windUp = def.WindUpSeconds * step.WindUp * (if z.unarmed then 1.2 else 1)
+	applyPose(z, poses.wind, windUp * 0.85)
+	if heavy then
+		-- Heavy blows are always clearly telegraphed
+		CombatEffects.glow(z.model, Color3.fromRGB(255, 120, 80), windUp)
+		CombatEffects.ring(z.root.Position - Vector3.new(0, z.humanoid.HipHeight, 0), if step.Kind == "Stomp" then step.Radius or 7 else 5, Color3.fromRGB(255, 120, 80))
+	end
+	local _, _, startRoot = CombatUtil.getLivingCharacter(player)
+	if startRoot and step.Kind ~= "Stomp" then
+		faceTowards(z, startRoot.Position)
+	end
+	task.wait(windUp)
+	if not z.alive or os.clock() < z.stunnedUntil then
+		return false, false -- interrupted (killed or staggered by a strong hit)
+	end
+	applyPose(z, poses.strike, 0.1)
+
+	-- Re-validate everything at the moment of impact (a dead zombie never deals damage)
+	local character, _, targetRoot = CombatUtil.getLivingCharacter(player)
+	if not character or not targetRoot or not isValidTarget(player) then
+		return false, false
+	end
+	local position = z.root.Position
+	local inReach: boolean
+	if step.Kind == "Stomp" then
+		inReach = CombatUtil.flatDistance(position, targetRoot.Position) <= (step.Radius or 7)
+		local feet = position - Vector3.new(0, z.humanoid.HipHeight + 1, 0)
+		CombatEffects.sandBurst(Vector3.new(feet.X, Arena.Layout.FloorTop, feet.Z), step.Radius or 7, 0.9)
+	else
+		local arc = step.Arc or 110
+		inReach = CombatUtil.flatDistance(position, targetRoot.Position) <= attackReach(z) + (step.ReachAdd or 0)
+			and CombatUtil.isFacing(z.root.CFrame, targetRoot.Position, math.cos(math.rad(arc / 2)))
+	end
+	inReach = inReach and math.abs(position.Y - targetRoot.Position.Y) <= 6
+	if not inReach or not CombatUtil.hasLineOfSight(position + Vector3.new(0, 1.5, 0), targetRoot.Position, ignoreList(character)) then
+		return false, false
+	end
+	local damage = math.max(1, math.floor(def.Damage * multiplier * CombatConfig.ZombieDamageMultiplier + 0.5))
+	local pierce = step.Pierce or (if heavy then math.max(profile.BlockPierce, 0.6) else profile.BlockPierce)
+	local knockback = step.Knockback or (if heavy then 18 else 0)
+	local hit, blocked, staggerMultiplier = getHandlers().hitPlayer(player, position, damage, pierce, knockback, { height = step.Height, heavy = heavy })
+	if hit and blocked then
+		ZombieThreatService.add(z, player, 5) -- blocking draws a little attention
+		if step.Anim ~= "Bash" and step.Anim ~= "Shove" then
+			-- a perfect block returns a much larger stagger multiplier: the zombie recoils
+			pushBack(z, targetRoot.Position, CombatConfig.ShieldPushBackSpeed * staggerMultiplier, def.StaggerSeconds * staggerMultiplier)
+		end
+	end
+	return hit, blocked
+end
+
+-- Runs one attack sequence from a crowd slot. Steps stop early when the zombie dies, is staggered
+-- by a strong hit, or the target got far out of reach.
+local function performSequence(z: Zombie, player: Player, sequence: ZombieAttackDefinitions.Sequence)
 	local def = z.definition
 	local profile = z.profile
 	local mods = z.mods
 	z.busy = true
-	z.lastAttack = os.clock()
+	local started = os.clock()
+	z.lastAttack = started
+	ZombieAttackSequenceService.markUsed(z, sequence, started)
 	endGuard(z)
-
-	local finish = function()
-		z.busy = false
-		ZombieCrowdService.endAttack(z)
-	end
-
-	-- Optional roar (Brute) or a critical brute's last heavy swing: extra, very visible telegraphs
-	local heavy = style == "Normal" and not z.unarmed and mods.HeavySwingChance > 0 and z.rng:NextNumber() < mods.HeavySwingChance
-	if style == "Normal" and not z.unarmed and (heavy or (profile.RoarChance > 0 and z.rng:NextNumber() < profile.RoarChance)) then
-		setPose(z.rig.rightShoulder, z.rig.rightShoulderRest, 120, 0.2)
-		if z.canBlock then
-			setPose(z.rig.leftShoulder, z.rig.leftShoulderRest, 120, 0.2)
+	local landedAny = false
+	local heavyUsed = false
+	for _, step in sequence.Steps do
+		if not z.alive or os.clock() < z.stunnedUntil then
+			break
 		end
-		CombatEffects.ring(z.root.Position - Vector3.new(0, z.humanoid.HipHeight, 0), if heavy then 8 else 6, Color3.fromRGB(255, 120, 80))
-		if heavy then
-			CombatEffects.glow(z.model, Color3.fromRGB(255, 120, 80), 0.9)
+		local _, _, targetRoot = CombatUtil.getLivingCharacter(player)
+		if not targetRoot or not isValidTarget(player) then
+			break
 		end
-		task.wait(if heavy then 0.8 else 0.5)
-		setPose(z.rig.leftShoulder, z.rig.leftShoulderRest, 0, 0.2)
-		if not z.alive then
-			finish()
-			return
+		local distance = CombatUtil.flatDistance(z.root.Position, targetRoot.Position)
+		if step.Kind ~= "Move" and distance > attackReach(z) + (step.ReachAdd or 0) + ZombieAttackDefinitions.OutOfReachAbort then
+			break -- the target escaped: don't swing at the air for the rest of the sequence
 		end
-	end
-
-	-- Telegraph: weapon raised, shield pulled back for a bash, or head drawn back for a bite
-	local windUp = def.WindUpSeconds * (if z.unarmed then 1.2 else 1)
-	if z.unarmed then
-		TweenService:Create(z.rig.rootJoint, TweenInfo.new(windUp * 0.8, Enum.EasingStyle.Quad), { C0 = z.rig.rootJointRest * CFrame.Angles(math.rad(15), 0, 0) }):Play()
-	elseif style == "Bash" then
-		setPose(z.rig.leftShoulder, z.rig.leftShoulderRest, 40, windUp * 0.8)
-	else
-		setPose(z.rig.rightShoulder, z.rig.rightShoulderRest, 150, windUp * 0.85)
-	end
-	task.wait(windUp)
-	if not z.alive then
-		finish()
-		return
-	end
-	if z.unarmed then
-		TweenService:Create(z.rig.rootJoint, TweenInfo.new(0.1, Enum.EasingStyle.Quad), { C0 = z.rig.rootJointRest * CFrame.Angles(math.rad(-35), 0, 0) }):Play()
-	elseif style == "Bash" then
-		setPose(z.rig.leftShoulder, z.rig.leftShoulderRest, 95, 0.1)
-	else
-		setPose(z.rig.rightShoulder, z.rig.rightShoulderRest, 25, 0.1)
-	end
-
-	-- Re-validate everything at the moment the blow lands (a dead zombie never deals damage)
-	local landed = false
-	local character, _, targetRoot = CombatUtil.getLivingCharacter(player)
-	if z.alive and character and targetRoot and isValidTarget(player) then
-		local inReach = CombatUtil.flatDistance(z.root.Position, targetRoot.Position) <= attackReach(z)
-			and math.abs(z.root.Position.Y - targetRoot.Position.Y) <= 6
-		local eye = z.root.Position + Vector3.new(0, 1.5, 0)
-		if inReach and CombatUtil.hasLineOfSight(eye, targetRoot.Position, ignoreList(character)) then
-			local multiplier = if style == "Bash" then 0.6 elseif z.unarmed then 0.55 elseif heavy then 1.4 else 1
-			local damage = math.max(1, math.floor(def.Damage * multiplier * CombatConfig.ZombieDamageMultiplier + 0.5))
-			local pierce = if style == "Bash" then 0.8 elseif heavy then math.max(profile.BlockPierce, 0.6) else profile.BlockPierce
-			local knockback = if style == "Bash" then 25 elseif heavy then 20 else 0
-			local hit, blocked, staggerMultiplier = getHandlers().hitPlayer(player, z.root.Position, damage, pierce, knockback)
-			landed = hit
-			if hit and blocked then
-				ZombieThreatService.add(z, player, 5) -- blocking draws a little attention
-				if style ~= "Bash" then
-					pushBack(z, targetRoot.Position, CombatConfig.ShieldPushBackSpeed * staggerMultiplier, def.StaggerSeconds * staggerMultiplier)
-				end
+		if step.Kind == "Move" then
+			local forward = CombatUtil.flat(targetRoot.Position - z.root.Position)
+			forward = if forward.Magnitude > 0.1 then forward.Unit else CombatUtil.flat(z.root.CFrame.LookVector)
+			local right = Vector3.new(-forward.Z, 0, forward.X)
+			local goal = z.root.Position + forward * (step.Forward or 0) + right * (step.Side or 0) * (if z.drift > 0 then 1 else -1)
+			if Arena.isInside(goal, -3) then
+				applyPose(z, (ZOMBIE_POSES[step.Anim] or ZOMBIE_POSES.Guard).wind, 0.15)
+				z.humanoid:MoveTo(goal)
+				task.wait(math.clamp(((goal - z.root.Position).Magnitude) / math.max(6, z.humanoid.WalkSpeed), 0.15, 0.6))
+				z.humanoid:MoveTo(z.root.Position)
 			end
+		elseif step.Kind == "Roar" then
+			applyPose(z, ZOMBIE_POSES.Roar.wind, 0.2)
+			CombatEffects.ring(z.root.Position - Vector3.new(0, z.humanoid.HipHeight, 0), 6, Color3.fromRGB(255, 120, 80))
+			task.wait(def.WindUpSeconds * step.WindUp)
+		elseif step.Kind == "Block" then
+			if z.canBlock then
+				startGuard(z, os.clock(), (step.Recovery or 0.8), 1.5)
+				z.guardBlockedAt = 0
+				task.wait(def.WindUpSeconds * step.WindUp + (step.Recovery or 0.8))
+				endGuard(z)
+			end
+		elseif step.Kind == "Counter" then
+			-- Only if the guard just stopped a player attack (DEFENSIVE / BRONZE COUNTER)
+			if z.guardBlockedAt < started then
+				break
+			end
+			local hit = performStep(z, player, table.freeze({ Kind = "Hit", Anim = step.Anim, WindUp = step.WindUp, Damage = if step.Damage > 0 then step.Damage else 1, Knockback = step.Knockback, Arc = 120 }) :: any)
+			landedAny = landedAny or hit
+		elseif step.Kind == "Net" then
+			if z.canBlock and os.clock() >= z.netReadyAt then
+				throwNet(z, player)
+			end
+		else -- Hit / Stomp
+			local hit = performStep(z, player, step)
+			landedAny = landedAny or hit
+			heavyUsed = heavyUsed or step.Heavy == true
 		end
+		task.wait(ZombieAttackDefinitions.StepGap + (if step.Kind == "Block" then 0 else step.Recovery or 0))
 	end
-
-	task.wait(0.25)
+	task.wait(0.15)
+	resetPose(z)
 	if z.alive then
-		setPose(z.rig.rightShoulder, z.rig.rightShoulderRest, 0, 0.3)
-		setPose(z.rig.leftShoulder, z.rig.leftShoulderRest, 0, 0.3)
-		if z.unarmed then
-			TweenService:Create(z.rig.rootJoint, TweenInfo.new(0.3), { C0 = restPose(z) }):Play()
-		end
 		local now = os.clock()
-		if not landed and profile.ExposedAfterMiss > 0 then
-			-- Champion: a failed heavy attack leaves it open
+		if sequence.Recovery then
+			z.attackDelayUntil = math.max(z.attackDelayUntil, now + sequence.Recovery) -- exhaustion / vulnerable recovery
+		end
+		if not landedAny and profile.ExposedAfterMiss > 0 then
+			-- Champion: a failed attack leaves it open
 			z.stunnedUntil = math.max(z.stunnedUntil, now + profile.ExposedAfterMiss)
 			z.guardReadyAt = math.max(z.guardReadyAt, now + profile.ExposedAfterMiss + 1)
 		end
-		if heavy then
-			z.stunnedUntil = math.max(z.stunnedUntil, now + 0.8) -- a big swing leaves it slow to recover
+		if heavyUsed then
+			z.stunnedUntil = math.max(z.stunnedUntil, now + 0.6) -- a big swing leaves it slow to recover
 		end
 		if def.Special == "Guard" then
 			z.guardReadyAt = math.max(z.guardReadyAt, now + 2)
@@ -583,41 +709,32 @@ local function performAttack(z: Zombie, player: Player, style: AttackStyle)
 		if retreat > 0 then
 			z.retreatUntil = now + retreat
 			ZombieCrowdService.releaseSlot(z)
-		elseif mods.ComboChance > 0 and z.rng:NextNumber() < mods.ComboChance then
-			-- Desperate short combination: the next strike may follow almost immediately
-			z.lastAttack = now - def.AttackCooldown * mods.CooldownMultiplier + 0.3
 		end
-	end
-	finish()
-end
-
-local function throwNet(z: Zombie, player: Player)
-	local def = z.definition
-	z.busy = true
-	z.netReadyAt = os.clock() + (def.NetCooldown or 7) * z.mods.NetCooldownMultiplier
-	setPose(z.rig.leftShoulder, z.rig.leftShoulderRest, 160, (def.NetWindUp or 0.7) * 0.8)
-	task.wait(def.NetWindUp or 0.7)
-	if not z.alive then
-		ZombieCrowdService.endAttack(z)
-		return
-	end
-	setPose(z.rig.leftShoulder, z.rig.leftShoulderRest, 40, 0.12)
-	local character, _, targetRoot = CombatUtil.getLivingCharacter(player)
-	if character and targetRoot and isValidTarget(player) then
-		local from = z.root.Position + Vector3.new(0, 1.5, 0)
-		local inRange = (targetRoot.Position - z.root.Position).Magnitude <= (def.NetRange or 13) + 1
-		if inRange and CombatUtil.hasLineOfSight(from, targetRoot.Position, ignoreList(character)) then
-			CombatEffects.netThrow(from, targetRoot.Position + Vector3.new(0, 1.5, 0))
-			getHandlers().slowPlayer(player, def.NetSlowFactor or 0.75, def.NetSlowSeconds or 2)
-		end
-	end
-	task.wait(0.3)
-	if z.alive then
-		setPose(z.rig.leftShoulder, z.rig.leftShoulderRest, 0, 0.3)
 	end
 	z.busy = false
 	ZombieCrowdService.endAttack(z)
 end
+
+-- Picks and starts a sequence (false if nothing fits right now).
+local function startSequence(z: Zombie, player: Player, targetRoot: BasePart): boolean
+	local now = os.clock()
+	local sequence = ZombieAttackSequenceService.choose(z, {
+		distance = CombatUtil.flatDistance(z.root.Position, targetRoot.Position),
+		reach = attackReach(z),
+		targetBlocking = getHandlers().isBlockingToward(player, z.root.Position),
+		condition = z.condition,
+		canBlock = z.canBlock and not z.unarmed,
+		unarmed = z.unarmed,
+		now = now,
+	})
+	if not sequence or not ZombieCrowdService.tryStartAttack(z, player) then
+		return false
+	end
+	z.humanoid:MoveTo(z.root.Position)
+	task.spawn(performSequence, z, player, sequence)
+	return true
+end
+
 
 ------------------------------------------------------------------------------------------
 -- Think
@@ -651,14 +768,8 @@ local toolkit = {
 	end,
 	-- Weak close-range strike (cornered archer); false if the attack token isn't available
 	melee = function(z: Zombie, player: Player): boolean
-		if ZombieCrowdService.tryStartAttack(z, player) then
-			z.humanoid:MoveTo(z.root.Position)
-			task.spawn(function()
-				performAttack(z, player, "Normal")
-			end)
-			return true
-		end
-		return false
+		local _, _, targetRoot = CombatUtil.getLivingCharacter(player)
+		return targetRoot ~= nil and startSequence(z, player, targetRoot) -- BOW SHOVE / ARROW STAB
 	end,
 }
 
@@ -715,7 +826,12 @@ local function think(z: Zombie)
 	if netReady and distance >= 5 and distance <= (def.NetRange or 13) and canSee and ZombieCrowdService.tryStartAttack(z, player) then
 		faceTowards(z, targetPosition)
 		z.humanoid:MoveTo(position)
-		task.spawn(throwNet, z, player)
+		task.spawn(function()
+			z.busy = true
+			throwNet(z, player)
+			z.busy = false
+			ZombieCrowdService.endAttack(z)
+		end)
 		return
 	end
 	if z.canBlock and mods.BlockMultiplier > 0 and not z.guarding and now >= z.guardReadyAt and distance <= 14 then
@@ -749,30 +865,14 @@ local function think(z: Zombie)
 				z.attackDelayUntil = now + 0.4 -- hesitates
 			elseif getHandlers().isBlockingToward(player, position) then
 				local bashChance = if z.canBlock and not z.unarmed then profile.ShieldBashChance + mods.BashChanceAdd else 0
-				if bashChance > 0 and z.rng:NextNumber() < bashChance then
-					if ZombieCrowdService.tryStartAttack(z, player) then
-						z.humanoid:MoveTo(position)
-						task.spawn(function()
-							performAttack(z, player, "Bash")
-						end)
-						return
-					end
-				elseif profile.BlockPierce <= 0 and z.rng:NextNumber() < 0.5 then
+				if bashChance <= 0 and profile.BlockPierce <= 0 and z.rng:NextNumber() < 0.5 then
 					-- Most zombies hesitate against a raised shield and try a neighbouring slot
 					z.attackDelayUntil = now + 0.6
 					ZombieCrowdService.shiftSlot(z, if z.drift > 0 then 1 else -1)
-				elseif ZombieCrowdService.tryStartAttack(z, player) then
-					z.humanoid:MoveTo(position)
-					task.spawn(function()
-					performAttack(z, player, "Normal")
-				end)
-					return
+				elseif startSequence(z, player, targetRoot) then
+					return -- shield users prefer bash / pressure sequences against a raised guard
 				end
-			elseif ZombieCrowdService.tryStartAttack(z, player) then
-				z.humanoid:MoveTo(position)
-				task.spawn(function()
-					performAttack(z, player, "Normal")
-				end)
+			elseif startSequence(z, player, targetRoot) then
 				return
 			end
 		end
@@ -914,6 +1014,9 @@ function ZombieService.spawn(def: ZombieDefinition, cframe: CFrame, onDiedCallba
 		slowUntil = 0,
 		lastAttack = now - def.AttackCooldown * 0.5,
 		attackDelayUntil = 0,
+		recentSequences = {},
+		sequenceReadyAt = {},
+		guardBlockedAt = 0,
 		retreatUntil = 0,
 		target = nil,
 		nextRetarget = 0,
@@ -994,6 +1097,7 @@ function ZombieService.tryGuardBlock(z: Zombie, attackerPosition: Vector3): bool
 		return false -- side and rear attacks bypass the shield
 	end
 	flash(z, Color3.fromRGB(255, 220, 120))
+	z.guardBlockedAt = os.clock() -- a DEFENSIVE / BRONZE COUNTER may follow
 	return true
 end
 
@@ -1043,8 +1147,16 @@ function ZombieService.applyDamage(z: Zombie, attacker: Player, amount: number, 
 	ZombieThreatService.add(z, attacker, amount)
 	flash(z, Color3.new(1, 1, 1))
 	local hitPosition = if extra and extra.hitPosition then extra.hitPosition else z.root.Position + Vector3.new(0, 1, 0)
-	DamageEffectsService.hit("Zombie", hitPosition, math.clamp(amount / 30, 0.4, 1.5), CombatUtil.flat(z.root.Position - fromPosition))
 	z.humanoid:TakeDamage(amount)
+	-- Presentation of the CONFIRMED hit (blood / sparks / dust by weapon category; stains on the sand)
+	local weapon = extra and extra.weaponId and WeaponDefinitions.ById[extra.weaponId]
+	DamageEffectsService.hit("Zombie", hitPosition, math.clamp(amount / 30, 0.4, 1.5), CombatUtil.flat(z.root.Position - fromPosition), {
+		category = if weapon then weapon.Category else nil,
+		attackerId = attacker.UserId,
+		heavy = amount >= 30,
+		killed = z.humanoid.Health <= 0,
+		armored = z.definition.Special == "Guard" or z.definition.Id == "LegionRemnant",
+	})
 	if z.alive and z.humanoid.Health > 0 then
 		local lost = ZombieDismembermentService.tryDismember(z.rig, z.limbs, {
 			damage = amount,
@@ -1065,7 +1177,8 @@ function ZombieService.applyDamage(z: Zombie, attacker: Player, amount: number, 
 		if away.Magnitude > 0.01 then
 			z.root.AssemblyLinearVelocity = away.Unit * knockback * z.definition.KnockbackMultiplier
 		end
-		if not z.busy then
+		if not z.busy or stagger >= 0.35 then
+			-- strong hits also interrupt an attack sequence (the runner checks stunnedUntil)
 			z.stunnedUntil = math.max(z.stunnedUntil, os.clock() + stagger * z.definition.KnockbackMultiplier)
 		end
 	end

@@ -1,317 +1,77 @@
 --!strict
--- TEAM BATTLE: Red Gladiators vs Blue Gladiators, 1v1 up to 4v4.
--- Lobby: stand on the RED or BLUE pad (prompt) to join, LEAVE TEAM, READY / UNREADY and
--- AUTO BALANCE posts. When each team has at least one ready player (and the arena is free) a
--- 15 s countdown starts; it cancels if that stops being true. Only ready players fight.
--- Match: no zombies, no friendly fire, respawn after 4 s at the team spawn with 2 s protection,
--- first to 20 eliminations wins; when 8 minutes run out the higher score wins, a tie goes to
--- sudden death (next valid elimination wins). Eliminations/assists/deaths are tracked on the
--- server from damage it applied itself.
+-- TEAM BATTLE runtime in the Arena: Red vs Blue, 1v1 up to 4v4, no friendly fire, eliminations /
+-- assists / deaths tracked from damage the server applied itself. The submode RULES are separate
+-- modules (src/arena/server: TimeBattleService, FirstToKillsService, EliminationService) injected
+-- with setRules(); this core owns teams, kill credit, alive state, publishing and the result.
+-- Teams are formed by Hub matchmaking (never by clients); there is no lobby team selection here.
 
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
 local Config = require(ReplicatedStorage.Shared.Config)
-local GameModeDefinitions = require(ReplicatedStorage.Shared.GameModeDefinitions)
 local GameStates = require(ReplicatedStorage.Shared.GameStates)
-local InventoryService = require(script.Parent.InventoryService)
+local TeamModeDefinitions = require(ReplicatedStorage.Shared.TeamModeDefinitions)
+local Arena = require(script.Parent.Arena)
+local CombatUtil = require(script.Parent.CombatUtil)
+local PlayerCombatService = require(script.Parent.PlayerCombatService)
+local PlayerMatchStateService = require(script.Parent.PlayerMatchStateService)
 local Remotes = require(script.Parent.Remotes)
 
 export type TeamName = "Red" | "Blue"
 
 export type Hooks = {
-	onJoin: (player: Player) -> (), -- leave other lobby groups (party)
-	isArenaBusy: () -> boolean,
-	start: (red: { Player }, blue: { Player }) -> boolean,
-	finished: (winner: TeamName, reason: string) -> (),
+	finished: (winner: string, reason: string) -> (), -- "Red" | "Blue" | "Draw"
+	statusChanged: () -> (),
 }
 
-type Member = { player: Player, ready: boolean }
-
-type Match = {
+-- What a submode's rules can see and do.
+export type Context = {
+	subMode: string,
 	teamOf: { [Player]: TeamName },
 	score: { Red: number, Blue: number },
-	timeLeft: number,
+	alive: { [Player]: boolean },
+	timeLeft: number, -- -1 = no clock
+	target: number,
 	suddenDeath: boolean,
-	damageLog: { [Player]: { [Player]: number } }, -- victim -> attacker -> last hit time
+	round: number,
+	teamSize: number,
+	active: boolean,
 	finished: boolean,
 	token: number,
-	matchId: number, -- MatchService match id (PlayerMatchStateService)
-	active: boolean, -- false during the arena countdown
+	-- actions
+	finish: (winner: string, reason: string) -> (),
+	broadcast: (text: string) -> (),
+	publish: () -> (),
+	setActive: (active: boolean) -> (),
+	livingCount: (team: TeamName) -> number,
+	respawnAll: () -> (), -- everyone back to their team spawn as a fighter
+	stillCurrent: () -> boolean,
+}
+
+export type Rules = {
+	respawns: boolean, -- false: a defeated player stays out until the next round
+	setup: (ctx: Context) -> (),
+	onActivated: ((ctx: Context) -> ())?,
+	onSecond: (ctx: Context) -> (),
+	onDeath: (ctx: Context, victim: Player, killerTeam: TeamName?) -> (),
+}
+
+type Match = Context & {
+	matchId: number,
+	damageLog: { [Player]: { [Player]: number } }, -- victim -> attacker -> last hit time
+	rules: Rules,
 }
 
 local PREFIX = "[OttiArena][Server]"
-local MODE = GameModeDefinitions.TeamBattle
-local TEAMS: { TeamName } = { "Red", "Blue" }
+local COMMON = TeamModeDefinitions.Common
 
 local TeamBattleService = {}
 
-local lobbyTeams: { Red: { Member }, Blue: { Member } } = { Red = {}, Blue = {} }
-local lobbyFolder: Instance? = nil
 local arenaFolder: Instance? = nil
-local boards: { Red: TextLabel?, Blue: TextLabel?, Status: TextLabel? } = { Red = nil, Blue = nil, Status = nil }
 local hooks: Hooks? = nil
-local countdownToken = 0
-local countdownRunning = false
+local rulesById: { [string]: Rules } = {}
 local match: Match? = nil
-local matchCounter = 0
-
-local function message(player: Player, text: string, ok: boolean)
-	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Shop, text, ok)
-end
-
-------------------------------------------------------------------------------------------
--- Lobby teams
-------------------------------------------------------------------------------------------
-
-local function findMember(player: Player): (TeamName?, number?)
-	for _, team in TEAMS do
-		for i, member in lobbyTeams[team] do
-			if member.player == player then
-				return (team :: any) :: TeamName, i
-			end
-		end
-	end
-	return nil, nil
-end
-
-local function readyCount(team: TeamName): number
-	local count = 0
-	for _, member in lobbyTeams[team] do
-		if member.ready then
-			count += 1
-		end
-	end
-	return count
-end
-
-local updateCountdown: () -> ()
-
--- True while the player is still choosing a team in the lobby (never for match participants).
-local function inLobbyFlow(player: Player): boolean
-	local state = player:GetAttribute(GameStates.StateAttribute)
-	return GameStates.isInLobby(state) or state == GameStates.Countdown
-end
-
--- Takes the starting players out of the lobby lists WITHOUT touching their attributes: from this
--- moment the match owns their state. (Root cause of the old Team Battle bug: players were removed
--- one by one after the match had started, and every publish() reset the still-listed participants
--- to READY_CHECK / TEAM_SELECTION and cleared their team, so the arena safety net sent them back
--- to the lobby.)
-local function detachForMatch(players: { Player })
-	for _, player in players do
-		local team, index = findMember(player)
-		if team and index then
-			table.remove(lobbyTeams[team], index)
-		end
-	end
-end
-
-local function publish()
-	for _, team in TEAMS do
-		local parts, lines = {}, {}
-		for _, member in lobbyTeams[team] do
-			table.insert(parts, ("%s|%s"):format(member.player.DisplayName, if member.ready then "ready" else ""))
-			table.insert(lines, ("%s  %s"):format(member.player.DisplayName, if member.ready then "READY" else "…"))
-			-- Only lobby players are touched here: match participants are never in these lists
-			member.player:SetAttribute(Config.TeamAttribute, team)
-			member.player:SetAttribute(Config.ReadyAttribute, member.ready)
-			if not countdownRunning and inLobbyFlow(member.player) then
-				member.player:SetAttribute(GameStates.StateAttribute, if member.ready then GameStates.ReadyCheck else GameStates.TeamSelection)
-			end
-		end
-		if lobbyFolder then
-			lobbyFolder:SetAttribute(if team == "Red" then Config.RedRosterAttribute else Config.BlueRosterAttribute, table.concat(parts, ";"))
-		end
-		local board = boards[team]
-		if board then
-			board.Text = if #lines > 0 then table.concat(lines, "\n") else "(empty)"
-		end
-	end
-	updateCountdown()
-end
-
-local function clearLobbyPlayer(player: Player)
-	if player.Parent then
-		player:SetAttribute(Config.TeamAttribute, "")
-		player:SetAttribute(Config.ReadyAttribute, false)
-		local state = player:GetAttribute(GameStates.StateAttribute)
-		if state == GameStates.TeamSelection or state == GameStates.ReadyCheck or state == GameStates.Countdown then
-			player:SetAttribute(GameStates.StateAttribute, GameStates.Lobby)
-		end
-	end
-end
-
-function TeamBattleService.removeFromLobby(player: Player)
-	local team, index = findMember(player)
-	if team and index then
-		table.remove(lobbyTeams[team], index)
-		clearLobbyPlayer(player)
-		publish()
-	end
-end
-
-local function join(player: Player, team: TeamName)
-	if not GameStates.isInLobby(player:GetAttribute(GameStates.StateAttribute)) and player:GetAttribute(GameStates.StateAttribute) ~= GameStates.Countdown then
-		return
-	end
-	local current = findMember(player)
-	if current == team then
-		return
-	end
-	if #lobbyTeams[team] >= MODE.MaxPerTeam then
-		message(player, team .. " team is full (4 players)", false)
-		return
-	end
-	if current then
-		TeamBattleService.removeFromLobby(player)
-	end
-	if hooks then
-		hooks.onJoin(player)
-	end
-	table.insert(lobbyTeams[team], { player = player, ready = false })
-	publish()
-	message(player, ("You joined the %s Gladiators"):format(team), true)
-end
-
-local function toggleReady(player: Player)
-	local team, index = findMember(player)
-	if not team or not index then
-		message(player, "Choose RED or BLUE first", false)
-		return
-	end
-	local member = lobbyTeams[team][index]
-	if not member.ready then
-		local ok, reason = InventoryService.hasValidLoadout(player)
-		if not ok then
-			message(player, reason, false)
-			return
-		end
-	end
-	member.ready = not member.ready
-	publish()
-end
-
-local function autoBalance(player: Player)
-	local moved = 0
-	while math.abs(#lobbyTeams.Red - #lobbyTeams.Blue) > 1 do
-		local from: TeamName = if #lobbyTeams.Red > #lobbyTeams.Blue then "Red" else "Blue"
-		local to: TeamName = if from == "Red" then "Blue" else "Red"
-		local member = table.remove(lobbyTeams[from])
-		if not member then
-			break
-		end
-		member.ready = false
-		table.insert(lobbyTeams[to], member)
-		moved += 1
-	end
-	publish()
-	message(player, if moved > 0 then ("Auto balance moved %d player(s)"):format(moved) else "Teams are already balanced", true)
-end
-
-updateCountdown = function()
-	local currentHooks = hooks
-	local canStart = currentHooks ~= nil and readyCount("Red") >= MODE.MinPerTeam and readyCount("Blue") >= MODE.MinPerTeam and not currentHooks.isArenaBusy()
-	local status = boards.Status
-	if not canStart then
-		if countdownRunning then
-			countdownRunning = false
-			countdownToken += 1
-			if lobbyFolder then
-				lobbyFolder:SetAttribute(Config.TeamCountdownAttribute, 0)
-			end
-			for _, team in TEAMS do
-				for _, member in lobbyTeams[team] do
-					if inLobbyFlow(member.player) then
-						member.player:SetAttribute(GameStates.StateAttribute, if member.ready then GameStates.ReadyCheck else GameStates.TeamSelection)
-					end
-				end
-			end
-		end
-		if status then
-			status.Text = if currentHooks and currentHooks.isArenaBusy() then "Arena busy" else "Need 1 ready player per team"
-		end
-		return
-	end
-	if countdownRunning then
-		return
-	end
-	countdownRunning = true
-	countdownToken += 1
-	local myToken = countdownToken
-	task.spawn(function()
-		for remaining = MODE.StartCountdownSeconds, 1, -1 do
-			if countdownToken ~= myToken then
-				return
-			end
-			if lobbyFolder then
-				lobbyFolder:SetAttribute(Config.TeamCountdownAttribute, remaining)
-			end
-			if status then
-				status.Text = ("Starting in %d"):format(remaining)
-			end
-			for _, team in TEAMS do
-				for _, member in lobbyTeams[team] do
-					if inLobbyFlow(member.player) then
-						member.player:SetAttribute(GameStates.StateAttribute, GameStates.Countdown)
-					end
-				end
-			end
-			task.wait(1)
-		end
-		if countdownToken ~= myToken then
-			return
-		end
-		countdownRunning = false
-		if lobbyFolder then
-			lobbyFolder:SetAttribute(Config.TeamCountdownAttribute, 0)
-		end
-		local red, blue = {}, {}
-		for _, member in lobbyTeams.Red do
-			if member.ready and member.player.Parent then
-				table.insert(red, member.player)
-			end
-		end
-		for _, member in lobbyTeams.Blue do
-			if member.ready and member.player.Parent then
-				table.insert(blue, member.player)
-			end
-		end
-		local startHooks = hooks
-		if #red >= 1 and #blue >= 1 and startHooks then
-			-- Detach first, atomically, then hand the players to the match
-			local all = table.clone(red)
-			table.move(blue, 1, #blue, #all + 1, all)
-			detachForMatch(all)
-			if not startHooks.start(red, blue) then
-				-- The arena was taken meanwhile: put them back into their lobby teams
-				for _, player in red do
-					table.insert(lobbyTeams.Red, { player = player, ready = true })
-				end
-				for _, player in blue do
-					table.insert(lobbyTeams.Blue, { player = player, ready = true })
-				end
-			end
-		end
-		publish()
-	end)
-end
-
-------------------------------------------------------------------------------------------
--- Match runtime
-------------------------------------------------------------------------------------------
-
-local function publishMatch()
-	local folder = arenaFolder
-	local current = match
-	if folder and current then
-		folder:SetAttribute(Config.RedScoreAttribute, current.score.Red)
-		folder:SetAttribute(Config.BlueScoreAttribute, current.score.Blue)
-		folder:SetAttribute(Config.TimeLeftAttribute, current.timeLeft)
-		folder:SetAttribute(Config.SuddenDeathAttribute, current.suddenDeath)
-	end
-end
+local tokenCounter = 0
 
 local function participants(current: Match): { Player }
 	local list = {}
@@ -321,34 +81,84 @@ local function participants(current: Match): { Player }
 	return list
 end
 
+local function addStat(player: Player, attribute: string)
+	player:SetAttribute(attribute, (tonumber(player:GetAttribute(attribute)) or 0) + 1)
+end
+
+local function livingCount(current: Match, team: TeamName): number
+	local count = 0
+	for player, t in current.teamOf do
+		if t == team and current.alive[player] ~= false and player.Parent then
+			count += 1
+		end
+	end
+	return count
+end
+
+local function publish(current: Match)
+	local folder = arenaFolder
+	if folder and match == current then
+		folder:SetAttribute(Config.RedScoreAttribute, current.score.Red)
+		folder:SetAttribute(Config.BlueScoreAttribute, current.score.Blue)
+		folder:SetAttribute(Config.TimeLeftAttribute, math.max(0, current.timeLeft))
+		folder:SetAttribute(Config.SuddenDeathAttribute, current.suddenDeath)
+		folder:SetAttribute(Config.TeamSubModeAttribute, current.subMode)
+		folder:SetAttribute(Config.ScoreTargetAttribute, current.target)
+		folder:SetAttribute(Config.RedAliveAttribute, livingCount(current, "Red"))
+		folder:SetAttribute(Config.BlueAliveAttribute, livingCount(current, "Blue"))
+		folder:SetAttribute(Config.EliminationRoundAttribute, current.round)
+	end
+end
+
 local function broadcast(current: Match, text: string)
 	for _, player in participants(current) do
 		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Elimination, text)
 	end
 end
 
-local function finish(winner: TeamName, reason: string)
-	local current = match
-	if not current or current.finished then
+local function finish(current: Match, winner: string, reason: string)
+	if current.finished or match ~= current then
 		return -- exactly once
 	end
 	current.finished = true
+	current.active = false
 	current.token += 1
-	print(PREFIX, ("Team Battle finished: %s wins (%s) %d-%d"):format(winner, reason, current.score.Red, current.score.Blue))
+	print(PREFIX, ("Team Battle (%s) finished: %s (%s) %d-%d"):format(current.subMode, winner, reason, current.score.Red, current.score.Blue))
 	local currentHooks = hooks
 	if currentHooks then
 		task.spawn(currentHooks.finished, winner, reason)
 	end
 end
 
-local function addStat(player: Player, attribute: string)
-	player:SetAttribute(attribute, (tonumber(player:GetAttribute(attribute)) or 0) + 1)
+local function zoneFor(team: TeamName): PlayerMatchStateService.SpawnZone
+	return if team == "Red" then "RED_TEAM" else "BLUE_TEAM"
+end
+
+local function respawnAll(current: Match)
+	for player, team in current.teamOf do
+		if player.Parent then
+			current.alive[player] = true
+			current.damageLog[player] = nil
+			PlayerMatchStateService.setZone(player, zoneFor(team :: TeamName))
+			player:SetAttribute(Config.ArenaRoleAttribute, "FIGHTER")
+			PlayerCombatService.resetCombatState(player)
+			task.spawn(function()
+				pcall(function()
+					player:LoadCharacterAsync() -- MatchSpawnService places the new character at the team spawn
+				end)
+			end)
+		end
+	end
+	publish(current)
 end
 
 local function onParticipantDied(victim: Player)
 	local current = match
 	if not current or current.finished or not current.teamOf[victim] then
 		return
+	end
+	if current.alive[victim] == false then
+		return -- already out this round
 	end
 	addStat(victim, Config.DeathsAttribute)
 	victim:SetAttribute(GameStates.StateAttribute, GameStates.PlayerDefeated)
@@ -358,33 +168,46 @@ local function onParticipantDied(victim: Player)
 	local killer: Player? = nil
 	local latest = -math.huge
 	for attacker, time in log do
-		if now - time <= MODE.AssistWindowSeconds and current.teamOf[attacker] and current.teamOf[attacker] ~= current.teamOf[victim] and time > latest then
+		if now - time <= COMMON.AssistWindowSeconds and current.teamOf[attacker] and current.teamOf[attacker] ~= current.teamOf[victim] and time > latest then
 			killer, latest = attacker, time
 		end
 	end
-	if not killer then
-		broadcast(current, ("%s was defeated"):format(victim.DisplayName))
-		return
-	end
-	local team: TeamName = current.teamOf[killer]
-	current.score[team] += 1
-	addStat(killer, Config.EliminationsAttribute)
-	for attacker, time in log do
-		if attacker ~= killer and now - time <= MODE.AssistWindowSeconds and current.teamOf[attacker] == team then
-			addStat(attacker, Config.AssistsAttribute)
+	local killerTeam: TeamName? = nil
+	if killer then
+		killerTeam = current.teamOf[killer]
+		addStat(killer, Config.EliminationsAttribute)
+		for attacker, time in log do
+			if attacker ~= killer and now - time <= COMMON.AssistWindowSeconds and current.teamOf[attacker] == killerTeam then
+				addStat(attacker, Config.AssistsAttribute)
+			end
 		end
+		broadcast(current, ("%s eliminated %s"):format(killer.DisplayName, victim.DisplayName))
+	else
+		broadcast(current, ("%s was defeated"):format(victim.DisplayName))
 	end
-	publishMatch()
-	broadcast(current, ("%s eliminated %s"):format(killer.DisplayName, victim.DisplayName))
-	if current.suddenDeath then
-		finish(team, "sudden death")
-	elseif current.score[team] >= MODE.ScoreToWin then
-		finish(team, "score limit")
+	if not current.rules.respawns then
+		-- Out for the rest of the round: respawn in the closed waiting box, follow teammates only
+		current.alive[victim] = false
+		PlayerMatchStateService.setZone(victim, "ELIMINATED")
+		victim:SetAttribute(Config.ArenaRoleAttribute, "ELIMINATED_SPECTATOR")
+	end
+	current.rules.onDeath(current, victim, killerTeam)
+	publish(current)
+	local currentHooks = hooks
+	if currentHooks then
+		task.spawn(currentHooks.statusChanged)
 	end
 end
 
--- Listens for this participant character's death (called for every (re)spawned character by
--- MatchSpawnService, which also places it at the team spawn).
+------------------------------------------------------------------------------------------
+-- API used by MatchService / MatchSpawnService / CombatRules
+------------------------------------------------------------------------------------------
+
+function TeamBattleService.setRules(rules: { [string]: Rules })
+	rulesById = rules
+end
+
+-- Listens for this participant character's death (called for every (re)spawned character).
 function TeamBattleService.hookCharacter(player: Player, character: Model)
 	local current = match
 	if not current or current.finished or not current.teamOf[player] then
@@ -400,10 +223,28 @@ function TeamBattleService.hookCharacter(player: Player, character: Model)
 	end
 end
 
--- True once the arena countdown is over for this match id.
+-- True once the arena countdown (or the round countdown) is over for this match id.
 function TeamBattleService.isActive(matchId: number): boolean
 	local current = match
 	return current ~= nil and current.matchId == matchId and current.active and not current.finished
+end
+
+function TeamBattleService.isAlive(player: Player): boolean
+	local current = match
+	return current ~= nil and current.teamOf[player] ~= nil and current.alive[player] ~= false
+end
+
+function TeamBattleService.livingParticipants(): { Player }
+	local current = match
+	local list = {}
+	if current then
+		for player in current.teamOf do
+			if player.Parent and current.alive[player] ~= false and CombatUtil.getLivingCharacter(player) then
+				table.insert(list, player)
+			end
+		end
+	end
+	return list
 end
 
 function TeamBattleService.recordDamage(victim: Player, attacker: Player?, _amount: number)
@@ -424,28 +265,73 @@ function TeamBattleService.teamOf(player: Player): TeamName?
 	return if current then current.teamOf[player] else nil
 end
 
+-- No friendly fire; only living fighters of opposite teams while the match is active.
 function TeamBattleService.isEnemy(a: Player, b: Player): boolean
 	local current = match
-	if not current or current.finished then
+	if not current or current.finished or not current.active then
 		return false
 	end
 	local ta, tb = current.teamOf[a], current.teamOf[b]
-	return ta ~= nil and tb ~= nil and ta ~= tb
+	return ta ~= nil and tb ~= nil and ta ~= tb and current.alive[a] ~= false and current.alive[b] ~= false
 end
 
--- Registers the teams for an already-teleported match (the arena countdown runs next).
-function TeamBattleService.beginMatch(red: { Player }, blue: { Player }, matchId: number)
-	matchCounter += 1
-	local current: Match = {
+-- Registers the teams (the arena countdown runs next; activate() starts the rules' clock).
+function TeamBattleService.beginMatch(red: { Player }, blue: { Player }, matchId: number, subMode: string)
+	local rules = rulesById[subMode] or rulesById.TIME_BATTLE
+	assert(rules, "TeamBattleService: no rules installed")
+	tokenCounter += 1
+	local current: Match
+	current = {
+		subMode = if rulesById[subMode] then subMode else "TIME_BATTLE",
 		teamOf = {},
 		score = { Red = 0, Blue = 0 },
-		timeLeft = MODE.MatchSeconds,
+		alive = {},
+		timeLeft = -1,
+		target = 0,
 		suddenDeath = false,
-		damageLog = {},
-		finished = false,
-		token = matchCounter,
-		matchId = matchId,
+		round = 0,
+		teamSize = math.max(#red, #blue),
 		active = false,
+		finished = false,
+		token = tokenCounter,
+		matchId = matchId,
+		damageLog = {},
+		rules = rules,
+		finish = function(winner: string, reason: string)
+			finish(current, winner, reason)
+		end,
+		broadcast = function(text: string)
+			broadcast(current, text)
+		end,
+		publish = function()
+			publish(current)
+			local currentHooks = hooks
+			if currentHooks then
+				task.spawn(currentHooks.statusChanged)
+			end
+		end,
+		setActive = function(active: boolean)
+			current.active = active and not current.finished
+			Arena.setSpawnBarriers(not active)
+			local folder = arenaFolder
+			for player in current.teamOf do
+				if player.Parent and current.alive[player] ~= false and CombatUtil.getLivingCharacter(player) then
+					player:SetAttribute(GameStates.StateAttribute, if current.active then GameStates.MatchActive else GameStates.Countdown)
+				end
+			end
+			if folder then
+				folder:SetAttribute(Config.MatchStateAttribute, if current.active then GameStates.MatchActive else GameStates.RoundComplete)
+			end
+		end,
+		livingCount = function(team: TeamName): number
+			return livingCount(current, team)
+		end,
+		respawnAll = function()
+			respawnAll(current)
+		end,
+		stillCurrent = function(): boolean
+			return match == current and not current.finished
+		end,
 	}
 	for _, player in red do
 		current.teamOf[player] = "Red"
@@ -458,23 +344,29 @@ function TeamBattleService.beginMatch(red: { Player }, blue: { Player }, matchId
 		player:SetAttribute(Config.EliminationsAttribute, 0)
 		player:SetAttribute(Config.DeathsAttribute, 0)
 		player:SetAttribute(Config.AssistsAttribute, 0)
+		current.alive[player] = true
 	end
 	match = current
+	rules.setup(current)
 	for player in current.teamOf do
 		if player.Character then
 			task.spawn(TeamBattleService.hookCharacter, player, player.Character)
 		end
 	end
-	publishMatch()
+	publish(current)
 end
 
--- The arena countdown is over: the clock starts and combat counts.
+-- The arena countdown is over: the rules' clock starts and combat counts.
 function TeamBattleService.activate(matchId: number)
 	local current = match
 	if not current or current.matchId ~= matchId or current.active or current.finished then
 		return
 	end
 	current.active = true
+	local onActivated = current.rules.onActivated
+	if onActivated then
+		onActivated(current)
+	end
 	local myToken = current.token
 	task.spawn(function()
 		while match == current and current.token == myToken and not current.finished do
@@ -482,23 +374,14 @@ function TeamBattleService.activate(matchId: number)
 			if match ~= current or current.finished then
 				return
 			end
-			if not current.suddenDeath then
-				current.timeLeft = math.max(0, current.timeLeft - 1)
-				if current.timeLeft == 0 then
-					if current.score.Red ~= current.score.Blue then
-						finish(if current.score.Red > current.score.Blue then "Red" else "Blue", "time")
-					else
-						current.suddenDeath = true
-						broadcast(current, "SUDDEN DEATH: next elimination wins!")
-					end
-				end
-				publishMatch()
-			end
+			current.rules.onSecond(current)
+			publish(current)
 		end
 	end)
+	publish(current)
 end
 
--- A participant left the server during the match.
+-- A participant left the server during the match: the other team wins if one side is empty.
 function TeamBattleService.removeParticipant(player: Player)
 	local current = match
 	if not current or not current.teamOf[player] then
@@ -506,17 +389,20 @@ function TeamBattleService.removeParticipant(player: Player)
 	end
 	local team = current.teamOf[player]
 	current.teamOf[player] = nil
+	current.alive[player] = nil
 	current.damageLog[player] = nil
 	for _, log in current.damageLog do
 		log[player] = nil -- no credit for hitting someone who disconnected
 	end
+	publish(current)
 	for _, other in current.teamOf do
 		if other == team then
+			current.rules.onDeath(current, player, nil) -- e.g. Elimination: the round may end now
 			return
 		end
 	end
 	if not current.finished then
-		finish(if team == "Red" then "Blue" else "Red", "opponents left")
+		finish(current, if team == "Red" then "Blue" else "Red", "opponents left")
 	end
 end
 
@@ -533,11 +419,16 @@ function TeamBattleService.getScore(): (number, number)
 	return 0, 0
 end
 
+function TeamBattleService.getContext(): Context?
+	return match
+end
+
 -- Clears the match runtime (cleanup after the result screen).
 function TeamBattleService.stop()
 	local current = match
 	if current then
 		current.finished = true
+		current.active = false
 		current.token += 1
 		for player in current.teamOf do
 			if player.Parent then
@@ -553,65 +444,11 @@ function TeamBattleService.stop()
 		folder:SetAttribute(Config.TimeLeftAttribute, 0)
 		folder:SetAttribute(Config.SuddenDeathAttribute, false)
 	end
-	updateCountdown()
 end
 
-local function prompt(host: BasePart, action: string, objectText: string, callback: (Player) -> ())
-	local p = Instance.new("ProximityPrompt")
-	p.ActionText = action
-	p.ObjectText = objectText
-	p.HoldDuration = 0.3
-	p.MaxActivationDistance = 9
-	p.RequiresLineOfSight = false
-	p.KeyboardKeyCode = Enum.KeyCode.F
-	p.GamepadKeyCode = Enum.KeyCode.DPadUp
-	p.Parent = host
-	local last: { [Player]: number } = {}
-	p.Triggered:Connect(function(player)
-		local now = os.clock()
-		if last[player] and now - last[player] < 0.6 then
-			return
-		end
-		last[player] = now
-		callback(player)
-	end)
-end
-
-export type LobbyParts = {
-	redPad: BasePart,
-	bluePad: BasePart,
-	ready: BasePart,
-	leave: BasePart,
-	balance: BasePart,
-	redBoard: TextLabel,
-	blueBoard: TextLabel,
-	status: TextLabel,
-}
-
-function TeamBattleService.init(lobby: Instance, arena: Instance, parts: LobbyParts, newHooks: Hooks)
-	lobbyFolder = lobby
+function TeamBattleService.init(arena: Instance, newHooks: Hooks)
 	arenaFolder = arena
 	hooks = newHooks
-	boards.Red, boards.Blue, boards.Status = parts.redBoard, parts.blueBoard, parts.status
-	prompt(parts.redPad, "Join Red", "RED GLADIATORS", function(player)
-		join(player, "Red")
-	end)
-	prompt(parts.bluePad, "Join Blue", "BLUE GLADIATORS", function(player)
-		join(player, "Blue")
-	end)
-	prompt(parts.ready, "Ready / Unready", "TEAM BATTLE", toggleReady)
-	prompt(parts.leave, "Leave Team", "TEAM BATTLE", function(player)
-		TeamBattleService.removeFromLobby(player)
-		message(player, "You left your team", true)
-	end)
-	prompt(parts.balance, "Auto Balance", "TEAM BATTLE", autoBalance)
-	Players.PlayerRemoving:Connect(TeamBattleService.removeFromLobby)
-	publish()
-end
-
--- Re-evaluates the lobby countdown (e.g. when the arena becomes free again).
-function TeamBattleService.refreshLobby()
-	publish()
 end
 
 return TeamBattleService

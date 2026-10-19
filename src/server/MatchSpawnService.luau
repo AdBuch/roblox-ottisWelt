@@ -4,7 +4,8 @@
 --   RED_TEAM /    the player's team spawn in the arena, visible spawn protection, equipment is
 --   BLUE_TEAM     rebuilt by PlayerCombatService, match membership untouched
 --   ZOMBIE_ARENA  the arena start line
---   SPECTATOR     the tribune walkway
+--   SPECTATOR     a spot on the lower or middle tribune walkway (never the imperial box)
+--   ELIMINATED    the closed waiting box below the arena (Elimination: out for the round)
 -- Characters are positioned as soon as their root exists (event-driven, no fixed delays). The
 -- returned boolean tells MatchService that the match owns this character.
 
@@ -46,7 +47,9 @@ function MatchSpawnService.cframeFor(player: Player, zone: PlayerMatchStateServi
 	elseif zone == "ZOMBIE_ARENA" then
 		return Arena.getStartCFrame(index)
 	elseif zone == "SPECTATOR" then
-		return Arena.getTribuneCFrame()
+		return Arena.getTribuneCFrame(player.UserId)
+	elseif zone == "ELIMINATED" then
+		return Arena.getEliminationCFrame(player.UserId)
 	end
 	return nil
 end
@@ -91,6 +94,10 @@ function MatchSpawnService.onCharacterAdded(player: Player, character: Model): b
 		end
 		print(PREFIX, ("Match %d: %s respawned at the %s spawn"):format(matchId, player.Name, if zone == "RED_TEAM" then "Red" else "Blue"))
 	elseif zone == "SPECTATOR" then
+		player:SetAttribute(GameStates.LocationAttribute, "Tribune")
+	elseif zone == "ELIMINATED" then
+		-- Elimination: out for this round, closed waiting box, camera follows teammates only
+		player:SetAttribute(GameStates.StateAttribute, GameStates.PlayerDefeated)
 		player:SetAttribute(GameStates.LocationAttribute, "Tribune")
 	elseif zone == "ZOMBIE_ARENA" then
 		player:SetAttribute(GameStates.LocationAttribute, "Arena")

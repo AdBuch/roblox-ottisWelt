@@ -20,6 +20,9 @@ export type FeedbackKind =
 	| "Leap"
 	| "Dive"
 	| "ComboFail"
+	| "Dodge"
+	| "PerfectBlock"
+	| "Slide"
 
 export type ActionName = "Basic" | "Jump" | "Execute"
 
@@ -101,6 +104,9 @@ local CombatConfig = {
 		Leap = "Leap" :: FeedbackKind, -- (upVelocity, direction, distance) one controlled hop for a combo aerial
 		Dive = "Dive" :: FeedbackKind, -- (direction, distance, downVelocity) aerial descent
 		ComboFail = "ComboFail" :: FeedbackKind, -- (text) NO COMBO / NOT READY
+		Dodge = "Dodge" :: FeedbackKind, -- () a slide dodged an attack
+		PerfectBlock = "PerfectBlock" :: FeedbackKind, -- () a perfect block / parry: counter window open
+		Slide = "Slide" :: FeedbackKind, -- (direction, distance, duration) approved slide: the client moves its character
 	}),
 }
 

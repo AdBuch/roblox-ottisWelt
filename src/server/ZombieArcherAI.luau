@@ -6,7 +6,10 @@
 --   position  keeps 55-85 studs: picks reachable firing spots with line of sight, near the arena
 --             edge, away from melee crowds and other archers; relocates when a player gets closer
 --             than 25 studs; a cornered archer strikes weakly once and retreats
---   shooting  visible bow draw + aim line, then a server-simulated arrow (ProjectileService) with
+--   shooting  sequences (ZombieAttackDefinitions.Archer): single arrow, DOUBLE SHOT (arrow, short
+--             reposition, quick arrow), AIMED SHOT (long draw, accurate, strong; one per target at a
+--             time) and RETREATING FIRE (shove, back away, quick arrow). Every shot: visible bow draw
+--             + aim line, then a server-simulated arrow (ProjectileService) with
 --             slight lead, limited accuracy (worse when wounded/critical) and no wall/floor/shield
 --             penetration. Only a few archers may draw at the same time.
 -- A dead archer never deals delayed damage: its arrows check that the shooter is still alive.
@@ -19,6 +22,7 @@ local Arena = require(script.Parent.Arena)
 local CombatEffects = require(script.Parent.CombatEffects)
 local CombatRules = require(script.Parent.CombatRules)
 local CombatUtil = require(script.Parent.CombatUtil)
+local ZombieAttackDefinitions = require(ReplicatedStorage.Shared.ZombieAttackDefinitions)
 
 type ArcherState = {
 	target: Player?,
@@ -26,12 +30,17 @@ type ArcherState = {
 	nextShotAt: number,
 	goal: Vector3?,
 	nextReposition: number,
+	plan: { string }, -- remaining shots of the current sequence (Normal / Quick / Aimed)
+	planGap: number, -- seconds between the shots of the sequence (short reposition)
+	planRecovery: number,
 }
 
 local ZombieArcherAI = {}
 
 local targetOf: { [any]: Player? } = {}
 local drawing = 0
+local aimedOn: { [Player]: number } = {} -- Aimed Shots being drawn at each player (max 1)
+local ARCHER = ZombieAttackDefinitions.Archer
 
 local function archersOn(player: Player, except: any): number
 	local count = 0
@@ -123,12 +132,45 @@ local function pickFiringSpot(z: any, kit: any, targetRoot: BasePart, character:
 	return best
 end
 
-local function shoot(z: any, kit: any, state: ArcherState, player: Player)
+-- Picks the next shot sequence (Single / DOUBLE SHOT / AIMED SHOT, ZombieAttackDefinitions.Archer).
+local function choosePlan(z: any, state: ArcherState, player: Player, distance: number)
+	local total = 0
+	local options = {}
+	for _, sequence in ARCHER.Sequences :: { any } do
+		local ok = distance >= (sequence.MinDistance or 0)
+		if ok and table.find(sequence.Shots, "Aimed") and (aimedOn[player] or 0) >= ARCHER.MaxAimedPerTarget then
+			ok = false -- never several Aimed Shots at one player at the same time
+		end
+		if ok then
+			total += sequence.Weight
+			table.insert(options, sequence)
+		end
+	end
+	local roll = z.rng:NextNumber() * total
+	local chosen = options[1]
+	for _, sequence in options do
+		roll -= sequence.Weight
+		if roll <= 0 then
+			chosen = sequence
+			break
+		end
+	end
+	state.plan = table.clone(chosen.Shots)
+	state.planGap = chosen.Reposition or 0
+	state.planRecovery = chosen.Recovery or 0
+end
+
+local function shoot(z: any, kit: any, state: ArcherState, player: Player, shotType: string)
 	local def = z.definition
 	local rig = z.rig
+	local shot = (ARCHER.Shots :: any)[shotType] or ARCHER.Shots.Normal
 	z.busy = true
 	drawing += 1
-	local drawSeconds = def.DrawSeconds or 0.75
+	local aimed = shotType == "Aimed"
+	if aimed then
+		aimedOn[player] = (aimedOn[player] or 0) + 1
+	end
+	local drawSeconds = (def.DrawSeconds or 0.75) * shot.Draw
 	-- Telegraph: bow raised, string drawn, glowing outline and a faint aim line
 	kit.setPose(rig.leftShoulder, rig.leftShoulderRest, 90, drawSeconds * 0.4)
 	kit.setPose(rig.rightShoulder, rig.rightShoulderRest, 95, drawSeconds * 0.6)
@@ -140,6 +182,9 @@ local function shoot(z: any, kit: any, state: ArcherState, player: Player)
 	end
 	task.wait(drawSeconds)
 	drawing = math.max(0, drawing - 1)
+	if aimed then
+		aimedOn[player] = math.max(0, (aimedOn[player] or 1) - 1)
+	end
 
 	local fired = false
 	local character, _, targetRoot = CombatUtil.getLivingCharacter(player)
@@ -153,7 +198,7 @@ local function shoot(z: any, kit: any, state: ArcherState, player: Player)
 			local velocity = CombatUtil.flat(targetRoot.AssemblyLinearVelocity)
 			local lead = velocity * (distance / arrowDef.Speed) * (def.LeadFactor or 0.35)
 			local aim = targetRoot.Position + lead + Vector3.new(0, 0.4, 0)
-			local errorRad = math.rad((def.AimErrorDegrees or 2.2) * z.mods.AimErrorMultiplier)
+			local errorRad = math.rad((def.AimErrorDegrees or 2.2) * z.mods.AimErrorMultiplier * shot.Error)
 			local direction = (aim - origin).Unit
 			direction = (CFrame.fromAxisAngle(Vector3.yAxis, z.rng:NextNumber(-1, 1) * errorRad)
 				* CFrame.fromAxisAngle(CombatUtil.flat(direction).Unit:Cross(Vector3.yAxis), z.rng:NextNumber(-0.6, 0.6) * errorRad)):VectorToWorldSpace(direction)
@@ -162,7 +207,7 @@ local function shoot(z: any, kit: any, state: ArcherState, player: Player)
 				direction = direction,
 				speed = arrowDef.Speed,
 				range = math.min(arrowDef.MaxRange, (def.DetectRange or 140) + 20),
-				damage = math.max(1, math.floor((def.ArrowDamage or 8) * CombatConfig.ZombieDamageMultiplier + 0.5)),
+				damage = math.max(1, math.floor((def.ArrowDamage or 8) * shot.Damage * CombatConfig.ZombieDamageMultiplier + 0.5)),
 				isShooterAlive = function()
 					return z.alive
 				end,
@@ -177,14 +222,19 @@ local function shoot(z: any, kit: any, state: ArcherState, player: Player)
 		kit.setPose(rig.leftShoulder, rig.leftShoulderRest, 0, 0.3)
 	end
 	local cooldown = (def.FireCooldown or 2.2) * z.mods.FireCooldownMultiplier * (0.85 + z.rng:NextNumber() * 0.3)
-	state.nextShotAt = os.clock() + (if fired then cooldown else 0.6)
+	if #state.plan > 0 and fired then
+		state.nextShotAt = os.clock() + math.max(0.35, state.planGap) -- next shot of the sequence after a short reposition
+	else
+		state.plan = {}
+		state.nextShotAt = os.clock() + (if fired then cooldown + state.planRecovery else 0.6)
+	end
 	z.busy = false
 end
 
 function ZombieArcherAI.think(z: any, kit: any, now: number)
 	local state: ArcherState = z.archer
 	if not state then
-		state = { target = nil, nextRetarget = 0, nextShotAt = now + 1.2 + z.rng:NextNumber(), goal = nil, nextReposition = 0 }
+		state = { target = nil, nextRetarget = 0, nextShotAt = now + 1.2 + z.rng:NextNumber(), goal = nil, nextReposition = 0, plan = {}, planGap = 0, planRecovery = 0 }
 		z.archer = state
 	end
 	local def = z.definition
@@ -213,7 +263,12 @@ function ZombieArcherAI.think(z: any, kit: any, now: number)
 		if not Arena.isInside(escape, -6) or z.rng:NextNumber() < 0.5 then
 			kit.faceTowards(z, targetRoot.Position)
 			if kit.melee(z, player) then
+				-- RETREATING FIRE: shove, back away, then a quick arrow
 				state.goal = nil
+				state.plan = { "Quick" }
+				state.planGap = 0
+				state.planRecovery = 0
+				state.nextShotAt = math.max(state.nextShotAt, now + 1.4)
 				return
 			end
 		end
@@ -222,7 +277,11 @@ function ZombieArcherAI.think(z: any, kit: any, now: number)
 	-- Shoot when lined up (individual cooldown + global draw limit)
 	if canSee and distance >= 8 and now >= state.nextShotAt and drawing < maxSimultaneousDraws() and now >= z.retreatUntil - 1 then
 		z.humanoid:MoveTo(position)
-		task.spawn(shoot, z, kit, state, player)
+		if #state.plan == 0 then
+			choosePlan(z, state, player, distance)
+		end
+		local shotType = table.remove(state.plan, 1) or "Normal"
+		task.spawn(shoot, z, kit, state, player, shotType)
 		return
 	end
 

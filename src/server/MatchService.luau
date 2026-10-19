@@ -1,16 +1,17 @@
 --!strict
--- The arena match state machine (one match per server) and every player's GameState.
+-- The arena match runtime of ONE reserved Arena server (one match per server) and every player's
+-- GameState in it. ArenaMatchService starts exactly one match after admission; the result
+-- sequence ends with `hooks.ended`, which returns everyone to the Hub (ArenaReturnService).
 --
---   Match:  idle (LOBBY) -> COUNTDOWN -> MATCH_ACTIVE <-> ROUND_COMPLETE -> VICTORY | MATCH_COMPLETE
---           -> CLEANUP -> idle            (published as "MatchState" on the arena folder)
+--   Match:  COUNTDOWN -> MATCH_ACTIVE <-> ROUND_COMPLETE -> VICTORY | MATCH_COMPLETE -> CLEANUP
+--           (published as "MatchState" on the arena folder)
 --   Solo    : one fighter, rounds 1-2-4-8-16-32, then Round 7 (Otti), death ends the run.
---   Co-op   : 1-4 ready party members, scaled rounds, shared progression; the dead wait on the
---             tribune and return with 60 % health after a completed round; a full wipe ends it.
---             Round 7 is the Otti boss (OttiBossService); his defeat pays the boss reward once.
---   Team    : Red vs Blue via TeamBattleService; rewards 80 / 25 Aura.
--- Cleanup always removes zombies, Otti, projectiles, limbs, effects, shells and match attributes, returns
--- everybody to the lobby and frees the arena for the next match.
--- Also installs CombatRules (who may hit whom) and wires the lobby prompts.
+--   Co-op   : 1-4 fighters, scaled rounds, shared progression; the dead wait on the tribune and
+--             return with 60 % health after a completed round; a full wipe ends it.
+--   Team    : Red vs Blue via TeamBattleService with a submode (Time / First to / Elimination).
+-- Spectators (admitted by ticket) watch from the tribunes and never take part.
+-- Rewards are paid exactly once per match (Aura + saved statistics), by the server only.
+-- Also installs CombatRules (who may hit whom).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -19,25 +20,26 @@ local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
 local Config = require(ReplicatedStorage.Shared.Config)
 local GameModeDefinitions = require(ReplicatedStorage.Shared.GameModeDefinitions)
 local GameStates = require(ReplicatedStorage.Shared.GameStates)
+local OttiBossConfig = require(ReplicatedStorage.Shared.OttiBossConfig)
+local TeamModeDefinitions = require(ReplicatedStorage.Shared.TeamModeDefinitions)
 local Arena = require(script.Parent.Arena)
 local AuraService = require(script.Parent.AuraService)
 local CombatEffects = require(script.Parent.CombatEffects)
 local CombatRules = require(script.Parent.CombatRules)
 local CombatUtil = require(script.Parent.CombatUtil)
+local DamageEffectsService = require(script.Parent.DamageEffectsService)
 local InventoryService = require(script.Parent.InventoryService)
-local LobbyService = require(script.Parent.LobbyService)
-local OttiBossConfig = require(ReplicatedStorage.Shared.OttiBossConfig)
 local MatchSpawnService = require(script.Parent.MatchSpawnService)
+local MomentumService = require(script.Parent.MomentumService)
+local MomentumConfig = require(ReplicatedStorage.Shared.MomentumConfig)
 local OttiBossService = require(script.Parent.OttiBossService)
 local OttiSpectatorService = require(script.Parent.OttiSpectatorService)
-local PartyService = require(script.Parent.PartyService)
 local PlayerCombatService = require(script.Parent.PlayerCombatService)
 local PlayerMatchStateService = require(script.Parent.PlayerMatchStateService)
 local ProjectileService = require(script.Parent.ProjectileService)
 local Remotes = require(script.Parent.Remotes)
 local ShellService = require(script.Parent.ShellService)
 local TeamBattleService = require(script.Parent.TeamBattleService)
-local TrainingService = require(script.Parent.TrainingService)
 local VictoryService = require(script.Parent.VictoryService)
 local WaveService = require(script.Parent.WaveService)
 local ZombieService = require(script.Parent.ZombieService)
@@ -47,7 +49,13 @@ type Location = GameStates.Location
 type ModeId = GameModeDefinitions.ModeId
 
 local PREFIX = "[OttiArena][Server]"
-local PROMPT_COOLDOWN = 1.2
+
+export type Result = { reason: string, victory: boolean, mode: ModeId }
+
+export type Hooks = {
+	ended: (result: Result) -> (), -- result sequence over: return everybody to the Hub
+	statusChanged: () -> (), -- publish the registry record now (round / boss / score changes)
+}
 
 type Match = {
 	id: number,
@@ -55,16 +63,16 @@ type Match = {
 	participants: { Player },
 	alive: { [Player]: boolean }, -- zombie modes: currently fighting (not waiting to revive)
 	ended: boolean,
-	bossRewarded: boolean, -- the Otti reward is paid at most once per match
+	rewarded: boolean, -- match rewards are paid at most once
+	bossRewarded: boolean,
 }
 
 local MatchService = {}
 
-local lobby: LobbyService.LobbyLayout? = nil
 local arenaFolder: Instance? = nil
+local hooks: Hooks? = nil
 local match: Match? = nil
-local matchCounter = 0
-local lastPromptUse: { [Player]: number } = {}
+local finished = false -- this server's one match is over (no second match on a reserved server)
 
 ------------------------------------------------------------------------------------------
 -- Helpers
@@ -88,34 +96,14 @@ local function setMatchState(state: GameState)
 	if arenaFolder then
 		arenaFolder:SetAttribute(Config.MatchStateAttribute, state)
 	end
+	local current = hooks
+	if current then
+		task.spawn(current.statusChanged)
+	end
 end
 
 local function message(player: Player, text: string, ok: boolean)
 	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Shop, text, ok)
-end
-
-local function debounced(player: Player): boolean
-	local now = os.clock()
-	local last = lastPromptUse[player]
-	if last and now - last < PROMPT_COOLDOWN then
-		return true
-	end
-	lastPromptUse[player] = now
-	return false
-end
-
-local function teleport(player: Player, cframe: CFrame)
-	local character = player.Character
-	local root = character and character:FindFirstChild("HumanoidRootPart")
-	if character and root and root:IsA("BasePart") then
-		root.AssemblyLinearVelocity = Vector3.zero
-		character:PivotTo(cframe)
-	end
-end
-
-local function lobbyCFrame(): CFrame
-	local layout = lobby :: LobbyService.LobbyLayout
-	return layout.spawnCFrame + Vector3.new(math.random(-3, 3), 3.5, math.random(-3, 3))
 end
 
 local function isParticipant(player: Player): boolean
@@ -144,52 +132,26 @@ local function publishPlayers()
 	folder:SetAttribute(Config.PlayersTotalAttribute, total)
 end
 
-local function updateGateSigns()
-	local layout = lobby
-	if not layout then
-		return
-	end
-	local current = match
-	local busy = current ~= nil
-	layout.soloLabel.Text = if busy then "ARENA BUSY · watch from the TRIBUNES" else "ARENA READY"
-	layout.soloLabel.TextColor3 = if busy then Color3.fromRGB(255, 130, 110) else Color3.fromRGB(140, 255, 140)
-	local prompt = layout.soloGate:FindFirstChildOfClass("ProximityPrompt")
-	if prompt then
-		prompt.Enabled = not busy -- the gate closes during an active match
-	end
+local function showResult(text: string)
 	if arenaFolder then
-		arenaFolder:SetAttribute(Config.ArenaBusyAttribute, busy)
-		arenaFolder:SetAttribute(Config.MatchModeAttribute, if current then current.mode else "")
+		arenaFolder:SetAttribute(Config.ResultAttribute, text)
 	end
 end
 
 ------------------------------------------------------------------------------------------
--- Cleanup
+-- End of the match
 ------------------------------------------------------------------------------------------
 
--- Sends a player back to the lobby, but only if they still belong to `matchId` (0 = no match,
--- e.g. a spectator). An old cleanup can never move a player who already joined a newer match.
-local function returnToLobby(player: Player, matchId: number)
-	if not PlayerMatchStateService.release(player, matchId) then
-		return
-	end
-	PlayerCombatService.resetCombatState(player)
-	setState(player, GameStates.Lobby, "Lobby")
-	local _, humanoid = CombatUtil.getLivingCharacter(player)
-	if humanoid then
-		teleport(player, lobbyCFrame())
-	end
-end
-
--- Ends the current match and resets everything. Safe to call more than once.
-local function cleanupMatch(reason: string)
+-- Stops everything; fighters wait on the tribune until the return teleport. Safe to call twice.
+local function cleanupMatch(reason: string, victory: boolean)
 	local current = match
 	if not current or current.ended then
 		return
 	end
 	current.ended = true
+	finished = true
 	setMatchState(GameStates.Cleanup)
-	print(PREFIX, ("Match %d (%s) completed and cleaned up: %s"):format(current.id, current.mode, reason))
+	print(PREFIX, ("Match %d (%s) completed: %s"):format(current.id, current.mode, reason))
 
 	WaveService.abort()
 	OttiBossService.stop()
@@ -203,22 +165,19 @@ local function cleanupMatch(reason: string)
 
 	for _, player in current.participants do
 		if player.Parent then
-			returnToLobby(player, current.id)
+			PlayerCombatService.resetCombatState(player)
+			PlayerMatchStateService.setZone(player, "SPECTATOR")
+			MomentumService.reset(player, 0)
+			setState(player, GameStates.MatchComplete, "Tribune")
+			if CombatUtil.getLivingCharacter(player) then
+				MatchSpawnService.place(player)
+			end
 		end
 	end
-	match = nil
-	if arenaFolder then
-		arenaFolder:SetAttribute(Config.ResultAttribute, "")
-	end
 	publishPlayers()
-	updateGateSigns()
-	setMatchState(GameStates.Lobby)
-	TeamBattleService.refreshLobby()
-end
-
-local function showResult(text: string)
-	if arenaFolder then
-		arenaFolder:SetAttribute(Config.ResultAttribute, text)
+	local currentHooks = hooks
+	if currentHooks then
+		task.spawn(currentHooks.ended, { reason = reason, victory = victory, mode = current.mode })
 	end
 end
 
@@ -241,6 +200,17 @@ local function endZombieMatch(current: Match, victory: boolean, resultText: stri
 		return
 	end
 	setMatchState(if victory then GameStates.Victory else GameStates.MatchComplete)
+	if not current.rewarded then
+		current.rewarded = true
+		for _, player in current.participants do
+			if player.Parent then
+				InventoryService.addStat(player, "zombieRuns", 1)
+				if victory then
+					InventoryService.addStat(player, if current.mode == "Solo" then "soloVictories" else "coopVictories", 1)
+				end
+			end
+		end
+	end
 	for _, player in current.participants do
 		if player.Parent then
 			if victory then
@@ -261,7 +231,7 @@ local function endZombieMatch(current: Match, victory: boolean, resultText: stri
 	local delay = if victory then GameModeDefinitions.VictoryReturnSeconds else GameModeDefinitions.DefeatReturnSeconds
 	task.delay(delay, function()
 		if match == current then
-			cleanupMatch(if victory then "victory" else "defeat")
+			cleanupMatch(if victory then "victory" else "defeat", victory)
 		end
 	end)
 end
@@ -280,6 +250,7 @@ local function reviveWaitingPlayers(current: Match)
 				MatchSpawnService.place(player, index)
 				humanoid.Health = math.floor(humanoid.MaxHealth * CombatConfig.CoopRespawnHealthFraction)
 				setState(player, GameStates.RoundComplete, "Arena")
+				player:SetAttribute(Config.ArenaRoleAttribute, "FIGHTER")
 				message(player, "Back in the fight with 60% health!", true)
 			end
 		end
@@ -293,8 +264,8 @@ local function onZombieParticipantDied(current: Match, player: Player)
 	end
 	current.alive[player] = false
 	setState(player, GameStates.PlayerDefeated)
-	-- Co-op: respawn on the tribune and wait for the round; Solo: the run is over
-	PlayerMatchStateService.setZone(player, if current.mode == "Coop" then "SPECTATOR" else "LOBBY")
+	-- Co-op: respawn on the tribune and wait for the round; Solo: the run is over (tribune too)
+	PlayerMatchStateService.setZone(player, "SPECTATOR")
 	OttiSpectatorService.react("PlayerDefeated")
 	publishPlayers()
 	if #livingParticipants(current) == 0 then
@@ -305,7 +276,7 @@ local function onZombieParticipantDied(current: Match, player: Player)
 	end
 end
 
--- Otti defeated: boss reward exactly once, then the victory screen and the return to the lobby.
+-- Otti defeated: boss reward exactly once, then the victory screen and the return to the Hub.
 local function onBossDefeated(current: Match, damageBy: { [Player]: number })
 	if match ~= current or current.ended or current.bossRewarded then
 		return
@@ -320,6 +291,9 @@ local function onBossDefeated(current: Match, damageBy: { [Player]: number })
 				table.insert(rewards, { player = player, amount = OttiBossConfig.CoopSurvivorReward })
 			elseif (damageBy[player] or 0) > 0 then
 				table.insert(rewards, { player = player, amount = OttiBossConfig.CoopContributorReward })
+			end
+			if current.alive[player] or (damageBy[player] or 0) > 0 then
+				InventoryService.addStat(player, "bossDefeats", 1)
 			end
 		end
 	end
@@ -373,21 +347,19 @@ local function startBossRound(current: Match)
 	})
 end
 
-local function startZombieMatch(mode: ModeId, players: { Player }): boolean
-	if match then
-		for _, player in players do
-			message(player, "The arena is busy. Watch from the TRIBUNES!", false)
-		end
+local function newMatch(mode: ModeId, players: { Player }): Match
+	return { id = 1, mode = mode, participants = players, alive = {}, ended = false, rewarded = false, bossRewarded = false }
+end
+
+-- Starts the zombie run for the admitted fighters ("Solo" or "Coop").
+function MatchService.startZombies(mode: ModeId, players: { Player }): boolean
+	if match or finished then
 		return false
 	end
 	local valid = {}
 	for _, player in players do
-		local ok, reason = InventoryService.hasValidLoadout(player)
-		local _, humanoid = CombatUtil.getLivingCharacter(player)
-		if ok and humanoid and GameStates.isInLobby(getState(player)) then
+		if player.Parent then
 			table.insert(valid, player)
-		elseif not ok then
-			message(player, reason, false)
 		end
 	end
 	local definition = if mode == "Coop" then GameModeDefinitions.Coop else GameModeDefinitions.Solo
@@ -395,10 +367,13 @@ local function startZombieMatch(mode: ModeId, players: { Player }): boolean
 		return false
 	end
 
-	matchCounter += 1
-	local current: Match = { id = matchCounter, mode = mode, participants = valid, alive = {}, ended = false, bossRewarded = false }
+	local current = newMatch(mode, valid)
 	match = current
-	updateGateSigns()
+	DamageEffectsService.newMatch() -- sand stains of an earlier match fade, intensity resets
+	if arenaFolder then
+		arenaFolder:SetAttribute(Config.MatchModeAttribute, mode)
+		arenaFolder:SetAttribute(Config.ArenaBusyAttribute, true)
+	end
 	setMatchState(GameStates.Countdown)
 	local shellCount = if mode == "Coop"
 		then math.min(GameModeDefinitions.Coop.MaxShellCount, GameModeDefinitions.Coop.BaseShellCount + GameModeDefinitions.Coop.ShellsPerPlayer * #valid)
@@ -406,19 +381,19 @@ local function startZombieMatch(mode: ModeId, players: { Player }): boolean
 	ShellService.setActiveCount(shellCount)
 
 	for index, player in valid do
-		PartyService.remove(player)
-		TeamBattleService.removeFromLobby(player)
 		current.alive[player] = true
 		AuraService.resetRunStats(player)
 		PlayerCombatService.resetCombatState(player)
-		PlayerCombatService.refreshEquipment(player) -- auto-equip the chosen weapon and shield
+		MomentumService.reset(player, if mode == "Coop" then MomentumConfig.Start.Coop else MomentumConfig.Start.Solo)
+		PlayerCombatService.refreshEquipment(player) -- the saved weapon, shield and armor
 		PlayerMatchStateService.assign(player, current.id, mode, "", "ZOMBIE_ARENA")
+		player:SetAttribute(Config.ArenaRoleAttribute, "FIGHTER")
 		setState(player, GameStates.Countdown, "Arena")
 		MatchSpawnService.place(player, index)
 	end
 	OttiSpectatorService.begin() -- Otti watches from the imperial box
 	publishPlayers()
-	print(PREFIX, ("Match %d: %s started with %d player(s), %d shells"):format(current.id, mode, #valid, shellCount))
+	print(PREFIX, ("Match: %s started with %d player(s), %d shells"):format(mode, #valid, shellCount))
 
 	task.delay(0.5, function()
 		if match ~= current or current.ended then
@@ -471,7 +446,11 @@ local function startZombieMatch(mode: ModeId, players: { Player }): boolean
 						table.insert(rewarded, player)
 					end
 				end
-				AuraService.awardZombieKill(zombie.definition.Coins, if killer and isParticipant(killer) then killer else nil, rewarded, assist)
+				local validKiller = if killer and isParticipant(killer) then killer else nil
+				if validKiller then
+					InventoryService.addStat(validKiller, "zombieKills", 1)
+				end
+				AuraService.awardZombieKill(zombie.definition.Coins, validKiller, rewarded, assist)
 			end,
 		})
 	end)
@@ -482,11 +461,63 @@ end
 -- Team Battle
 ------------------------------------------------------------------------------------------
 
--- Team Battle start (also one-versus-one: one player per team). Steps, all under one match id:
---   assign id + team -> COUNTDOWN -> protected team spawns behind closed barriers -> 5 s arena
---   countdown -> MATCH_ACTIVE, barriers open. Participants never pass through the lobby.
-local function startTeamMatch(red: { Player }, blue: { Player }): boolean
-	if match then
+local function onTeamMatchFinished(winner: string, reason: string)
+	local current = match
+	if not current or current.mode ~= "TeamBattle" or current.ended then
+		return
+	end
+	local red, blue = TeamBattleService.getScore()
+	showResult(if winner == "Draw" then ("DRAW  %d - %d"):format(red, blue) else ("%s GLADIATORS WIN  %d - %d"):format(winner:upper(), red, blue))
+	local winners, losers, draws = {}, {}, {}
+	for _, player in TeamBattleService.getParticipants() do
+		if player.Parent then
+			if winner == "Draw" then
+				table.insert(draws, player)
+				setState(player, GameStates.MatchComplete)
+			elseif TeamBattleService.teamOf(player) == winner then
+				table.insert(winners, player)
+				setState(player, GameStates.Victory)
+			else
+				table.insert(losers, player)
+				setState(player, GameStates.MatchComplete)
+			end
+		end
+	end
+	if not current.rewarded then
+		current.rewarded = true
+		local common = TeamModeDefinitions.Common
+		AuraService.awardMatchResult(winners, losers, common.WinAura, common.LoseAura)
+		if #draws > 0 then
+			AuraService.awardMatchResult(draws, {}, common.DrawAura, 0)
+		end
+		for _, player in TeamBattleService.getParticipants() do
+			if player.Parent then
+				InventoryService.addStat(player, "teamMatches", 1)
+				InventoryService.addStat(player, "eliminations", tonumber(player:GetAttribute(Config.EliminationsAttribute)) or 0)
+				InventoryService.addStat(player, "deaths", tonumber(player:GetAttribute(Config.DeathsAttribute)) or 0)
+			end
+		end
+		for _, player in winners do
+			InventoryService.addStat(player, "teamVictories", 1)
+		end
+	end
+	setMatchState(GameStates.Victory)
+	if arenaFolder then
+		VictoryService.play(arenaFolder)
+	end
+	print(PREFIX, ("Team Battle result: %s (%s)"):format(winner, reason))
+	task.delay(TeamModeDefinitions.Common.ResultSeconds, function()
+		if match == current then
+			cleanupMatch("team battle finished", winner ~= "Draw")
+		end
+	end)
+end
+
+-- Team Battle start (1v1 .. 4v4). Steps, all under one match:
+--   teams assigned -> COUNTDOWN -> protected team spawns behind closed barriers -> arena
+--   countdown -> MATCH_ACTIVE, barriers open. The submode rules live in TeamBattleService.
+function MatchService.startTeams(red: { Player }, blue: { Player }, subMode: string): boolean
+	if match or finished then
 		return false
 	end
 	local teams: { { team: string, zone: PlayerMatchStateService.SpawnZone, players: { Player } } } = {
@@ -496,7 +527,7 @@ local function startTeamMatch(red: { Player }, blue: { Player }): boolean
 	local all = {}
 	for i, list in { red, blue } do
 		for _, player in list do
-			if player.Parent and CombatUtil.getLivingCharacter(player) then
+			if player.Parent then
 				table.insert(all, player)
 				table.insert(teams[i].players, player)
 			end
@@ -505,34 +536,38 @@ local function startTeamMatch(red: { Player }, blue: { Player }): boolean
 	if #teams[1].players == 0 or #teams[2].players == 0 then
 		return false
 	end
-	matchCounter += 1
-	local current: Match = { id = matchCounter, mode = "TeamBattle", participants = all, alive = {}, ended = false, bossRewarded = false }
+	local current = newMatch("TeamBattle", all)
 	match = current
-	print(PREFIX, ("Match %d created: Team Battle %d v %d"):format(current.id, #teams[1].players, #teams[2].players))
-	updateGateSigns()
+	DamageEffectsService.newMatch()
+	if arenaFolder then
+		arenaFolder:SetAttribute(Config.MatchModeAttribute, "TeamBattle")
+		arenaFolder:SetAttribute(Config.ArenaBusyAttribute, true)
+	end
+	print(PREFIX, ("Match: %s %d v %d"):format(subMode, #teams[1].players, #teams[2].players))
 	setMatchState(GameStates.Countdown)
-	ShellService.setActiveCount(if GameModeDefinitions.TeamBattle.ShellsEnabled then GameModeDefinitions.TeamBattle.ShellCount else 0)
+	local common = TeamModeDefinitions.Common
+	ShellService.setActiveCount(if common.ShellsEnabled then common.ShellCount else 0)
 	Arena.setSpawnBarriers(true)
 	for _, entry in teams do
 		for index, player in entry.players do
-			PartyService.remove(player)
 			current.alive[player] = true
 			AuraService.resetRunStats(player)
+			MomentumService.reset(player, if subMode == "ELIMINATION" then MomentumConfig.Start.EliminationRound else MomentumConfig.Start.TeamBattle)
 			PlayerMatchStateService.assign(player, current.id, "TeamBattle", entry.team, entry.zone)
+			player:SetAttribute(Config.ArenaRoleAttribute, "FIGHTER")
 			PlayerCombatService.resetCombatState(player)
 			PlayerCombatService.refreshEquipment(player)
 			setState(player, GameStates.Countdown, "Arena")
 			MatchSpawnService.place(player, index)
-			PlayerCombatService.setSpawnProtection(player, GameModeDefinitions.TeamBattle.ArenaCountdownSeconds + CombatConfig.SpawnProtectionSeconds)
-			print(PREFIX, ("Match %d: %s placed at the %s spawn"):format(current.id, player.Name, entry.team))
+			PlayerCombatService.setSpawnProtection(player, common.ArenaCountdownSeconds + common.SpawnProtectionSeconds)
 		end
 	end
-	TeamBattleService.beginMatch(teams[1].players, teams[2].players, current.id)
+	TeamBattleService.beginMatch(teams[1].players, teams[2].players, current.id, subMode)
 	publishPlayers()
 
 	-- Arena countdown: barriers closed, no combat (COUNTDOWN is not a fighting state)
 	task.spawn(function()
-		for remaining = GameModeDefinitions.TeamBattle.ArenaCountdownSeconds, 1, -1 do
+		for remaining = common.ArenaCountdownSeconds, 1, -1 do
 			if match ~= current or current.ended then
 				return
 			end
@@ -555,46 +590,24 @@ local function startTeamMatch(red: { Player }, blue: { Player }): boolean
 			end
 		end
 		TeamBattleService.activate(current.id)
-		print(PREFIX, ("Match %d started: FIGHT"):format(current.id))
+		print(PREFIX, "Team match started: FIGHT")
 	end)
 	return true
 end
 
-local function onTeamMatchFinished(winner: TeamBattleService.TeamName, reason: string)
-	local current = match
-	if not current or current.mode ~= "TeamBattle" or current.ended then
-		return
-	end
-	local red, blue = TeamBattleService.getScore()
-	showResult(("%s GLADIATORS WIN  %d - %d"):format(winner:upper(), red, blue))
-	local winners, losers = {}, {}
-	for _, player in TeamBattleService.getParticipants() do
-		if player.Parent then
-			if TeamBattleService.teamOf(player) == winner then
-				table.insert(winners, player)
-				setState(player, GameStates.Victory)
-			else
-				table.insert(losers, player)
-				setState(player, GameStates.MatchComplete)
-			end
-		end
-	end
-	AuraService.awardMatchResult(winners, losers, GameModeDefinitions.TeamBattle.WinAura, GameModeDefinitions.TeamBattle.LoseAura)
-	setMatchState(GameStates.Victory)
-	if arenaFolder then
-		VictoryService.play(arenaFolder)
-	end
-	print(PREFIX, ("Team Battle result: %s (%s)"):format(winner, reason))
-	task.delay(GameModeDefinitions.TeamBattle.ResultSeconds, function()
-		if match == current then
-			cleanupMatch("team battle finished")
-		end
-	end)
-end
+------------------------------------------------------------------------------------------
+-- Spectators and characters
+------------------------------------------------------------------------------------------
 
-------------------------------------------------------------------------------------------
--- Characters and players
-------------------------------------------------------------------------------------------
+-- An admitted spectator (or a fighter whose match ended / never started) on the tribunes.
+function MatchService.addSpectator(player: Player)
+	PlayerCombatService.resetCombatState(player)
+	PlayerMatchStateService.setSpectator(player, true)
+	PlayerMatchStateService.setZone(player, "SPECTATOR")
+	player:SetAttribute(Config.ArenaRoleAttribute, "SPECTATOR")
+	setState(player, GameStates.Spectating, "Tribune")
+	MatchSpawnService.place(player)
+end
 
 local function hookZombieModeDeath(player: Player, character: Model)
 	local humanoid = character:WaitForChild("Humanoid", 10)
@@ -608,30 +621,21 @@ local function hookZombieModeDeath(player: Player, character: Model)
 	end
 end
 
--- Every (re)spawn is decided by the authoritative match state (ExpectedSpawnZone), never by
--- guessing from timers: lobby characters get the lobby state, match characters are placed by
--- MatchSpawnService (team spawn, tribune, arena).
+-- Every (re)spawn is placed by the authoritative zone (ExpectedSpawnZone), never by guessing.
 local function onCharacterAdded(player: Player, character: Model)
-	task.spawn(hookZombieModeDeath, player, character) -- every character, including revived ones
+	task.spawn(hookZombieModeDeath, player, character)
 	local zone = PlayerMatchStateService.getZone(player)
-	local current = match
-	local inThisMatch = current ~= nil and not current.ended and PlayerMatchStateService.getMatchId(player) == current.id
-	if zone ~= "LOBBY" and (inThisMatch or PlayerMatchStateService.getMatchId(player) == 0) then
-		if zone == "SPECTATOR" and inThisMatch then
-			setState(player, GameStates.PlayerDefeated, "Tribune") -- co-op: waits for the round
-		end
-		MatchSpawnService.onCharacterAdded(player, character)
-		return
+	if zone == "SPECTATOR" and isParticipant(player) and getState(player) == GameStates.PlayerDefeated then
+		setState(player, GameStates.PlayerDefeated, "Tribune") -- co-op: waits for the round
 	end
-	if zone ~= "LOBBY" then
-		-- Stale state from a match that no longer exists: release it cleanly
-		PlayerMatchStateService.release(player, PlayerMatchStateService.getMatchId(player))
+	if zone == "LOBBY" then
+		-- No lobby in the Arena place: anybody without a zone waits on the tribune
+		PlayerMatchStateService.setZone(player, "SPECTATOR")
 	end
-	setState(player, GameStates.Lobby, "Lobby")
+	MatchSpawnService.onCharacterAdded(player, character)
 end
 
 local function onPlayerRemoving(player: Player)
-	lastPromptUse[player] = nil
 	local current = match
 	if not current or current.ended or not table.find(current.participants, player) then
 		return
@@ -646,61 +650,8 @@ local function onPlayerRemoving(player: Player)
 		end
 		publishPlayers()
 		if #livingParticipants(current) == 0 then
-			cleanupMatch("all fighters left")
+			cleanupMatch("all fighters left", false)
 		end
-	end
-end
-
-------------------------------------------------------------------------------------------
--- Lobby prompts
-------------------------------------------------------------------------------------------
-
-local function addPrompt(host: BasePart, actionText: string, objectText: string, holdDuration: number, onTriggered: (Player) -> ())
-	local prompt = Instance.new("ProximityPrompt")
-	prompt.ActionText = actionText
-	prompt.ObjectText = objectText
-	prompt.HoldDuration = holdDuration
-	prompt.MaxActivationDistance = 10
-	prompt.RequiresLineOfSight = false
-	prompt.KeyboardKeyCode = Enum.KeyCode.F
-	prompt.GamepadKeyCode = Enum.KeyCode.DPadUp
-	prompt.Parent = host
-	prompt.Triggered:Connect(function(player)
-		if not debounced(player) then
-			onTriggered(player)
-		end
-	end)
-end
-
-local function startSolo(player: Player)
-	if not GameStates.isInLobby(getState(player)) then
-		return
-	end
-	if PartyService.isMember(player) then
-		PartyService.remove(player)
-	end
-	TeamBattleService.removeFromLobby(player)
-	startZombieMatch("Solo", { player })
-end
-
-local function goToTribune(player: Player)
-	if not GameStates.isInLobby(getState(player)) then
-		return
-	end
-	PartyService.remove(player)
-	TeamBattleService.removeFromLobby(player)
-	PlayerCombatService.resetCombatState(player)
-	PlayerMatchStateService.setSpectator(player, true)
-	setState(player, GameStates.Spectating, "Tribune")
-	MatchSpawnService.place(player)
-end
-
-local function leaveTribune(player: Player)
-	local state = getState(player)
-	if state == GameStates.Spectating then
-		returnToLobby(player, 0)
-	elseif state == GameStates.PlayerDefeated and not isParticipant(player) then
-		returnToLobby(player, PlayerMatchStateService.getMatchId(player))
 	end
 end
 
@@ -712,18 +663,78 @@ function MatchService.isBusy(): boolean
 	return match ~= nil
 end
 
-function MatchService.getLobbyCFrame(): CFrame
-	return lobbyCFrame()
+function MatchService.isFinished(): boolean
+	return finished
 end
 
 function MatchService.getState(player: Player): unknown
 	return getState(player)
 end
 
-function MatchService.init(layout: LobbyService.LobbyLayout, folder: Instance)
-	lobby = layout
+function MatchService.isFighter(player: Player): boolean
+	return isParticipant(player)
+end
+
+-- Fighters of the running match that are still connected.
+function MatchService.fighters(): { Player }
+	local current = match
+	local list = {}
+	if current then
+		for _, player in current.participants do
+			if player.Parent then
+				table.insert(list, player)
+			end
+		end
+	end
+	return list
+end
+
+-- Living fighters (zombie modes: not waiting to revive; team modes: alive this round).
+function MatchService.livingFighters(): { Player }
+	local current = match
+	if not current or current.ended then
+		return {}
+	end
+	if current.mode == "TeamBattle" then
+		return TeamBattleService.livingParticipants()
+	end
+	return livingParticipants(current)
+end
+
+function MatchService.getMode(): string
+	local current = match
+	return if current then current.mode else ""
+end
+
+-- Aborts a match that can't run (e.g. a team arrived incomplete): no rewards.
+function MatchService.cancel(reason: string)
+	if match then
+		cleanupMatch(reason, false)
+	else
+		finished = true
+		local currentHooks = hooks
+		if currentHooks then
+			task.spawn(currentHooks.ended, { reason = reason, victory = false, mode = "Solo" :: ModeId })
+		end
+	end
+end
+
+-- Mock mode only (Studio): allow a fresh match on the same server after the previous one.
+function MatchService.resetForMock()
+	match = nil
+	finished = false
+	if arenaFolder then
+		arenaFolder:SetAttribute(Config.ResultAttribute, "")
+		arenaFolder:SetAttribute(Config.MatchModeAttribute, "")
+		arenaFolder:SetAttribute(Config.ArenaBusyAttribute, false)
+	end
+	publishPlayers()
+end
+
+function MatchService.init(folder: Instance, newHooks: Hooks)
 	arenaFolder = folder
-	Players.RespawnTime = GameModeDefinitions.TeamBattle.RespawnSeconds
+	hooks = newHooks
+	Players.RespawnTime = TeamModeDefinitions.Common.RespawnSeconds
 
 	CombatRules.install({
 		getContext = function(player: Player)
@@ -731,19 +742,12 @@ function MatchService.init(layout: LobbyService.LobbyLayout, folder: Instance)
 			local current = match
 			if current and not current.ended and GameStates.isFighter(state) and table.find(current.participants, player) then
 				if current.mode == "TeamBattle" then
-					return "PvP"
+					return if TeamBattleService.isAlive(player) then "PvP" else nil
 				elseif current.alive[player] then
 					return "Zombies"
 				end
-				return nil
 			end
-			if GameStates.isInLobby(state) then
-				local _, _, root = CombatUtil.getLivingCharacter(player)
-				if root and TrainingService.isInTrainingArea(root.Position) then
-					return "Training"
-				end
-			end
-			return nil
+			return nil -- spectators, defeated players, the result sequence
 		end,
 		isEnemy = function(attacker: Player, victim: Player)
 			return TeamBattleService.isEnemy(attacker, victim)
@@ -768,40 +772,15 @@ function MatchService.init(layout: LobbyService.LobbyLayout, folder: Instance)
 		end,
 	})
 
-	PartyService.init(layout.folder, layout.coopJoin, layout.coopReady, layout.coopStart, layout.coopBoard, {
-		onJoin = TeamBattleService.removeFromLobby,
-		isArenaBusy = MatchService.isBusy,
-		start = function(players)
-			return startZombieMatch("Coop", players)
+	TeamBattleService.init(folder, {
+		finished = onTeamMatchFinished,
+		statusChanged = function()
+			local currentHooks = hooks
+			if currentHooks then
+				task.spawn(currentHooks.statusChanged)
+			end
 		end,
 	})
-	TeamBattleService.init(layout.folder, folder, {
-		redPad = layout.redPad,
-		bluePad = layout.bluePad,
-		ready = layout.teamReady,
-		leave = layout.teamLeave,
-		balance = layout.teamBalance,
-		redBoard = layout.redBoard,
-		blueBoard = layout.blueBoard,
-		status = layout.teamStatus,
-	}, {
-		onJoin = PartyService.remove,
-		isArenaBusy = MatchService.isBusy,
-		start = startTeamMatch,
-		finished = onTeamMatchFinished,
-	})
-
-	addPrompt(layout.soloGate, "Start Solo Arena", "SOLO ARENA", 1, startSolo)
-	addPrompt(layout.tribuneDoor, "Go to Tribunes", "TRIBUNES", 0.5, goToTribune)
-	if Arena.Layout.ReturnDoor then
-		addPrompt(Arena.Layout.ReturnDoor, "Return to Lobby", "RETURN TO LOBBY", 0.5, leaveTribune)
-	end
-	-- The spectator HUD's EXIT button does the same as the RETURN TO LOBBY door
-	Remotes.CombatAction.OnServerEvent:Connect(function(player: Player, action: unknown)
-		if action == "LeaveTribune" and not debounced(player) then
-			leaveTribune(player)
-		end
-	end)
 
 	MatchSpawnService.init({
 		teamMatchActive = TeamBattleService.isActive,
@@ -810,7 +789,8 @@ function MatchService.init(layout: LobbyService.LobbyLayout, folder: Instance)
 
 	local function setup(player: Player)
 		PlayerMatchStateService.init(player)
-		setState(player, GameStates.Lobby, "Lobby")
+		PlayerMatchStateService.setZone(player, "SPECTATOR")
+		setState(player, GameStates.Spectating, "Tribune") -- until admission decides
 		player:SetAttribute(Config.TeamAttribute, "")
 		player.CharacterAdded:Connect(function(character)
 			onCharacterAdded(player, character)
@@ -825,7 +805,6 @@ function MatchService.init(layout: LobbyService.LobbyLayout, folder: Instance)
 	end
 	Players.PlayerRemoving:Connect(onPlayerRemoving)
 
-	updateGateSigns()
 	setMatchState(GameStates.Lobby)
 	publishPlayers()
 end

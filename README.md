@@ -12,15 +12,47 @@ Plain Luau (strict), no packages, no Toolbox assets, no uploaded asset IDs. Ever
 built-in materials, built-in SpecialMesh shapes, ParticleEmitters and lights. The server decides every
 gameplay outcome (damage, hits, combos, Aura, ownership, scores, victories, boss state, projectiles, AI).
 
-> **One arena match per server.** While a match runs, the arena gates are closed. Everyone else can shop,
-> train, visit the Zombie Archive or watch from the TRIBUNES. The code keeps per-match data in one `Match`
-> record, so parallel arenas can be added later.
+> **Two Places, one Experience.** The **OTTI HUB** (start place) is the Colosseum basement: armory, archive,
+> training, parties, mode selection, matchmaking and the live-battle menu. Every match runs on its **own
+> reserved server of the COLOSSEUM ARENA place**, so any number of matches run at the same time, each with
+> up to 8 fighters and 20 live spectators. See [Multi-place architecture](#multi-place-architecture).
 
 ## Project structure
 
 ```
-default.project.json                 Rojo mapping (+ Remotes, + Health override)
+default.project.json                 = the Hub (start place); kept so `rojo serve` keeps working
+places/hub.project.json              OTTI HUB  (shared code + src/hub, PlaceRole "Hub")
+places/arena.project.json            COLOSSEUM ARENA (shared code + src/arena, PlaceRole "Arena")
+scripts/build-places.ps1 / .sh       builds build/OttiHub.rbxlx and build/OttiArena.rbxlx
+src/hub/PlaceRole, src/arena/PlaceRole   -> ReplicatedStorage.Shared.PlaceRole (build-time role)
+src/hub/server/   -> ServerScriptService.Server.Place  (Hub only)
+  Main.server                        builds the basement, starts data, armory, training, Hub matchmaking
+  HubMatchService                    MatchRequest dispatch (rate limited), Solo / Co-op start, basement prompts, live board
+  PartyService                       parties 1-4 (create, invite, accept, ready, lock while queued)
+  MatchmakingService                 cross-server queues (Co-op, Time, First to, Elimination), lease, claims, assignments
+  ArenaReservationService            match id + ReserveServerAsync + match record + connection record + fighter tickets
+  HubTeleportService                 flush/freeze profile -> TeleportAsync to the reserved Arena, failure recovery
+  LiveBattlesService                 LIVE IN THE COLOSSEUM sections, policies, featured, filters, WATCH RANDOM weights, Studio mock battles
+  FriendBattleService                server-side Roblox friend lists (cached)
+  SpectatorJoinService               WATCH / WATCH RANDOM: atomic slot reservation, spectator ticket, teleport
+src/hub/client/   -> StarterPlayerScripts.Client.Place  (Hub only)
+  GameModeMenuController             PLAY menu: ZOMBIE BATTLES / TEAM BATTLES / WATCH LIVE, party panel
+  ActiveBattlesController            the LIVE IN THE COLOSSEUM overlay
+src/arena/server/ -> ServerScriptService.Server.Place  (Arena only)
+  Main.server                        builds the Colosseum, starts combat, zombies, Otti, team rules, admission
+  ArenaAdmissionService              ticket validation + consumption, roles, capacity, rejections
+  ArenaMatchService                  waits for fighters, starts the one match, ends it, return flow, Studio mock matches
+  ArenaRegistryHeartbeat             public registry record every 12 s (+ on changes), spectator slots
+  ArenaSpectatorService              spectator role, tribune spawn, "Spectators" collision group
+  ArenaReturnService                 flush rewards -> TeleportAsync back to the Hub, retries, emergency button
+  TimeBattleService / FirstToKillsService / EliminationService   the three Team Battle rule sets
 src/shared/   -> ReplicatedStorage.Shared
+  ExperienceConfig                   Place IDs (DEV/PROD), DataStore + MemoryStore names, teleport, registry, matchmaking, capacity, Studio mock
+  EnvironmentConfig                  DEV / PROD resolution (server-side), place role, mock mode
+  GameProtocol                       cross-place protocol version (admission compatibility)
+  PlayerDataSchema                   saved profile schema version, statistics, preference whitelist
+  MatchDefinitions / TeamModeDefinitions   the 5 match types / Time, First to, Elimination rules
+  MatchTypes                         registry record, match record, connection record, ticket, teleport payload, message codes
   Config                             names, tags, attributes, remotes, shells
   CombatConfig                       player/crowd/shield/parry/combo tuning, rate limits, feedback kinds
   GameStates                         player + match states (LOBBY … CLEANUP)
@@ -43,12 +75,14 @@ src/shared/   -> ReplicatedStorage.Shared
   OttiBossConfig                     Otti: health per player count, rewards, intro, speeds, safety values
   OttiMoveDefinitions                Otti's 11 attacks as data (wind-up, active, recovery, ranges, warnings)
   BossPhaseDefinitions               3 phases: names, accent colors, pacing, move weights
-src/server/   -> ServerScriptService.Server
-  Main.server                        builds the world, starts services
-  Arena / LobbyService               Colosseum + tribunes / underground complex
-  MatchService                       match state machine, Solo/Co-op/Team flow, cleanup by match id, combat rules, prompts
+src/server/   -> ServerScriptService.Server   (shared server library: both places include it, each
+                                     Main starts only what its place needs)
+  Arena / LobbyService               Colosseum + tribunes + elimination box + camera points / underground complex
+  MatchService                       the one match of an Arena server: Solo/Co-op/Team flow, rewards once, combat rules
   PlayerMatchStateService / MatchSpawnService   authoritative per-player match state / every (re)spawn by spawn zone
-  PartyService / TeamBattleService   co-op party lobby / team lobby + PvP match runtime
+  TeamBattleService                  Team Battle core (teams, kill credit, alive state, result); rules injected
+  MemoryStoreAdapter / RateLimiter / TeleportUtil   failure-tolerant MemoryStore (+ Studio mock) / remote cooldowns / TeleportAsync + retries
+  AdmissionTicketService / MatchRecordService / MatchRegistryService / SpectatorSlotService   tickets / server-only records / public registry / atomic spectator slots
   WaveService                        six zombie rounds (mode-aware, simultaneous + archer caps), then Round 7
   OttiBossService                    Round 7 encounter: intro, health, phases, guard/poise, defeat
   OttiBossAI / BossAttackService     boss targeting + decisions / validated attack execution
@@ -84,7 +118,8 @@ src/client/   -> StarterPlayer.StarterPlayerScripts.Client
   TeamStatusController               team score + time, co-op teammate strip, lobby rosters
   AuraDisplayController              lobby Aura counter, +n rewards in combat
   MobileControlsController           touch buttons around the jump button, desktop special cards
-  InfoPanelController / SpectatorController   optional i panel / tribune watching bar
+  InfoPanelController / SpectatorController   optional i panel / Arena spectator bar + camera modes
+  TeleportStatusController           travel / queue chip, START WITH CURRENT PARTY, emergency RETURN TO HUB
   InputController                    mouse/keyboard, gamepad and touch input (Attack, Block, Jump, Execute)
   ComboFeedbackController            tiny input chips, COMBO TRAINING board
   PlayerAnimator                     procedural whole-body attack motion (additive, replaceable)
@@ -104,16 +139,31 @@ src/character/ -> StarterCharacterScripts
 Remotes: `CombatAction` (client → server: action + aim point), `ShieldBlock` (client → server: true/false),
 `CombatFeedback` (server → client: HUD messages, hit effects, knockdowns). `CombatAction` also carries
 `"SkipIntro"` (only accepted once every participant has seen the boss intro this session). Both client remotes are rate-limited (10/s per player).
-Lobby interactions use server-side ProximityPrompts.
+Lobby interactions use server-side ProximityPrompts. Multi-place remotes: `MatchRequest` (RemoteFunction,
+client → server requests only, rate limited per action) and `MatchEvent` (server → client: party, queue,
+teleport status, open overlay).
 
 ## Start Rojo and connect Studio
 
+Each Place is its own Studio window with its own Rojo server (two ports):
+
 ```bash
-rojo serve
+rojo serve places/hub.project.json --port 34872
 ```
 
-Then in Studio: Plugins → **Rojo** → **Connect**, **View → Output**, **Shift+F5**, **F5**.
-For multiplayer tests: **Test → Clients and Servers → Local Server** with 2 or more players.
+```bash
+rojo serve places/arena.project.json --port 34873
+```
+
+(`rojo serve` without arguments serves `default.project.json` = the Hub.) In each Studio window: Plugins →
+**Rojo** → enter the port → **Connect**, **View → Output**, **F5**. For multiplayer tests:
+**Test → Clients and Servers → Local Server** with 2 or more players.
+
+Build both place files (git-ignored `build/`):
+
+```bash
+powershell -File scripts/build-places.ps1
+```
 
 ## Controls
 
@@ -175,9 +225,10 @@ centre of the screen stay free; everything is small, anchored to an edge and sca
 ## The basement (lobby)
 
 About twice the old lobby, with wide open floors: arrival hall with the welcome board (spawn), the **GLADIATOR ARMORY** (west),
-mode area (north) with **SOLO ARENA**, **CO-OP LEGIONS** and **TEAM BATTLE** gates,
-**ZOMBIE ARCHIVE** gallery (east annex), **TRAINING** yard (south-west), **TRIBUNES** door (east), a barred prison
-corridor and storage corners. The lobby is a safe zone: no damage, no PvP. Attacks only hit the training dummies.
+mode area (north) with the **SOLO ARENA** gate, **CO-OP LEGIONS** posts (JOIN / READY / START / FIND PLAYERS) and
+**TEAM BATTLES** posts (TIME BATTLE / FIRST TO 20 / ELIMINATION / LEAVE QUEUE), **ZOMBIE ARCHIVE** gallery (east annex),
+**TRAINING** yard (south-west), the **WATCH LIVE** door with the LIVE IN THE COLOSSEUM board (east), a barred prison
+corridor and storage corners. The same actions are in the **PLAY** menu (right edge). The lobby is a safe zone: no damage, no PvP. Attacks only hit the training dummies.
 
 ### GLADIATOR ARMORY
 
@@ -200,21 +251,20 @@ whole lobby: no damage, PvP, projectiles or rewards.
 |---|---|---|
 | **Solo Arena** | 1 | Rounds 1, 2, 4, 8, 16, 32 zombies, then **Round 7: Otti** (1,200 HP, +500 Aura). Death ends the run. 8 shells. |
 | **Co-op Legions** | 1-4 | Base rounds 2, 4, 8, 12, 20, 32 × 0.75 / 1.0 / 1.25 / 1.5 (1-4 players, rounded up), max 48 active at once. Shared rounds; the dead wait on the tribune and return with 60 % health after a completed round; a full wipe ends the run. Killer +100 %, assists +30 % of the zombie's Aura (once per player per zombie). 4 + 2 per player shells (max 12). **Round 7: Otti** (1,200 / 1,850 / 2,450 / 3,000 HP for 1-4 players): +400 Aura per survivor, +250 for defeated players who damaged him. |
-| **Team Battle** | 1v1 - 4v4 | Red vs Blue, no zombies, no friendly fire, respawn after 4 s at the team spawn with 2 s protection. First to 20 eliminations, or more eliminations after 8 minutes; a tie goes to sudden death. Winners +80 Aura, losers +25. Shells off by default (`ShellsEnabled`). |
+| **Time Battle** | 1v1 - 4v4 | Red vs Blue, no friendly fire, respawn after 4 s with 2 s protection (no attacks while protected). 8 minutes; more eliminations wins; a tie goes to **Sudden Death** (next valid opposing elimination wins). HUD `RED 8 — 7 BLUE  04:12`. |
+| **First to 20** | 1v1 - 4v4 | Respawn as above. Target by team size: 1v1 10, 2v2 15, 3v3 / 4v4 20. 12-minute safety timeout: higher score wins, tie = Sudden Death. HUD `FIRST TO 20  RED 13 — 11 BLUE`. |
+| **Elimination** | 1v1 - 4v4 | One life per player per round, Best of 5 (first to 3 round wins). A round ends when a team has no living fighter; both wiped within 0.75 s = draw; 150 s round limit (more alive wins). Eliminated players wait in a closed room and can only follow living teammates. Between rounds the loadout is shown and locked (6 s), then a 5 s countdown at the team spawns. HUD `ELIMINATION  RED 2 — 1 BLUE  ALIVE 3 — 2`. |
 
-**Co-op lobby:** hold F at **JOIN / LEAVE PARTY**, then **READY** (needs a valid loadout). The leader (★) holds F at
-**START**. Only ready members fight. The roster shows on the board and in the right-side panel.
+All Team Battles: winners +80 Aura, losers +25, draw +40; shells off by default (`TeamModeDefinitions.Common`).
 
-**Team lobby:** hold F on the **RED** or **BLUE** pad (max 4 each), then **READY**. **AUTO BALANCE** evens the teams,
-**LEAVE TEAM** leaves. With at least one ready player per team, a 15 s countdown starts; it cancels if that stops being true.
+**Co-op:** SOLO / START WITH CURRENT PARTY start at once on a new reserved Arena server (no waiting for 4
+players). Parties: CREATE PARTY, invite players of the same Hub server (or friends via Roblox invite, then invite
+them here), ACCEPT, READY. The basement posts use an open party: JOIN, READY, the leader (★) holds START (only READY
+members fight; nobody ready = everybody). **FIND PLAYERS** queues the party for co-op matchmaking.
 
-**Team Battle / one-versus-one start (one authoritative lifecycle, also for 1v1):** the ready players are taken out of
-the lobby lists atomically → one match id → `CurrentMatchId`, `CurrentGameMode`, `SelectedTeam`, `ExpectedSpawnZone`
-(`RED_TEAM` / `BLUE_TEAM`) → `COUNTDOWN` → everyone stands at their protected team spawn behind closed barriers → 5 s
-arena countdown → `MATCH_ACTIVE`, barriers open. A defeated player respawns after 4 s at their own team spawn
-(equipment restored, 2 s visible protection, no attacks meanwhile) and keeps match id, score and stats. Players only
-return to the lobby after the result, when leaving or on cancellation; a delayed cleanup only touches players who still
-belong to the match id that scheduled it.
+**Team Battles:** choose a submode (post or menu); the party queues together. Teams are formed by the matchmaker
+(equal sizes only, see below), never by clients. In the Arena: one match id, protected team spawns behind closed
+barriers, 5 s countdown, FIGHT. Results, rewards (exactly once) and the return to the Hub follow automatically.
 
 ## Weapons (8)
 
@@ -455,8 +505,10 @@ solo 500 Aura; co-op 400 per survivor, 250 for defeated players who damaged him.
 
 ## Saving (DataStore)
 
-`PlayerDataService` stores per UserId (store `OttiColosseum_PlayerData_v1`): Aura Points, owned weapons / shields /
-armor, the equipped item of each kind and preferences (HUD mode, Otti intro seen). Loaded data always goes through
+`PlayerDataService` (both places) stores per UserId in the environment store (`OttiPlayerData_DEV_v1` /
+`OttiPlayerData_PROD_v1`, see [Environments and saved data](#environments-and-saved-data)): Aura Points, owned weapons /
+shields / armor, the equipped item of each kind, statistics and preferences (HUD mode, Otti intro seen). Studio uses
+mock data unless `StudioMockData = false`. Loaded data always goes through
 `InventoryService.migrateProfile` (legacy `coins`, missing armor, unknown ids are dropped, starter items guaranteed).
 - **Load** on join with 3 retries. While loading (`DataStatus = Loading`) the armory refuses purchases.
 - **Load failed / no API access:** a fresh profile marked `Unsaved` — it is never written, so saved progress can't be wiped.
@@ -464,9 +516,179 @@ armor, the equipped item of each kind and preferences (HUD mode, Otti intro seen
   shutdown (`BindToClose`) via `UpdateAsync`; a newer save from another server is kept.
 - **Preferences:** the client may only send whitelisted values (`SavePreference` remote, rate limited).
 
+## Multi-place architecture
+
+```
+OTTI HUB (start place, public servers)                COLOSSEUM ARENA (one reserved server per match)
+ basement, armory, archive, training                    Colosseum, tribunes, imperial box, Otti
+ parties, PLAY menu, posts                              ArenaAdmissionService (tickets, roles, capacity)
+ MatchmakingService ──┐                                 ArenaMatchService (wait -> start -> end)
+ HubMatchService ─────┼─ ArenaReservationService ──┐    MatchService / TeamBattleService + rules
+ SpectatorJoinService ┘   ReserveServerAsync        │    ArenaRegistryHeartbeat (every 12 s)
+ LiveBattlesService ◄── MemoryStore registry ◄──────┼─── public record, spectator slots
+ HubTeleportService ──── TeleportAsync(access code) ┴──► ArenaReturnService ── TeleportAsync ──► Hub
+            both places: same PlayerDataService / InventoryService / schema / environment DataStore
+```
+
+### Creator Dashboard setup (manual)
+
+1. Publish the Hub place (`build/OttiHub.rbxlx` or Rojo-synced Studio) as the **start place** of the Experience.
+2. In the same Experience, **Create → Add a Place**, publish the Arena place (`build/OttiArena.rbxlx`) into it.
+3. Copy both **Place IDs** (Creator Dashboard → Experience → Places → the number in each place URL) into
+   `src/shared/ExperienceConfig.luau`: `Environments.DEV.HubPlaceId / ArenaPlaceId` for the private dev Experience
+   and `Environments.PROD.*` for the live Experience (until then they are `0` = local mock mode). Rebuild and
+   publish **both** places after changing them.
+4. Arena place → Settings → **Max Players = 28** (`Capacity.RecommendedServerSize`). Hub: as large as you like.
+5. Game Settings → Security: **Enable Studio Access to API Services** (for Studio data tests with
+   `StudioMockData = false`). Third-party teleports are not needed (both places are in one Experience).
+6. Optional: turn off "Allow direct join" for the Arena place if your Dashboard offers it; public Arena servers
+   reject everybody anyway (no ticket for a non-reserved server) and send them to the Hub.
+
+### Environments and saved data
+
+`EnvironmentConfig` decides on the server: **Studio is always DEV**; a live server is **PROD only when
+`game.PlaceId` equals a configured PROD Place ID**; everything else is DEV. Client data is never used.
+| | DEV | PROD |
+|---|---|---|
+| DataStore | `OttiPlayerData_DEV_v1` | `OttiPlayerData_PROD_v1` |
+| MemoryStore maps | `OttiMatches_DEV_*` | `OttiMatches_PROD_*` |
+| Studio | mock player data (`StudioMockData`), mock MemoryStore | never used in Studio |
+
+The store names never change for normal updates. `PlayerDataSchema.Version` (now 4) only moves forward;
+`InventoryService.migrateProfile` keeps Aura and owned items, adds missing fields (armor, statistics), drops
+unknown ids and re-validates equipped items. A pre-multi-place save (`OttiColosseum_PlayerData_v1`) is imported
+once if the environment store has no profile yet. Persisted: Aura, owned + equipped weapon / shield / armor,
+statistics (zombie kills, Otti defeats, runs, victories, team matches / wins, eliminations, deaths, spectated
+matches), HUD mode, intro seen. Never persisted: health, round, scores, match id, cooldowns, projectiles, buffs,
+positions. Before every cross-place teleport the profile is **flushed and frozen** (`beginTransfer`: no
+purchases, no late overwrite); the destination loads it again from the DataStore (never from TeleportData);
+after a match the rewards are flushed before the return teleport. If loading fails, the session is `Unsaved`
+and never written, so saved progress can't be replaced by empty defaults.
+
+### Match creation and admission security
+
+1. Hub validates the request (mode, party leadership, lobby state, data loaded, equipment) — MatchRequest is
+   rate limited per action and accepts only actions, never ids of places, teams, roles, rewards or scores.
+2. `ArenaReservationService`: unique match id, `TeleportService:ReserveServerAsync`, then three server-only
+   MemoryStore records: **MatchRecord** (mode, fighters + teams + party ids, policy, protocol, the reserved
+   server's `PrivateServerId`), **ConnectionRecord** (the access code) and one **AdmissionTicket** per fighter
+   (`<matchId>:<userId>`, role, team, mode, issued / expires (120 s), consumed, protocol).
+3. `HubTeleportService` freezes each profile and calls `TeleportAsync` with `ReservedServerAccessCode`. The access
+   code exists only in server memory, MemoryStore and `TeleportOptions` — never in LocalScripts, GUIs,
+   attributes, remotes or TeleportData. TeleportData = `{ kind, matchId, role, mode }` (hints only).
+4. The Arena re-checks everything: the match record exists, belongs to **this** reserved server
+   (`game.PrivateServerId`) and has a compatible protocol; the ticket is consumed atomically (UpdateAsync: exists,
+   not expired / consumed, same user + match, valid role, compatible protocol); fighters must be listed in the record
+   and arrive before the start; spectators need a joinable match and free capacity. Otherwise: compact message
+   (ADMISSION REJECTED / BATTLE HAS ENDED / MATCH IS ALREADY FULL / GAME UPDATE IN PROGRESS) and back to the Hub.
+5. `GameProtocol.Version` (1): Hub writes it into tickets and records; the Arena publishes its own; the Hub lists
+   only compatible arenas; mismatches are rejected safely. Running matches finish on their version.
+
+### Match registry and heartbeat
+
+`ArenaRegistryHeartbeat` writes the public record (mode, status, round, Otti phase, scores, target, time, alive
+counts, fighters, spectators, joinable, start time, public participant ids, party ids, policy, protocol) every
+**12 s** and right after round / boss / score changes (throttled to 3 s), with a **50 s expiration**: crashed or
+stale arenas disappear by themselves. Completed matches are **removed at once** (non-joinable immediately), the
+spectator slot record is closed and the server-only records are deleted shortly after. Registry failures are
+logged and ignored; they never affect the match.
+
+### Parties and matchmaking
+
+* **Solo / Co-op start now:** one reserved Arena per start, no waiting for other players.
+* **Queues:** MemoryStore map per mode (`Queue_COOP_ZOMBIES`, `Queue_TIME_BATTLE`, `Queue_FIRST_TO`,
+  `Queue_ELIMINATION`), one entry per party with a server-generated token, expiring (90 s) unless the home server
+  refreshes it (20 s); no duplicate queueing; parties are locked while queued; leaving removes the entry.
+* **Matchmaker:** every Hub server ticks every 3 s; a short **lease** per mode lets one server match at a time.
+  Entries are **claimed atomically**; if a claim or the Arena reservation fails, all claims are released and the
+  entries are matched later. Assignments (`Assign` map) are picked up by each entry's home server, which teleports
+  its players together.
+* **Co-op:** oldest entry first, filled to 4; starts at 4 or after 45 s; after 20 s the chip offers
+  **START WITH CURRENT PARTY**.
+* **Teams:** only equal sizes (4v4 at once, 3v3 after 15 s, 2v2 after 30 s, 1v1 after 45 s waiting), never 3v1,
+  parties are never split and never face themselves (a party is one entry).
+* **Partial teleport failure:** failed players get a message, their profile unfreezes and the party unlocks; the
+  Arena waits up to 25 s; Co-op starts with whoever arrived, a team match with unequal teams is **cancelled**
+  (MATCH CANCELLED, no rewards) and everybody returns.
+
+### Spectators
+
+* Join through **WATCH** / **WATCH RANDOM** (Hub): the slot is reserved atomically in the match's slot record
+  (connected + live reservations < 20); a SPECTATOR ticket is issued; on failure the reservation is released (and
+  expires after 60 s anyway). The Arena consumes the reservation on arrival.
+* In the Arena they spawn on lower / middle tribune spots (never the floor, never the imperial box), use the
+  **Spectators** collision group (walk through each other, never touch zombies or Otti), have no combat context
+  (no damage dealt or taken, no shells, no Aura, no objectives, no boss / zombie targeting, no crowd slots, no
+  fighter scaling), and the podium barrier + safety net keep them out of the arena. They can return any time.
+* Capacities (configurable): 8 fighters, 20 spectators, server size 28; admission counts admitted fighters,
+  spectators and admissions in progress.
+* **Camera** (local only): WALK (tribunes), FOLLOW fighter (◀ ▶), OVERVIEW (5 fixed points), OTTI. Desktop: **Q**
+  previous, **E** next, **C** camera mode; touch: ◀ · CAM · ▶ · HUB. **Elimination:** eliminated players wait in a
+  closed room and can only FOLLOW living teammates (no overview, no free camera, no enemy cameras).
+
+### LIVE IN THE COLOSSEUM overlay
+
+Opens from **WATCH LIVE** (PLAY menu), the WATCH LIVE door or the live board; it never teleports by itself.
+Sections in this order: **FRIENDS IN BATTLE** (only when a Roblox friend fights; up to 3 portraits + "+N"),
+**FEATURED BATTLES** (server rules: Otti active / Phase 3, final zombie round, close finish, sudden death,
+Elimination match point, 10+ spectators), **ALL LIVE BATTLES**. Sorted by friends, featured, free slots,
+spectators, start time. Filters: All, Friends, Zombies, Otti, Time Battle, First to 20, Elimination. Refreshes when
+opened, on ⟳ and every 12 s while open; stops when closed; a closed overlay is invisible and catches no input.
+Friend lists come from `Players:GetFriendsAsync` on the server, cached 5 minutes per player (prefetched on join).
+Spectator policies PUBLIC / FRIENDS_ONLY / PARTY_ONLY / PRIVATE are applied before anything is listed.
+
+**WATCH RANDOM:** joinable matches only; weights friend 5, featured 3, normal 1; when several apply they combine by
+`Spectating.WeightRule` (default **Max**: a featured friend battle weighs 5; `Sum` = 8, `Product` = 15). A
+weighted random roll, so the busiest match is not always chosen. Nothing joinable: **NO LIVE BATTLES RIGHT NOW**
+with REFRESH and MODE SELECTION.
+
+### Teleport failures and the return
+
+Reservation / destination / capacity / expiry / protocol problems keep or return the player to the Hub with one of:
+ARENA COULD NOT BE REACHED · MATCH IS ALREADY FULL · BATTLE HAS ENDED · TELEPORT FAILED — TRY AGAIN ·
+GAME UPDATE IN PROGRESS. Reservations and tickets are released, queue / party locks are lifted, Aura and equipment are
+untouched, matches are created only after all claims succeeded. After the result sequence the Arena flushes the
+rewards, removes itself from the registry and teleports everybody to the Hub (retried every 15 s; a failed return
+shows **RETURN TO HUB**). Spectators arrive next to the live board; nobody gets a duplicate reward.
+
+### Studio local mode (mock)
+
+With Place IDs = 0 or in Studio nothing is teleported (and nothing pretends to be):
+* **Hub:** mock player data, mock MemoryStore, 4 fake live battles (one with a "Studio Friend", see
+  `ExperienceConfig.Studio`). SOLO / CO-OP / queues create real match records and tickets in the mock store and
+  report `STUDIO MOCK: ... match created — no teleport`. WATCH reserves and releases a mock slot.
+* **Arena:** opened directly, it runs `Studio.ArenaMockMode` (default COOP_ZOMBIES) with the local players a few
+  seconds after the first one joins; extra players become spectators; after the end a fresh match starts on
+  the same server (stale-state test). Team modes need an even number of players (Local Server).
+
 ## Studio test steps
 
-**Gladiator Armory, armor and saving** (Game Settings → Security → *Enable Studio Access to API Services* for saving)
+**Local Studio mock mode**
+1. Hub window (`rojo serve places/hub.project.json`): F5. Output shows `Hub DEV ... MOCK`. PLAY → ZOMBIE BATTLES →
+   SOLO: `STUDIO MOCK: SOLO_ZOMBIES match ... created`. TEAM BATTLES → TIME BATTLE: SEARCHING chip, after 45 s
+   (1 player) a mock match is created (lower `TeamSizeWaitSeconds` for faster tests).
+2. PLAY → WATCH LIVE: FRIENDS IN BATTLE (Studio Friend), FEATURED (Otti Phase 2, Elimination match point), ALL.
+   Filters, ⟳, close (the screen is clickable again), WATCH RANDOM (mock message).
+3. Arena window (`rojo serve places/arena.project.json --port 34873`): set `ArenaMockMode`, F5 / Local Server.
+   Fight, die, watch: spectator bar (Q / E / C, CAM, HUB), result, a fresh match after ~10 s.
+
+**Private published DEV test** (DEV Place IDs filled in, both places published, 2+ test accounts)
+* **Solo reserved Arena:** Hub → SOLO → `TRAVELLING` → Arena (Output: `admitted as FIGHTER`) → play → result →
+  back in the Hub with the Aura earned; open a second Solo from another account at the same time: two arenas.
+* **Four-player Co-op:** 4 accounts: CREATE PARTY, INVITE, ACCEPT, START WITH CURRENT PARTY → all in one arena.
+  Or FIND PLAYERS from separate parties → grouped up to 4.
+* **1v1 Time Battle:** two accounts queue TIME BATTLE → after 45 s (1v1 wait) one arena, RED vs BLUE, clock 08:00.
+* **4v4 First to 20:** 8 accounts (e.g. two 4-parties) queue FIRST TO 20 → `FIRST TO 20`, ends at 20.
+* **Elimination:** 2-8 accounts; die → closed room, camera follows teammates only; next round everyone fights;
+  first to 3 rounds wins.
+* **Friend spectating:** befriend a fighter's account; WATCH LIVE shows FRIENDS IN BATTLE first → WATCH → tribune.
+* **Random spectating:** WATCH RANDOM several times with several matches: different matches are picked.
+* **Returning to the Hub:** after the result everyone is back in the basement (spectators next to the live
+  board); HUB button / RETURN TO HUB door work any time for spectators.
+* **Persistence after an update:** buy something, leave, change code, publish both places, rejoin: Aura, gear,
+  HUD mode and statistics are still there (same `OttiPlayerData_DEV_v1`).
+
+**Gladiator Armory, armor and saving (Hub)** (Game Settings → Security → *Enable Studio Access to API Services* for saving)
 1. F5. Follow the `◄ WEAPONS / SHIELDS / ARMOR` signpost to the GLADIATOR ARMORY arch in the hall's west wall.
 2. Walk along BLADES (north), HEAVY & REACH (west), RANGED & SPECIAL (east, bow + quiver), SHIELDS LIGHT / BALANCED / HEAVY
    (south) and the ARMOR mannequins (centre). Near a display: gold outline + card with stats, price and BUY / EQUIP / EQUIPPED; `i` shows details.
@@ -478,12 +700,12 @@ armor, the equipped item of each kind and preferences (HUD mode, Otti intro seen
 6. Shells now heal +10.
 7. Change the HUD mode (H), leave and rejoin: Aura, owned/equipped gear and the HUD mode are restored.
 
-**Solo**
-1. F5. You spawn in the arrival hall: the Aura orb top-right shows 0, Rusty Gladius + Wooden Buckler in your hands, touch: ATK, BLOCK and COMBO around the jump button.
-2. Walk to the TRAINING yard (south-west), hit a dummy, then try Basic → Basic → Q: you should see a short `GLADIATOR'S POINT!` notification.
+**Solo (Arena gameplay: Arena place in Studio with `ArenaMockMode = "SOLO_ZOMBIES"`, or a real Solo start)**
+1. Hub F5. You spawn in the arrival hall: the Aura orb top-right shows 0, Rusty Gladius + Wooden Buckler in your hands, touch: ATK, BLOCK and COMBO around the jump button.
+2. Walk to the TRAINING yard (south-west), hit a dummy, then try a combo (B → J → A, Enter): `COMBO SUCCESS · …`.
 3. Visit the ZOMBIE ARCHIVE (east): 6 caged zombies with plaques; the Undead Sagittarius draws its bow at you.
-4. Hold F at the SOLO ARENA gate (north-west). GET READY, then ROUND 1 / 7. Kill zombies: a short `+10` with the Aura orb (no permanent counter in combat).
-5. Die or win: you return to the lobby and keep your Aura. Buy something in the GLADIATOR ARMORY (e.g. Legion Sword for 80).
+4. Hold F at the SOLO ARENA gate (north-west) or PLAY → SOLO: a reserved Arena server (Studio: open the Arena place). GET READY, then ROUND 1 / 7. Kill zombies: a short `+10` with the Aura orb (no permanent counter in combat).
+5. Die or win: you return to the Hub and keep your Aura. Buy something in the GLADIATOR ARMORY (e.g. Legion Sword for 80).
 
 **Zombie damage, limbs, archers** (buy the Battle Axe or Morning Star for quick results)
 1. From Round 3: hit a zombie below 65 %: darker skin, scratches, torn cloth; below 30 % it limps and hunches.
@@ -501,33 +723,37 @@ armor, the equipped item of each kind and preferences (HUD mode, Otti intro seen
 3. Fight: on `TAIL SWEEP — JUMP!` jump over the tail; on `TAIL SLAM — MOVE!` leave the red/orange circle; block a bite
    with your shield facing him; on `GRAPPLE — DODGE!` sidestep. If caught, you land inside the arena and can move again.
 4. Watch the bar turn blue (70 %) and red (35 %) with a shield strike and a sand burst.
-5. Win: Otti drops his sword and raises a paw, fireworks, `+500`, back to the lobby after 12 s.
+5. Win: Otti drops his sword and raises a paw, fireworks, `+500`, back to the Hub after 12 s.
    Start again: the intro now has a SKIP INTRO button, and no boss state is left over.
 
-**Two-player co-op** (Test → Local Server, 2 players)
-1. Both hold F at JOIN / LEAVE PARTY, then READY. The leader (★) holds F at START.
+**Two-player co-op** (Arena place, `ArenaMockMode = "COOP_ZOMBIES"`, Test → Local Server, 2 players; live: a 2-player party)
+1. Both players fight in the same reserved arena.
 2. Round 1 has 2 zombies (2 × 100 %). Both players are targeted, damage gives assist Aura (`+3`).
 3. Let one player die: they wait on the tribune and return with 72 HP after the round. If both die, the run ends.
 4. Round 7: Otti has 1,850 HP and switches targets; he never grapples the same player twice in a row.
 
 **Four-player co-op** (4 players)
-1. Join, ready, start as above. Round 1 = 3 zombies (2 × 1.5), Round 6 = 48. 12 shells are active. At most 6 archers.
+1. Party of 4, START WITH CURRENT PARTY. Round 1 = 3 zombies (2 × 1.5), Round 6 = 48. 12 shells are active. At most 6 archers.
 2. Zombies spread across all four players; no player has more than 4 attackers at once.
 3. Round 7: 3,000 HP; tail sweeps can hit several players; surround him and he sweeps or dashes out.
 
-**One-versus-one** (2 players)
-1. One holds F on the RED pad, the other on BLUE. Both READY → a 15 s countdown.
+**One-versus-one Time Battle** (Arena place `ArenaMockMode = "TIME_BATTLE"`, Local Server with 2 players; live: queue TIME BATTLE)
+1. Teams are assigned (Red / Blue), 5 s at the protected spawns.
 2. In the arena: `RED 0 — 0 BLUE`, `TIME 08:00`. Hits work only on the opponent, with damage caps. The defeated player respawns at their team spawn after 4 s with a force field.
-3. To test sudden death, temporarily set `MatchSeconds` to 30 in `GameModeDefinitions` and leave the score tied.
+3. To test sudden death, temporarily set `TeamModeDefinitions.TIME_BATTLE.DurationSeconds` to 30 and leave the score tied.
 
-**Four-versus-four** (8 players)
-1. 4 on each pad (a 5th is told the team is full). Try AUTO BALANCE with 5 v 3.
+**Four-versus-four First to 20** (8 players; live: two parties of 4 or 8 players queue FIRST TO 20)
+1. Equal teams only: a 5th player waits for the next match; 5 + 3 never starts.
 2. Ready up, fight: friendly fire does nothing, eliminations/assists/deaths show in the right panel and the kill feed.
-3. First to 20 wins: result screen, fireworks, +80 / +25 Aura, everyone back in the lobby, and a new match can start.
+3. First to 20 wins: result screen, fireworks, +80 / +25 Aura, everyone back in the Hub, and a new match can start at once.
 
 ## Limitations
 
-- One arena match per server; parallel matches would need a second arena instance.
+- Real teleports, reserved servers, cross-server matchmaking and spectating can only be tested in a published Experience (Studio = mock mode).
+- Matchmaking has no skill rating yet and no region preference beyond Roblox's own server placement; the registry lists at most 1,000 matches (5 pages).
+- A fighter who disconnects can't rejoin the running match (tickets are one-time); Co-op continues without them.
+- Eliminated players are held in a closed room and their camera is restricted on the client; a modified client could still move its own camera (Roblox replicates character positions to every client).
+- Parties are per Hub server; friends in other servers are invited with the Roblox invite and join the Hub first.
 - Saving needs DataStore access (published place, or Studio with "Enable Studio Access to API Services"); without it progress is session-only and never written.
 - Swings, thrusts, spins and parries move the equipment, not the player's arms (no uploaded animations).
 - Otti's animation is procedural (client `OttiAnimator`); authored animations can be plugged in via `OttiBossConfig.AnimationIds`.
@@ -540,6 +766,9 @@ armor, the equipped item of each kind and preferences (HUD mode, Otti intro seen
 ## Troubleshooting
 
 - **Old modules still in Explorer** (`GameStateService`, `CoinService`, `HudController`, `WaveConfig`): disconnect and reconnect Rojo.
-- **Prompts don't react to E:** interactions use **F** now (E is Special 2).
+- **Prompts don't react to E:** interactions use **F** (E is the spectator "next" key).
 - **"Attack … rejected: …" warnings:** temporary diagnostics, switch off with `DebugRejectedAttacks = false` in `CombatConfig`.
-- **Build check:** `rojo build -o OttiArena.rbxlx` must succeed.
+- **Build check:** `scripts/build-places.ps1` must build both `build/OttiHub.rbxlx` and `build/OttiArena.rbxlx`.
+- **"This place was not built as the Hub / Arena":** the Studio window is synced with the wrong project file (each place needs its own `rojo serve` port).
+- **Everything says STUDIO MOCK in a published place:** the Place IDs in `ExperienceConfig` are still 0 or belong to another environment.
+- **Players land in a public Arena server:** they are sent back to the Hub automatically (matches only run on reserved servers).

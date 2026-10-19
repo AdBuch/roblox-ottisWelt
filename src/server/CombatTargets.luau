@@ -48,6 +48,10 @@ export type HitInfo = {
 	guardBreak: boolean?, -- combo: breaks a raised guard instead of being stopped by it
 	fromCombo: boolean?, -- combo / aerial move (PvP stagger lock)
 	pvpCap: number?, -- PvP: the most this hit may still deal (whole-move cap)
+	height: string?, -- Low | Mid | High (block pose, slide dodge)
+	heavy: boolean?, -- heavy attack: heavy block reaction
+	label: string?, -- move name (training dummies show it)
+	direction: string?, -- LEFT | RIGHT | THRUST | DOWN | SPIN (training dummies show it)
 }
 
 -- Handles damage to players (installed by PlayerCombatService: blocking, caps, deaths).
@@ -255,7 +259,7 @@ function CombatTargets.applyHit(attacker: Player, target: Target, info: HitInfo)
 		local dummy = target.dummy
 		if dummy then
 			dealt = math.floor(info.damage + 0.5)
-			TrainingService.hit(dummy, dealt)
+			TrainingService.hit(dummy, dealt, info.label, info.direction)
 		end
 	end
 	if dealt > 0 or blocked then

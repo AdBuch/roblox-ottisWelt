@@ -57,13 +57,18 @@ local UiConfig = {
 	TouchLayoutPhone = table.freeze({
 		Attack = Vector2.new(60, 160),
 		Block = Vector2.new(140, 60),
-		Combo = Vector2.new(140, 140), -- Execute; Roblox's jump button is the Jump input
+		Slide = Vector2.new(140, 140), -- Roblox's jump button stays the Jump input
+		Special = Vector2.new(215, 95),
+		Pad = Vector2.new(110, 255), -- Wild gesture pad centre (above the jump button)
 	}),
 	TouchLayoutTablet = table.freeze({
 		Attack = Vector2.new(110, 290),
 		Block = Vector2.new(235, 150),
-		Combo = Vector2.new(235, 255),
+		Slide = Vector2.new(235, 255),
+		Special = Vector2.new(330, 190),
+		Pad = Vector2.new(150, 330),
 	}),
+	DesktopPad = Vector2.new(170, 190), -- Wild pad centre on desktop (from the bottom-right corner)
 
 	-- Colors
 	Gold = Color3.fromRGB(255, 205, 70),

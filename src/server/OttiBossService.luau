@@ -465,7 +465,7 @@ function OttiBossService.applyPlayerHit(attacker: Player, damage: number, fromPo
 	if isProjectile or (attackerRoot and CombatUtil.flatDistance(attackerRoot.Position, current.root.Position) > OttiBossConfig.RangedAttackerDistance) then
 		current.rangedAt[attacker] = now
 	end
-	DamageEffectsService.hit("Boss", hitPosition or current.root.Position + Vector3.new(0, 2, 0), math.clamp(dealt / 25, 0.4, 1.4), CombatUtil.flat(current.root.Position - fromPosition))
+	DamageEffectsService.hit("Boss", hitPosition or current.root.Position + Vector3.new(0, 2, 0), math.clamp(dealt / 25, 0.4, 1.4), CombatUtil.flat(current.root.Position - fromPosition), { attackerId = attacker.UserId, heavy = dealt >= 30 })
 	publishHealth()
 
 	if current.health <= 0 then

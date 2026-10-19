@@ -6,7 +6,7 @@
 --   IsParticipant      fighting in that match (also while dead and waiting to respawn)
 --   IsSpectator        watching from the tribunes
 --   SelectedTeam       "" | Red | Blue
---   ExpectedSpawnZone  LOBBY | RED_TEAM | BLUE_TEAM | ZOMBIE_ARENA | SPECTATOR
+--   ExpectedSpawnZone  LOBBY | RED_TEAM | BLUE_TEAM | ZOMBIE_ARENA | SPECTATOR | ELIMINATED
 -- The per-player GameState attribute (GameStates) stays the moment-to-moment state (LOBBY,
 -- COUNTDOWN, MATCH_ACTIVE, PLAYER_DEFEATED, ...). Attributes replicate, so the HUD can read them.
 
@@ -14,7 +14,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 
-export type SpawnZone = "LOBBY" | "RED_TEAM" | "BLUE_TEAM" | "ZOMBIE_ARENA" | "SPECTATOR"
+export type SpawnZone = "LOBBY" | "RED_TEAM" | "BLUE_TEAM" | "ZOMBIE_ARENA" | "SPECTATOR" | "ELIMINATED"
 
 local PREFIX = "[OttiArena][Match]"
 

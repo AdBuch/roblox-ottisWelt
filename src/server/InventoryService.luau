@@ -3,14 +3,17 @@
 -- of each kind and a few player preferences. Profiles live in memory keyed by UserId;
 -- PlayerDataService loads them from the DataStore on join (load) and saves serialize().
 --
--- Migration: version 1 stored `coins` (moved into `auraPoints` once and cleared); version 2 had
--- no armor (Recruit Leather is granted). migrateProfile() is safe to call repeatedly and also
--- removes unknown ids, so a saved profile can never equip something that no longer exists.
+-- Used identically by the Hub and the Arena place (same schema, validation and migrations:
+-- PlayerDataSchema). Migration: version 1 stored `coins` (moved into `auraPoints` once and
+-- cleared); version 2 had no armor (Recruit Leather is granted); version 3 had no statistics
+-- (all start at 0). migrateProfile() is safe to call repeatedly and also removes unknown ids, so a
+-- saved profile can never equip something that no longer exists.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ArmorDefinitions = require(ReplicatedStorage.Shared.ArmorDefinitions)
 local Config = require(ReplicatedStorage.Shared.Config)
+local PlayerDataSchema = require(ReplicatedStorage.Shared.PlayerDataSchema)
 local ShieldDefinitions = require(ReplicatedStorage.Shared.ShieldDefinitions)
 local WeaponDefinitions = require(ReplicatedStorage.Shared.WeaponDefinitions)
 
@@ -31,15 +34,13 @@ export type Profile = {
 	equippedShield: string,
 	equippedArmor: string,
 	preferences: { [string]: string },
+	stats: { [string]: number },
 }
 
-local PROFILE_VERSION = 3
+local PROFILE_VERSION = PlayerDataSchema.Version
 
 -- Preferences a client may store (value must be one of the listed strings)
-local PREFERENCES: { [string]: { string } } = {
-	HudMode = { "Full", "Minimal", "Hidden" },
-	BossIntro = { "Seen", "" },
-}
+local PREFERENCES: { [string]: { string } } = PlayerDataSchema.Preferences :: any
 
 local InventoryService = {}
 
@@ -58,6 +59,7 @@ local function newProfile(): Profile
 		equippedShield = ShieldDefinitions.Starter,
 		equippedArmor = ArmorDefinitions.Starter,
 		preferences = {},
+		stats = {},
 	}
 end
 
@@ -113,7 +115,14 @@ function InventoryService.migrateProfile(profile: Profile): Profile
 		end
 	end
 	profile.preferences = preferences
-	profile.version = PROFILE_VERSION
+	local stats: { [string]: number } = {}
+	local savedStats: any = profile.stats
+	for _, key in PlayerDataSchema.Stats do
+		local value = if typeof(savedStats) == "table" then tonumber(savedStats[key]) else nil
+		stats[key] = if value and value == value then math.max(0, math.floor(value)) else 0
+	end
+	profile.stats = stats
+	profile.version = math.max(PROFILE_VERSION, tonumber(profile.version) or 0)
 	return profile
 end
 
@@ -122,7 +131,7 @@ local function getProfile(player: Player): Profile
 	if not profile then
 		profile = newProfile()
 		profiles[player.UserId] = profile
-	elseif profile.version ~= PROFILE_VERSION or profile.coins ~= nil then
+	elseif profile.version < PROFILE_VERSION or profile.coins ~= nil then
 		InventoryService.migrateProfile(profile)
 	end
 	return profile
@@ -347,6 +356,24 @@ function InventoryService.setPreference(player: Player, key: unknown, value: unk
 	return true
 end
 
+-- Increases a saved statistic (server decisions only, e.g. a validated kill or victory).
+function InventoryService.addStat(player: Player, key: string, amount: number?)
+	if not PlayerDataSchema.isStat(key) then
+		return
+	end
+	local value = math.floor(amount or 1)
+	if value <= 0 then
+		return
+	end
+	local profile = getProfile(player)
+	profile.stats[key] = (profile.stats[key] or 0) + value
+	changed(player)
+end
+
+function InventoryService.getStat(player: Player, key: string): number
+	return getProfile(player).stats[key] or 0
+end
+
 function InventoryService.getPreference(player: Player, key: string): string?
 	return getProfile(player).preferences[key]
 end
@@ -364,6 +391,7 @@ function InventoryService.serialize(player: Player): { [string]: any }
 		equippedShield = profile.equippedShield,
 		equippedArmor = profile.equippedArmor,
 		preferences = table.clone(profile.preferences),
+		stats = table.clone(profile.stats),
 	}
 end
 

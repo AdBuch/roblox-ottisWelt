@@ -54,10 +54,15 @@ export type Attacker = {
 	extendBusy: (seconds: number) -> (), -- landing recovery
 	stillValid: () -> boolean,
 	reject: (reason: string) -> (),
+	pvpScale: number?, -- PvP damage scale (Special tiers use flatter PvP multipliers)
+	onLanded: ((target: Target, dealt: number, blocked: boolean, killed: boolean) -> ())?,
 }
 
 -- Per execution: damage already dealt to each player (whole-move PvP cap).
 type Execution = { move: MoveDefinition, attacker: Attacker, dealtTo: { [Player]: number }, landedAny: boolean }
+
+local SWEEP_TOLERANCE = 14 -- degrees added on each side of a sweep slice (plus the target's own width)
+local MAX_AIM_TURN = math.rad(45) -- the aim may bend a swing at most this far from the body's facing
 
 local SpecialMoveService = {}
 
@@ -91,7 +96,15 @@ local function hitInfo(execution: Execution, damage: number, target: Target?): C
 	end
 	return {
 		damage = damage * attacker.comboMultiplier,
-		pvpMultiplier = move.PvPMultiplier,
+		pvpMultiplier = move.PvPMultiplier * (attacker.pvpScale or attacker.comboMultiplier) / math.max(0.01, attacker.comboMultiplier),
+		height = move.Height,
+		heavy = move.Impact ~= nil or move.Ultimate == true or move.Stagger >= 0.45,
+		label = move.Name,
+		direction = if move.Sweep and math.abs(move.Sweep[2] - move.Sweep[1]) >= 300 then "SPIN"
+			elseif move.Sweep and move.Height == "High" then "DOWN"
+			elseif move.Sweep then (if move.Sweep[2] < move.Sweep[1] then "LEFT" else "RIGHT")
+			elseif move.Line then "THRUST"
+			else nil,
 		fromPosition = attacker.root.Position,
 		stagger = (move.Stagger + attacker.bonusStagger) * bash,
 		knockback = move.Knockback * bash,
@@ -107,6 +120,14 @@ local function hitInfo(execution: Execution, damage: number, target: Target?): C
 	}
 end
 
+local function landed(execution: Execution, target: Target, dealt: number, blocked: boolean)
+	execution.landedAny = execution.landedAny or dealt > 0 or blocked
+	local callback = execution.attacker.onLanded
+	if callback and (dealt > 0 or blocked) then
+		callback(target, dealt, blocked, dealt > 0 and not CombatTargets.isAlive(target))
+	end
+end
+
 local function apply(execution: Execution, target: Target, damage: number, hitPosition: Vector3?): (number, boolean)
 	if target.kind == "Player" and target.player then
 		local info = hitInfo(execution, damage, target)
@@ -116,13 +137,13 @@ local function apply(execution: Execution, target: Target, damage: number, hitPo
 		info.hitPosition = hitPosition
 		local dealt, blocked = CombatTargets.applyHit(execution.attacker.player, target, info)
 		execution.dealtTo[target.player] = (execution.dealtTo[target.player] or 0) + dealt
-		execution.landedAny = execution.landedAny or dealt > 0 or blocked
+		landed(execution, target, dealt, blocked)
 		return dealt, blocked
 	end
 	local info = hitInfo(execution, damage, nil)
 	info.hitPosition = hitPosition
 	local dealt, blocked = CombatTargets.applyHit(execution.attacker.player, target, info)
-	execution.landedAny = execution.landedAny or dealt > 0 or blocked
+	landed(execution, target, dealt, blocked)
 	return dealt, blocked
 end
 
@@ -147,6 +168,93 @@ local function aimDirection(attacker: Attacker): Vector3
 		return CombatUtil.flat(attacker.root.CFrame.LookVector).Unit
 	end
 	return flat.Unit
+end
+
+-- The swing direction: the aim, bent at most MAX_AIM_TURN away from the body's facing (a client
+-- can't swing behind itself by sending a backward aim point).
+local function swingDirection(attacker: Attacker): Vector3
+	local look = CombatUtil.flat(attacker.root.CFrame.LookVector)
+	local aim = aimDirection(attacker)
+	if look.Magnitude < 0.1 then
+		return aim
+	end
+	look = look.Unit
+	local angle = math.acos(math.clamp(look:Dot(aim), -1, 1))
+	if angle <= MAX_AIM_TURN then
+		return aim
+	end
+	local sign = if look:Cross(aim).Y >= 0 then 1 else -1
+	return CFrame.fromAxisAngle(Vector3.yAxis, sign * MAX_AIM_TURN):VectorToWorldSpace(look)
+end
+
+type Geometry = { sweep: { number }?, line: number?, range: number }
+
+-- One hit phase along the ANIMATED path: a sweep is checked in time slices from its start angle to
+-- its end angle (so a right-to-left slash hits right-side targets first and never hits behind),
+-- a thrust is a narrow line. Every target is hit at most once; walls block (line of sight).
+local function sweepStrike(execution: Execution, multiplier: number, isFirst: boolean, geometry: Geometry, exclude: { [Model]: boolean }?): { [Model]: boolean }
+	local move, attacker = execution.move, execution.attacker
+	local hit: { [Model]: boolean } = {}
+	if multiplier <= 0 then
+		return hit
+	end
+	local limit = maxTargets(move, attacker.context)
+	local count = 0
+	local sweep = geometry.sweep
+	local slices = if sweep then math.clamp(math.ceil(math.abs(sweep[2] - sweep[1]) / 45), 2, 8) else 1
+	local active = move.ActiveTime or 0.1
+	for slice = 1, slices do
+		if slice > 1 then
+			task.wait(active / slices)
+			if not refresh(attacker) then
+				return hit
+			end
+		end
+		local origin = attacker.root.Position
+		local forward = swingDirection(attacker)
+		local right = Vector3.new(-forward.Z, 0, forward.X)
+		local lo, hi = 0, 0
+		if sweep then
+			local a0 = sweep[1] + (sweep[2] - sweep[1]) * (slice - 1) / slices
+			local a1 = sweep[1] + (sweep[2] - sweep[1]) * slice / slices
+			lo, hi = math.min(a0, a1) - SWEEP_TOLERANCE, math.max(a0, a1) + SWEEP_TOLERANCE
+		end
+		local ignore = CombatTargets.losIgnoreList(attacker.character)
+		for _, target in CombatTargets.list(attacker.player, attacker.context) do
+			if count >= limit then
+				break
+			end
+			if hit[target.model] or (exclude and exclude[target.model]) then
+				continue
+			end
+			local position = target.root.Position
+			local offset = CombatUtil.flat(position - origin)
+			local distance = offset.Magnitude
+			if distance - target.radius > geometry.range or math.abs(origin.Y - position.Y) > 7 then
+				continue
+			end
+			local along, across = offset:Dot(forward), offset:Dot(right)
+			local inside: boolean
+			if geometry.line then
+				inside = along >= -target.radius and math.abs(across) <= (geometry.line :: number) + target.radius
+			elseif sweep then
+				local angle = math.deg(math.atan2(across, along)) -- + = right of the swing direction
+				local margin = if distance > 0.1 then math.deg(math.atan(target.radius / distance)) else 180
+				inside = distance <= target.radius + 1 or (angle + margin >= lo and angle - margin <= hi)
+			else
+				inside = true
+			end
+			if inside and CombatUtil.hasLineOfSight(origin, position, ignore) then
+				hit[target.model] = true
+				count += 1
+				apply(execution, target, moveDamage(move, attacker) * multiplier, nil)
+			end
+		end
+	end
+	if isFirst and count == 0 then
+		attacker.reject("nothing inside the swing")
+	end
+	return hit
 end
 
 -- One hit phase: every legal target in range/arc/sight is hit at most once.
@@ -192,6 +300,7 @@ local function executeMelee(execution: Execution)
 	end
 	local steps: { HitStep } = move.Hits or { { Delay = 0, Multiplier = 1 } }
 	local elapsed = 0
+	local allHit: { [Model]: boolean } = {}
 	for index, step in steps do
 		if step.Delay > elapsed then
 			task.wait(step.Delay - elapsed)
@@ -209,7 +318,26 @@ local function executeMelee(execution: Execution)
 		if step.Spin then
 			CombatEffects.ring(attacker.root.Position - Vector3.new(0, 2.5, 0), step.Range or move.Range, Color3.fromRGB(255, 220, 140))
 		end
-		strike(execution, step.Multiplier, index == 1, step.Range, if step.Spin then -1 else step.ArcDot)
+		local sweep = step.Sweep or (if not move.Hits then move.Sweep else nil)
+		local line = step.Line or (if not move.Hits then move.Line else nil)
+		local struck: { [Model]: boolean }
+		if sweep or line then
+			struck = sweepStrike(execution, step.Multiplier, index == 1, { sweep = sweep, line = line, range = moveRange(move, attacker, step.Range) }, nil)
+		else
+			struck = strike(execution, step.Multiplier, index == 1, step.Range, if step.Spin then -1 else step.ArcDot)
+		end
+		for model in struck do
+			allHit[model] = true
+		end
+	end
+	-- Heavy ground impact (e.g. HEAVY DESCENT): sand burst + a weaker hit around the impact point
+	if move.Impact and refresh(attacker) then
+		local point = attacker.root.Position + swingDirection(attacker) * math.min(move.Range * 0.6, 4)
+		CombatEffects.sandBurst(Vector3.new(point.X, Arena.Layout.FloorTop, point.Z), move.Impact, 1)
+		strike(execution, move.ImpactMultiplier or 0.35, false, move.Impact, -1, allHit)
+	end
+	if not execution.landedAny and move.MissRecovery then
+		attacker.extendBusy(move.MissRecovery) -- a missed heavy move is punishable
 	end
 end
 

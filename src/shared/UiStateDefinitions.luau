@@ -17,6 +17,7 @@ export type Group =
 	| "Roster" -- lobby party / team rosters
 	| "Spectator" -- watching bar
 	| "Notifications" -- small queued messages
+	| "Momentum" -- narrow ARENA MOMENTUM bar (combat + training)
 
 local function set(list: { Group }): { [Group]: boolean }
 	local result = {}
@@ -28,11 +29,11 @@ end
 
 local UiStateDefinitions = {
 	States = table.freeze({
-		Lobby = set({ "Aura", "Hints", "Roster", "Specials", "Controls", "Context", "Notifications" }),
-		Solo = set({ "Health", "Round", "Specials", "Controls", "Context", "Notifications", "Hints" }),
-		Coop = set({ "Health", "Round", "Teammates", "Specials", "Controls", "Context", "Notifications", "Hints" }),
-		TeamBattle = set({ "Health", "TeamScore", "Specials", "Controls", "Context", "Notifications", "Hints" }),
-		Boss = set({ "Health", "Boss", "Teammates", "Specials", "Controls", "Context", "Notifications" }),
+		Lobby = set({ "Aura", "Hints", "Roster", "Specials", "Controls", "Context", "Notifications", "Momentum" }),
+		Solo = set({ "Health", "Round", "Specials", "Controls", "Context", "Notifications", "Hints", "Momentum" }),
+		Coop = set({ "Health", "Round", "Teammates", "Specials", "Controls", "Context", "Notifications", "Hints", "Momentum" }),
+		TeamBattle = set({ "Health", "TeamScore", "Specials", "Controls", "Context", "Notifications", "Hints", "Momentum" }),
+		Boss = set({ "Health", "Boss", "Teammates", "Specials", "Controls", "Context", "Notifications", "Momentum" }),
 		Spectator = set({ "Spectator", "Round", "TeamScore", "Boss", "Notifications" }),
 		Results = set({ "Notifications" }),
 	}) :: { [UiState]: { [Group]: boolean } },
@@ -40,8 +41,8 @@ local UiStateDefinitions = {
 	-- Groups each HUD mode allows (critical warnings, results, prompts and touch combat buttons are
 	-- never optional; the low-health warning shows the health bar even in Hidden mode).
 	Modes = table.freeze({
-		Full = set({ "Health", "Round", "Teammates", "TeamScore", "Boss", "Specials", "Controls", "Context", "Aura", "Hints", "Roster", "Spectator", "Notifications" }),
-		Minimal = set({ "Health", "Controls", "Boss", "TeamScore", "Spectator", "Notifications" }),
+		Full = set({ "Health", "Round", "Teammates", "TeamScore", "Boss", "Specials", "Controls", "Context", "Aura", "Hints", "Roster", "Spectator", "Notifications", "Momentum" }),
+		Minimal = set({ "Health", "Controls", "Boss", "TeamScore", "Spectator", "Notifications", "Momentum" }),
 		Hidden = set({ "Controls", "Spectator" }),
 	}) :: { [string]: { [Group]: boolean } },
 

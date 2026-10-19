@@ -58,16 +58,16 @@ export type LobbyLayout = {
 	coopJoin: BasePart,
 	coopReady: BasePart,
 	coopStart: BasePart,
+	coopQueue: BasePart,
 	coopBoard: TextLabel,
-	redPad: BasePart,
-	bluePad: BasePart,
-	teamReady: BasePart,
-	teamLeave: BasePart,
-	teamBalance: BasePart,
-	redBoard: TextLabel,
-	blueBoard: TextLabel,
+	timePost: BasePart,
+	firstToPost: BasePart,
+	elimPost: BasePart,
+	leaveQueuePost: BasePart,
 	teamStatus: TextLabel,
-	tribuneDoor: BasePart,
+	tribuneDoor: BasePart, -- WATCH LIVE spectator entrance (opens the live-battle overlay)
+	liveBoard: TextLabel,
+	liveCFrame: CFrame, -- where returning spectators arrive
 	archiveSlots: { CFrame },
 	archivePlaques: { CFrame },
 	trainingSlots: { CFrame },
@@ -487,14 +487,12 @@ type ModeArea = {
 	coopJoin: BasePart,
 	coopReady: BasePart,
 	coopStart: BasePart,
+	coopQueue: BasePart,
 	coopBoard: TextLabel,
-	redPad: BasePart,
-	bluePad: BasePart,
-	teamReady: BasePart,
-	teamLeave: BasePart,
-	teamBalance: BasePart,
-	redBoard: TextLabel,
-	blueBoard: TextLabel,
+	timePost: BasePart,
+	firstToPost: BasePart,
+	elimPost: BasePart,
+	leaveQueuePost: BasePart,
 	teamStatus: TextLabel,
 }
 
@@ -536,28 +534,21 @@ local function buildModeArea(folder: Folder): ModeArea
 	local coopJoin = post(area, "CoopJoinPost", -7, -32, "JOIN / LEAVE PARTY", GOLD)
 	local coopReady = post(area, "CoopReadyPost", 0, -32, "READY / UNREADY", Color3.fromRGB(140, 255, 140))
 	local coopStart = post(area, "CoopStartPost", 7, -32, "START (LEADER)", Color3.fromRGB(255, 180, 120))
+	local coopQueue = post(area, "CoopQueuePost", 0, -23, "FIND PLAYERS", Color3.fromRGB(150, 210, 255))
 	makePart("PartyCircle", Vector3.new(0.2, 26, 26), at(0, 0.1, -30) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(150, 120, 70), Enum.Material.Sandstone, area, { collide = false, shape = Enum.PartType.Cylinder })
 
-	-- TEAM BATTLE (x = 36): red/blue pads, posts, roster boards
+	-- TEAM BATTLES (x = 36): one matchmaking post per submode (teams are formed by the matchmaker)
 	portcullis(area, 36)
 	local teamLabels = sign(area, "TeamSign", Vector3.new(14, 4, 0.5), facing(36, 15, -HALF_Z + 0.3, SOUTH), {
-		{ text = "TEAM BATTLE", color = GOLD, scale = 0.5 },
-		{ text = "Red vs Blue · up to 4 v 4", color = WHITE, scale = 0.22 },
-		{ text = "Choose a team", color = Color3.fromRGB(220, 220, 220), scale = 0.2 },
+		{ text = "TEAM BATTLES", color = GOLD, scale = 0.5 },
+		{ text = "Time · First to 20 · Elimination", color = WHITE, scale = 0.22 },
+		{ text = "1v1 to 4v4 · equal teams", color = Color3.fromRGB(220, 220, 220), scale = 0.2 },
 	}, RED)
-	local redPad = makePart("RedPad", Vector3.new(0.4, 9, 9), at(27, 0.2, -30) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(190, 40, 40), Enum.Material.Neon, area, { shape = Enum.PartType.Cylinder })
-	local bluePad = makePart("BluePad", Vector3.new(0.4, 9, 9), at(45, 0.2, -30) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(40, 90, 210), Enum.Material.Neon, area, { shape = Enum.PartType.Cylinder })
-	local redBoard = sign(area, "RedRoster", Vector3.new(9, 7, 0.4), facing(23, 6, -HALF_Z + 0.6, SOUTH), {
-		{ text = "RED GLADIATORS", color = Color3.fromRGB(255, 120, 120), scale = 0.2 },
-		{ text = "-", color = WHITE, scale = 0.75 },
-	}, Color3.fromRGB(70, 20, 20))
-	local blueBoard = sign(area, "BlueRoster", Vector3.new(9, 7, 0.4), facing(50, 6, -HALF_Z + 0.6, SOUTH), {
-		{ text = "BLUE GLADIATORS", color = Color3.fromRGB(140, 180, 255), scale = 0.2 },
-		{ text = "-", color = WHITE, scale = 0.75 },
-	}, Color3.fromRGB(20, 30, 70))
-	local teamReady = post(area, "TeamReadyPost", 36, -32, "READY / UNREADY", Color3.fromRGB(140, 255, 140))
-	local teamLeave = post(area, "TeamLeavePost", 31, -24, "LEAVE TEAM", Color3.fromRGB(220, 220, 220))
-	local teamBalance = post(area, "TeamBalancePost", 41, -24, "AUTO BALANCE", Color3.fromRGB(255, 220, 120))
+	local timePost = post(area, "TimeBattlePost", 27, -32, "TIME BATTLE", Color3.fromRGB(255, 200, 120))
+	local firstToPost = post(area, "FirstToPost", 36, -32, "FIRST TO 20", Color3.fromRGB(255, 150, 120))
+	local elimPost = post(area, "EliminationPost", 45, -32, "ELIMINATION", Color3.fromRGB(255, 110, 110))
+	local leaveQueuePost = post(area, "LeaveQueuePost", 36, -23, "LEAVE QUEUE", Color3.fromRGB(220, 220, 220))
+	makePart("TeamCircle", Vector3.new(0.2, 26, 26), at(36, 0.1, -30) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(120, 60, 60), Enum.Material.Sandstone, area, { collide = false, shape = Enum.PartType.Cylinder })
 
 	banner(area, facing(-18, 13, -HALF_Z, SOUTH))
 	banner(area, facing(18, 13, -HALF_Z, SOUTH))
@@ -568,14 +559,12 @@ local function buildModeArea(folder: Folder): ModeArea
 		coopJoin = coopJoin,
 		coopReady = coopReady,
 		coopStart = coopStart,
+		coopQueue = coopQueue,
 		coopBoard = coopLabels[3],
-		redPad = redPad,
-		bluePad = bluePad,
-		teamReady = teamReady,
-		teamLeave = teamLeave,
-		teamBalance = teamBalance,
-		redBoard = redBoard[2],
-		blueBoard = blueBoard[2],
+		timePost = timePost,
+		firstToPost = firstToPost,
+		elimPost = elimPost,
+		leaveQueuePost = leaveQueuePost,
 		teamStatus = teamLabels[3],
 	}
 end
@@ -647,7 +636,7 @@ local function buildTraining(folder: Folder): ({ CFrame }, CFrame, Vector3)
 	return slots, CFrame.new(center + Vector3.new(0, 6, 0)), Vector3.new(26, 16, 22)
 end
 
-local function buildTribuneDoor(folder: Folder): BasePart
+local function buildTribuneDoor(folder: Folder): (BasePart, TextLabel, CFrame)
 	local door = Instance.new("Model")
 	door.Name = "TribuneDoor"
 	local x, z = HALF_X - 0.4, -30
@@ -660,16 +649,23 @@ local function buildTribuneDoor(folder: Folder): BasePart
 	end
 	makePart("DoorLintel", Vector3.new(1.6, 1.4, 11), at(x - 0.3, 11.7, z), SANDSTONE, Enum.Material.Limestone, door)
 	sign(door, "TribuneSign", Vector3.new(10, 3, 0.5), facing(x - 0.5, 14.2, z, WEST), {
-		{ text = "TRIBUNES", color = GOLD, scale = 0.62 },
-		{ text = "Watch the fights · hold F", color = WHITE, scale = 0.3 },
+		{ text = "WATCH LIVE", color = GOLD, scale = 0.62 },
+		{ text = "Live battles in the Colosseum · hold F", color = WHITE, scale = 0.3 },
 	}, RED)
 	-- Stone stairs climbing along the wall toward the stands
 	for i = 1, 12 do
 		makePart("WallStair", Vector3.new(3, i, 1.2), at(HALF_X - 1.6, i / 2, z + 6 + i * 1.2), SANDSTONE, Enum.Material.Limestone, door)
 	end
 	torch(door, facing(HALF_X, 9, z - 7.5, WEST))
+	-- LIVE IN THE COLOSSEUM results board next to the door (server writes the live count)
+	local live = sign(door, "LiveBoard", Vector3.new(9, 5, 0.4), facing(x - 0.4, 6, z - 10, WEST), {
+		{ text = "LIVE IN THE COLOSSEUM", color = GOLD, scale = 0.3 },
+		{ text = "No live battles", color = WHITE, scale = 0.35 },
+		{ text = "hold F at the door", color = Color3.fromRGB(255, 210, 120), scale = 0.2 },
+	}, DARK_WOOD)
 	door.Parent = folder
-	return leaf
+	local arrival = Vector3.new(x - 8, FLOOR_Y + 3.5, z - 6)
+	return leaf, live[2], CFrame.lookAt(arrival, arrival + WEST)
 end
 
 -- Barred prison corridor behind the east opening (z 28..38) and storage corners.
@@ -759,7 +755,7 @@ function LobbyService.build(): LobbyLayout
 	local modes = buildModeArea(folder)
 	local archiveSlots, archivePlaques = buildArchive(folder)
 	local trainingSlots, trainingCFrame, trainingSize = buildTraining(folder)
-	local tribuneDoor = buildTribuneDoor(folder)
+	local tribuneDoor, liveBoard, liveCFrame = buildTribuneDoor(folder)
 	buildPrisonAndStorage(folder)
 	buildLighting(folder)
 
@@ -774,15 +770,15 @@ function LobbyService.build(): LobbyLayout
 		coopReady = modes.coopReady,
 		coopStart = modes.coopStart,
 		coopBoard = modes.coopBoard,
-		redPad = modes.redPad,
-		bluePad = modes.bluePad,
-		teamReady = modes.teamReady,
-		teamLeave = modes.teamLeave,
-		teamBalance = modes.teamBalance,
-		redBoard = modes.redBoard,
-		blueBoard = modes.blueBoard,
+		coopQueue = modes.coopQueue,
+		timePost = modes.timePost,
+		firstToPost = modes.firstToPost,
+		elimPost = modes.elimPost,
+		leaveQueuePost = modes.leaveQueuePost,
 		teamStatus = modes.teamStatus,
 		tribuneDoor = tribuneDoor,
+		liveBoard = liveBoard,
+		liveCFrame = liveCFrame,
 		archiveSlots = archiveSlots,
 		archivePlaques = archivePlaques,
 		trainingSlots = trainingSlots,

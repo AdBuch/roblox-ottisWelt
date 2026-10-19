@@ -3,8 +3,8 @@
 --   Team Battle  one capsule at the top: RED 8 — 6 BLUE · 04:12 (SUDDEN DEATH when tied)
 --   Co-op        a collapsible teammate strip on the left edge: initial, tiny health bar,
 --                downed marker, red pulse below 25 %, exact health only when critical
---   Lobby        the CO-OP party / RED and BLUE rosters with ready states and the team countdown
---                (only while you are in a party or team, and only in the lobby)
+--   Lobby        your party roster (ready states, leader) and the matchmaking queue you are in
+--                (only while you are in a party or queued, Hub only)
 -- Full rosters during combat live in the info panel (rosterText).
 
 local Players = game:GetService("Players")
@@ -43,11 +43,11 @@ local function hex(color: Color3): string
 	return ("#%02X%02X%02X"):format(math.floor(color.R * 255), math.floor(color.G * 255), math.floor(color.B * 255))
 end
 
-function TeamStatusController.start(group: (string, Vector2, UDim2, UDim2?) -> Frame, visibility: Visibility, arena: Instance, lobby: Instance, isPhone: () -> boolean, notify: (string, string) -> ()): TeamStatus
+function TeamStatusController.start(group: (string, Vector2, UDim2, UDim2?) -> Frame, visibility: Visibility, arena: Instance, lobby: Instance?, isPhone: () -> boolean, notify: (string, string) -> ()): TeamStatus
 	local player = Players.LocalPlayer
 
 	------------------------------------------------------------------ Team Battle score capsule
-	local scoreFrame = group("TeamScore", Vector2.new(0.5, 0), UDim2.new(0.5, 0, 0, 6), UDim2.fromOffset(260, 26))
+	local scoreFrame = group("TeamScore", Vector2.new(0.5, 0), UDim2.new(0.5, 0, 0, 6), UDim2.fromOffset(330, 26))
 	local score = Instance.new("TextLabel")
 	score.Size = UDim2.fromScale(1, 1)
 	score.BackgroundColor3 = Color3.new(0, 0, 0)
@@ -65,10 +65,22 @@ function TeamStatusController.start(group: (string, Vector2, UDim2, UDim2?) -> F
 		local red = tonumber(arena:GetAttribute(Config.RedScoreAttribute)) or 0
 		local blue = tonumber(arena:GetAttribute(Config.BlueScoreAttribute)) or 0
 		local timeLeft = tonumber(arena:GetAttribute(Config.TimeLeftAttribute)) or 0
-		local time = if arena:GetAttribute(Config.SuddenDeathAttribute) == true then "SUDDEN DEATH" else ("%02d:%02d"):format(timeLeft // 60, timeLeft % 60)
-		score.Text = ('<font color="%s">RED %d</font>  —  <font color="%s">%d BLUE</font>   <font color="#DDDDDD">%s</font>'):format(hex(UiConfig.Red), red, hex(UiConfig.Blue), blue, time)
+		local sudden = arena:GetAttribute(Config.SuddenDeathAttribute) == true
+		local time = if sudden then "SUDDEN DEATH" else ("%02d:%02d"):format(timeLeft // 60, timeLeft % 60)
+		local subMode = arena:GetAttribute(Config.TeamSubModeAttribute)
+		local teams = ('<font color="%s">RED %d</font>  —  <font color="%s">%d BLUE</font>'):format(hex(UiConfig.Red), red, hex(UiConfig.Blue), blue)
+		if subMode == "FIRST_TO" then
+			local target = tonumber(arena:GetAttribute(Config.ScoreTargetAttribute)) or 20
+			score.Text = ('<font color="#DDDDDD">%s</font>  %s'):format(if sudden then "SUDDEN DEATH" else "FIRST TO " .. target, teams)
+		elseif subMode == "ELIMINATION" then
+			local ra = tonumber(arena:GetAttribute(Config.RedAliveAttribute)) or 0
+			local ba = tonumber(arena:GetAttribute(Config.BlueAliveAttribute)) or 0
+			score.Text = ('<font color="#DDDDDD">ELIMINATION</font>  %s  <font color="#DDDDDD">ALIVE %d — %d</font>'):format(teams, ra, ba)
+		else
+			score.Text = ('%s   <font color="#DDDDDD">%s</font>'):format(teams, time)
+		end
 	end
-	for _, attribute in { Config.RedScoreAttribute, Config.BlueScoreAttribute, Config.TimeLeftAttribute, Config.SuddenDeathAttribute } do
+	for _, attribute in { Config.RedScoreAttribute, Config.BlueScoreAttribute, Config.TimeLeftAttribute, Config.SuddenDeathAttribute, Config.TeamSubModeAttribute, Config.ScoreTargetAttribute, Config.RedAliveAttribute, Config.BlueAliveAttribute } do
 		arena:GetAttributeChangedSignal(attribute):Connect(refreshScore)
 	end
 	refreshScore()
@@ -239,24 +251,21 @@ function TeamStatusController.start(group: (string, Vector2, UDim2, UDim2?) -> F
 	end
 
 	local function lobbyRoster(): string?
-		local team = player:GetAttribute(Config.TeamAttribute)
+		local lines = {}
 		if player:GetAttribute(Config.InPartyAttribute) == true then
-			return list("CO-OP PARTY", lobby:GetAttribute(Config.CoopRosterAttribute), "#FFD278")
-		elseif team == "Red" or team == "Blue" then
-			local countdown = tonumber(lobby:GetAttribute(Config.TeamCountdownAttribute)) or 0
-			return list("RED", lobby:GetAttribute(Config.RedRosterAttribute), hex(UiConfig.Red))
-				.. "\n" .. list("BLUE", lobby:GetAttribute(Config.BlueRosterAttribute), hex(UiConfig.Blue))
-				.. (if countdown > 0 then ("\n<b>Starting in %d</b>"):format(countdown) else "")
+			table.insert(lines, list("PARTY", player:GetAttribute("PartyRoster"), "#FFD278"))
 		end
-		return nil
+		local queued = player:GetAttribute(Config.QueueStatusAttribute)
+		if typeof(queued) == "string" and queued ~= "" then
+			table.insert(lines, ("<b>SEARCHING</b>  %s"):format((queued:gsub("_", " "))))
+		end
+		return if #lines > 0 then table.concat(lines, "\n") else nil
 	end
 	local function refreshRoster()
 		roster.Text = lobbyRoster() or ""
 	end
-	for _, attribute in { Config.CoopRosterAttribute, Config.RedRosterAttribute, Config.BlueRosterAttribute, Config.TeamCountdownAttribute } do
-		lobby:GetAttributeChangedSignal(attribute):Connect(refreshRoster)
-	end
-	for _, attribute in { Config.InPartyAttribute, Config.TeamAttribute } do
+	local _ = lobby
+	for _, attribute in { Config.InPartyAttribute, Config.TeamAttribute, Config.QueueStatusAttribute, "PartyRoster" } do
 		player:GetAttributeChangedSignal(attribute):Connect(refreshRoster)
 	end
 	refreshRoster()

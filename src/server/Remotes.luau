@@ -34,9 +34,23 @@ local function getRemote(name: string): RemoteEvent
 	return created
 end
 
+local function getFunction(name: string): RemoteFunction
+	local remote = folder:FindFirstChild(name)
+	if remote and remote:IsA("RemoteFunction") then
+		return remote
+	end
+	warn(PREFIX, ("Remotes.%s is missing (should come from Rojo); creating it at runtime"):format(name))
+	local created = Instance.new("RemoteFunction")
+	created.Name = name
+	created.Parent = folder
+	return created
+end
+
 return table.freeze({
 	CombatAction = getRemote(Config.CombatActionRemoteName),
 	ShieldBlock = getRemote(Config.ShieldBlockRemoteName),
 	CombatFeedback = getRemote(Config.CombatFeedbackRemoteName),
 	SavePreference = getRemote(Config.PreferenceRemoteName),
+	MatchEvent = getRemote(Config.MatchEventRemoteName),
+	MatchRequest = getFunction(Config.MatchRequestRemoteName),
 })

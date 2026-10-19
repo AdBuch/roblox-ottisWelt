@@ -85,6 +85,29 @@ local Config = {
 	ShieldBlockRemoteName = "ShieldBlock",
 	CombatFeedbackRemoteName = "CombatFeedback",
 	PreferenceRemoteName = "SavePreference",
+	MatchRequestRemoteName = "MatchRequest", -- RemoteFunction: Hub menu / Arena spectator requests
+	MatchEventRemoteName = "MatchEvent", -- RemoteEvent: server -> client match / teleport status
+
+	-- Multi-place (Hub / Arena)
+	ArenaRoleAttribute = "ArenaRole", -- FIGHTER | SPECTATOR | ELIMINATED_SPECTATOR (server-set)
+	QueueStatusAttribute = "QueueStatus", -- "" | mode id while queued (server-set)
+	PartyIdAttribute = "PartyId", -- "" | party id (server-set)
+	LiveBattleCountAttribute = "LiveBattles", -- Hub lobby folder: number of joinable live battles
+	TeamSubModeAttribute = "TeamSubMode", -- arena folder: TIME_BATTLE | FIRST_TO | ELIMINATION
+	ScoreTargetAttribute = "ScoreTarget", -- arena folder: FIRST_TO target / ELIMINATION rounds to win
+	RedAliveAttribute = "RedAlive",
+	BlueAliveAttribute = "BlueAlive",
+	EliminationRoundAttribute = "ElimRound",
+	ArenaMatchIdAttribute = "ArenaMatchId", -- arena folder: public match id (display only)
+	SpectatorCountAttribute = "SpectatorCount",
+	SpectatorCollisionGroup = "Spectators",
+	ProjectileCollisionGroup = "ArenaProjectiles",
+	EliminatedBoxTag = "EliminationBox",
+
+	-- Combat (server-set player / character attributes, display only on clients)
+	MomentumAttribute = "Momentum", -- player: 0..100
+	StainEpochAttribute = "StainEpoch", -- arena folder: sand stains of older epochs fade out
+	BattleIntensityAttribute = "BattleIntensity", -- arena folder: 0..1, crowd leans in
 }
 
 return table.freeze(Config)

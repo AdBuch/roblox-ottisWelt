@@ -1,7 +1,11 @@
 --!strict
--- Persistent player data (DataStore): Aura Points, owned and equipped weapons / shields / armor and
--- a few preferences (HUD mode, Otti intro seen). The DataStore only ever sees
--- InventoryService.serialize(); loaded data always goes through InventoryService.migrateProfile.
+-- Persistent player data (DataStore), identical in the Hub and the Arena place: Aura Points, owned
+-- and equipped weapons / shields / armor, statistics and preferences (PlayerDataSchema). The store
+-- name comes from the environment (ExperienceConfig: OttiPlayerData_DEV_v1 / _PROD_v1) and never
+-- changes for normal updates; Studio uses mock data unless StudioMockData = false. The DataStore
+-- only ever sees InventoryService.serialize(); loaded data always goes through migrateProfile.
+--   * Cross-place teleports: beginTransfer() flushes and freezes the profile; the destination
+--     loads it again from the DataStore (never from TeleportData).
 --   * Load on join (retries). Until it finishes the player is "Loading": the armory refuses
 --     purchases, so nothing bought can be overwritten by the late load.
 --   * If loading fails (or Studio has no API access) the player plays with a fresh in-memory
@@ -18,18 +22,21 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local EnvironmentConfig = require(ReplicatedStorage.Shared.EnvironmentConfig)
+local ExperienceConfig = require(ReplicatedStorage.Shared.ExperienceConfig)
 local InventoryService = require(script.Parent.InventoryService)
 local Remotes = require(script.Parent.Remotes)
 
 local PREFIX = "[OttiArena][Server]"
-local STORE_NAME = "OttiColosseum_PlayerData_v1"
+-- Store name per environment (ExperienceConfig): stable across updates, DEV never touches PROD.
+local LEGACY_STORE_NAME = "OttiColosseum_PlayerData_v1" -- pre-multi-place saves: imported once if present
 local AUTOSAVE_SECONDS = 120
 local SAVE_DEBOUNCE = 8 -- seconds after a change before it is written
 local LOAD_ATTEMPTS = 3
 local SAVE_ATTEMPTS = 3
 local PREFERENCE_RATE = 1 -- seconds between preference messages per player
 
-type Status = "Loading" | "Loaded" | "Unsaved"
+type Status = "Loading" | "Loaded" | "Unsaved" | "Mock" | "Transferring"
 
 type Session = {
 	status: Status,
@@ -38,6 +45,7 @@ type Session = {
 	saveQueued: boolean,
 	lastPreference: number,
 	auraAtJoin: number,
+	transferToken: number,
 }
 
 local PlayerDataService = {}
@@ -45,6 +53,7 @@ local PlayerDataService = {}
 local sessions: { [Player]: Session } = {}
 local serverId = HttpService:GenerateGUID(false)
 local store: DataStore? = nil
+local legacyStore: DataStore? = nil
 local loadedCallback: ((player: Player) -> ())? = nil
 
 local function key(player: Player): string
@@ -122,18 +131,35 @@ local function onPlayerAdded(player: Player)
 		saveQueued = false,
 		lastPreference = 0,
 		auraAtJoin = InventoryService.getAura(player),
+		transferToken = 0,
 	}
 	sessions[player] = session
 	setStatus(player, session, "Loading")
 
 	local dataStore = store
 	if not dataStore then
-		setStatus(player, session, "Unsaved")
+		setStatus(player, session, if EnvironmentConfig.useMockData() then "Mock" else "Unsaved")
+		local refresh = loadedCallback
+		if refresh then
+			refresh(player)
+		end
 		return
 	end
 	local ok, result = retry(LOAD_ATTEMPTS, function()
 		return dataStore:GetAsync(key(player))
 	end)
+	local legacy = legacyStore
+	if ok and result == nil and legacy then
+		-- No profile in the environment store yet: import a pre-multi-place save once (same schema
+		-- family, migrated below); the next save writes it to the environment store.
+		local legacyOk, legacyResult = retry(1, function()
+			return legacy:GetAsync(key(player))
+		end)
+		if legacyOk and typeof(legacyResult) == "table" then
+			result = legacyResult
+			print(PREFIX, ("Imported the legacy save of %s"):format(player.Name))
+		end
+	end
 	if sessions[player] ~= session then
 		return -- left while loading
 	end
@@ -157,6 +183,9 @@ end
 
 local function onPlayerRemoving(player: Player)
 	local session = sessions[player]
+	if session and session.status == "Transferring" and session.dirty then
+		session.status = "Loaded" -- something changed after the transfer flush: write it too
+	end
 	if session and session.status == "Loaded" then
 		save(player, "leave")
 	end
@@ -164,26 +193,103 @@ local function onPlayerRemoving(player: Player)
 	InventoryService.forget(player)
 end
 
+-- Before a cross-place teleport: write the profile now and freeze it as "Transferring" (no
+-- purchases, no further regular saves), so the destination loads exactly this state and a late
+-- save from this server can never overwrite newer data written by the destination.
+-- Returns false if the profile could not be flushed (the caller should not teleport).
+function PlayerDataService.beginTransfer(player: Player): boolean
+	local session = sessions[player]
+	if not session then
+		return false
+	end
+	if session.status == "Mock" or session.status == "Unsaved" then
+		return true -- nothing persistent to protect
+	end
+	if session.status == "Transferring" then
+		return true
+	end
+	if session.status ~= "Loaded" then
+		return false
+	end
+	if not save(player, "transfer") and session.dirty then
+		return false
+	end
+	session.status = "Transferring"
+	player:SetAttribute(Config.DataStatusAttribute, "Transferring")
+	session.transferToken += 1
+	local token = session.transferToken
+	task.delay(ExperienceConfig.Teleport.TransitionHoldSeconds, function()
+		-- Still here long after the teleport should have happened: back to normal
+		if sessions[player] == session and session.status == "Transferring" and session.transferToken == token then
+			PlayerDataService.cancelTransfer(player)
+		end
+	end)
+	return true
+end
+
+-- The teleport failed: the profile is normal again (and saved if something changed meanwhile).
+function PlayerDataService.cancelTransfer(player: Player)
+	local session = sessions[player]
+	if session and session.status == "Transferring" then
+		setStatus(player, session, "Loaded")
+		if session.dirty then
+			task.spawn(save, player, "after transfer")
+		end
+	end
+end
+
+-- Writes the profile now (e.g. match rewards before the return teleport). Yields.
+function PlayerDataService.flush(player: Player): boolean
+	local session = sessions[player]
+	if not session then
+		return false
+	end
+	if session.status ~= "Loaded" then
+		return session.status == "Mock" or session.status == "Unsaved"
+	end
+	return save(player, "flush")
+end
 
 -- True once purchases may be made (the saved profile is in memory, or saving is unavailable).
 function PlayerDataService.isReady(player: Player): boolean
 	local session = sessions[player]
-	return session ~= nil and session.status ~= "Loading"
+	return session ~= nil and session.status ~= "Loading" and session.status ~= "Transferring"
+end
+
+function PlayerDataService.getStatus(player: Player): string
+	local session = sessions[player]
+	return if session then session.status else "Loading"
 end
 
 function PlayerDataService.init(onLoaded: (player: Player) -> ())
 	loadedCallback = onLoaded
-	local ok, result = pcall(function()
-		return DataStoreService:GetDataStore(STORE_NAME)
-	end)
-	if ok then
-		store = result
+	local storeName = EnvironmentConfig.get().DataStoreName
+	if EnvironmentConfig.useMockData() then
+		print(PREFIX, "Studio mock player data: nothing is read from or written to", storeName)
 	else
-		warn(PREFIX, "DataStore unavailable (enable Studio API access to test saving):", tostring(result))
+		local ok, result = pcall(function()
+			return DataStoreService:GetDataStore(storeName)
+		end)
+		if ok then
+			store = result
+			do -- read-only import source, never written
+				local legacyOk, legacyResult = pcall(function()
+					return DataStoreService:GetDataStore(LEGACY_STORE_NAME)
+				end)
+				legacyStore = if legacyOk then legacyResult else nil
+			end
+		else
+			warn(PREFIX, "DataStore unavailable (enable Studio API access to test saving):", tostring(result))
+		end
 	end
+	print(PREFIX, "Player data:", EnvironmentConfig.describe())
 
 	InventoryService.onChanged(function(player: Player)
 		local session = sessions[player]
+		if session and session.status == "Transferring" then
+			session.dirty = true -- written on leave (see onPlayerRemoving)
+			return
+		end
 		if not session or session.status ~= "Loaded" or session.dirty then
 			return
 		end

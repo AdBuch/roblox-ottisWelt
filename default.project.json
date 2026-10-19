@@ -1,10 +1,13 @@
 {
-  "name": "OttiArena",
+  "name": "OttiHub",
   "tree": {
     "$className": "DataModel",
     "ReplicatedStorage": {
       "Shared": {
-        "$path": "src/shared"
+        "$path": "src/shared",
+        "PlaceRole": {
+          "$path": "src/hub/PlaceRole.luau"
+        }
       },
       "Remotes": {
         "$className": "Folder",
@@ -19,18 +22,30 @@
         },
         "SavePreference": {
           "$className": "RemoteEvent"
+        },
+        "MatchRequest": {
+          "$className": "RemoteFunction"
+        },
+        "MatchEvent": {
+          "$className": "RemoteEvent"
         }
       }
     },
     "ServerScriptService": {
       "Server": {
-        "$path": "src/server"
+        "$path": "src/server",
+        "Place": {
+          "$path": "src/hub/server"
+        }
       }
     },
     "StarterPlayer": {
       "StarterPlayerScripts": {
         "Client": {
-          "$path": "src/client"
+          "$path": "src/client",
+          "Place": {
+            "$path": "src/hub/client"
+          }
         }
       },
       "StarterCharacterScripts": {

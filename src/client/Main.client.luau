@@ -70,13 +70,21 @@ local BowController = load(script.Parent, "BowController")
 local ComboFeedbackController = load(script.Parent, "ComboFeedbackController")
 local PlayerAnimator = load(script.Parent, "PlayerAnimator")
 local OttiEntranceController = load(script.Parent, "OttiEntranceController")
+local TeleportStatusController = load(script.Parent, "TeleportStatusController")
+-- Build-time place role (Rojo project): the Hub shows the menus, the Arena the spectator tools
+local placeRoleModule = shared and shared:FindFirstChild("PlaceRole")
+local placeRole: string = if placeRoleModule and placeRoleModule:IsA("ModuleScript") then tostring(require(placeRoleModule) :: any) else "Hub"
+local isArena = placeRole == "Arena"
+local placeFolder = script.Parent:FindFirstChild("Place")
+local GameModeMenuController = if not isArena then load(placeFolder, "GameModeMenuController") else nil
+local ActiveBattlesController = if not isArena then load(placeFolder, "ActiveBattlesController") else nil
 for _, module in {
 	Config, CombatConfig, GameStates, GameModeDefinitions, WeaponDefinitions, ShieldDefinitions, SpecialMoveDefinitions, ComboDefinitions,
 	ResponsiveHudController, HudVisibilityController, HudStateController, NotificationController, ContextHealthController,
 	TeamStatusController, BossHudController, AuraDisplayController, MobileControlsController, InfoPanelController,
 	SpectatorController, InputController, ShopController, EffectsController, ZombieAnimator, OttiAnimator,
 	DamageEffectsController, CrowdEffectsController, BowController, ComboFeedbackController, PlayerAnimator,
-	OttiEntranceController,
+	OttiEntranceController, TeleportStatusController,
 } do
 	if not module then
 		return
@@ -87,7 +95,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 local hud = ResponsiveHudController.create(playerGui)
 
 -- Small edge buttons (eye = HUD mode, i = info) on the right edge, below the Aura counter
-local edge = hud.group("EdgeButtons", Vector2.new(1, 0), UDim2.new(1, -8, 0, 40), UDim2.fromOffset(44, 96))
+local edge = hud.group("EdgeButtons", Vector2.new(1, 0), UDim2.new(1, -8, 0, 40), UDim2.fromOffset(44, if isArena then 96 else 148))
 local edgeList = Instance.new("UIListLayout")
 edgeList.Padding = UDim.new(0, 8)
 edgeList.SortOrder = Enum.SortOrder.LayoutOrder
@@ -145,7 +153,7 @@ local function equippedWeapon(): any
 end
 
 -- The COMBO TRAINING board shows the equipped weapon's combinations
-local lobbyFolder = Workspace:WaitForChild(Config.LobbyFolderName, WAIT_TIMEOUT)
+local lobbyFolder = if isArena then nil else Workspace:WaitForChild(Config.LobbyFolderName, WAIT_TIMEOUT)
 local comboFeedback = ComboFeedbackController.start(hud.group, visibility, hud.onLayout, lobbyFolder)
 local function refreshSpecials()
 	comboFeedback.showBoard(equippedWeapon())
@@ -157,6 +165,38 @@ local combatActionInstance = remotes and waitFor(remotes, Config.CombatActionRem
 local shieldBlock = remotes and waitFor(remotes, Config.ShieldBlockRemoteName)
 local feedback = remotes and waitFor(remotes, Config.CombatFeedbackRemoteName)
 local combatAction: RemoteEvent? = if combatActionInstance and combatActionInstance:IsA("RemoteEvent") then combatActionInstance else nil
+local matchRequestInstance = remotes and remotes:WaitForChild(Config.MatchRequestRemoteName, WAIT_TIMEOUT)
+local matchEventInstance = remotes and remotes:WaitForChild(Config.MatchEventRemoteName, WAIT_TIMEOUT)
+local matchRequest: RemoteFunction? = if matchRequestInstance and matchRequestInstance:IsA("RemoteFunction") then matchRequestInstance else nil
+local matchEvent: RemoteEvent? = if matchEventInstance and matchEventInstance:IsA("RemoteEvent") then matchEventInstance else nil
+
+-- Match menus (Hub) / travel status (both): their own ScreenGui above the HUD
+local menuGui = Instance.new("ScreenGui")
+menuGui.Name = "MatchMenus"
+menuGui.ResetOnSpawn = false
+menuGui.DisplayOrder = 20
+menuGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+menuGui.Parent = playerGui
+TeleportStatusController.start(menuGui, matchRequest, matchEvent, isArena)
+if not isArena and GameModeMenuController and ActiveBattlesController then
+	local modeMenu: any = nil
+	local live = ActiveBattlesController.start(menuGui, matchRequest, matchEvent, function()
+		if modeMenu then
+			modeMenu.open(nil)
+		end
+	end)
+	modeMenu = GameModeMenuController.start(menuGui, edge, matchRequest, matchEvent, function()
+		live.open()
+	end, function(text: string)
+		notify("Info", text)
+	end)
+	-- the overlay's MODE SELECTION button closes it and opens the menu
+	local openMenu = modeMenu.open
+	modeMenu.open = function(tab: string?)
+		live.close()
+		openMenu(tab)
+	end
+end
 
 local context: any = nil -- ContextHealthController, started once the arena exists
 
@@ -365,7 +405,8 @@ local function refreshMatch()
 	resultShown = false
 	if state == GameStates.PlayerDefeated then
 		defeatShown = true
-		notifier.banner("DEFEATED", if mode == "Coop" then "Back after this round" elseif mode == "TeamBattle" then "Respawning…" else nil, nil)
+		local eliminated = arenaAttr(Config.TeamSubModeAttribute) == "ELIMINATION"
+		notifier.banner("DEFEATED", if mode == "Coop" then "Back after this round" elseif mode == "TeamBattle" and eliminated then "Out this round · follow your team" elseif mode == "TeamBattle" then "Respawning…" else "Watching from the tribune", nil)
 		return
 	elseif defeatShown then
 		defeatShown = false
@@ -421,10 +462,18 @@ end
 
 ------------------------------------------------------------------ arena-dependent controllers
 task.spawn(function()
-	arena = waitFor(Workspace, Config.ArenaFolderName)
-	local lobby = waitFor(Workspace, Config.LobbyFolderName)
+	-- Arena place: the generated Colosseum. Hub: no arena exists, a local empty stand-in keeps the
+	-- arena-driven HUD parts idle (no match attributes ever appear on it).
+	if isArena then
+		arena = waitFor(Workspace, Config.ArenaFolderName)
+	else
+		local standIn = Instance.new("Folder")
+		standIn.Name = "NoArenaInHub"
+		arena = standIn
+	end
+	local lobby = if isArena then nil else lobbyFolder
 	local arenaFolder = arena
-	if not arenaFolder or not lobby then
+	if not arenaFolder then
 		return
 	end
 	for _, name in {
@@ -440,8 +489,10 @@ task.spawn(function()
 	end, notify)
 	local entrance = OttiEntranceController.start(arenaFolder)
 	BossHudController.start(hud.group, visibility, hud.onLayout, arenaFolder, entrance)
-	CrowdEffectsController.start(arenaFolder, notify)
-	local spectator = SpectatorController.start(hud.group, visibility, combatAction)
+	CrowdEffectsController.start(arenaFolder, notify, function()
+		return hud.layout.device
+	end)
+	local spectator = SpectatorController.start(hud.group, visibility, combatAction, matchRequest)
 	context = ContextHealthController.start(playerGui, {
 		zombieTag = CombatConfig.ZombieTag,
 		dummyTag = Config.TrainingDummyTag,
@@ -462,7 +513,9 @@ task.spawn(function()
 		local lines = {}
 		local mode = tostring(arenaFolder:GetAttribute(Config.MatchModeAttribute) or "")
 		local modeDef = GameModeDefinitions[mode]
-		table.insert(lines, ("<b>MODE</b>  %s"):format(if type(modeDef) == "table" and modeDef.DisplayName then modeDef.DisplayName else "LOBBY"))
+		local subMode = tostring(arenaFolder:GetAttribute(Config.TeamSubModeAttribute) or "")
+		local modeName = if mode == "TeamBattle" and subMode ~= "" then subMode:gsub("_", " ") elseif type(modeDef) == "table" and modeDef.DisplayName then modeDef.DisplayName elseif isArena then "WAITING" else "HUB"
+		table.insert(lines, ("<b>MODE</b>  %s"):format(modeName))
 		local round = tonumber(arenaFolder:GetAttribute(Config.RoundAttribute)) or 0
 		if mode == "Solo" or mode == "Coop" then
 			table.insert(lines, ("Round %d / %d · %d zombies left · players %d / %d"):format(round, tonumber(arenaFolder:GetAttribute(Config.RoundMaxAttribute)) or 7, tonumber(arenaFolder:GetAttribute(Config.ZombiesAliveAttribute)) or 0, tonumber(arenaFolder:GetAttribute(Config.PlayersAliveAttribute)) or 0, tonumber(arenaFolder:GetAttribute(Config.PlayersTotalAttribute)) or 0))
