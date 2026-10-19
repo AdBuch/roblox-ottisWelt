@@ -123,7 +123,7 @@ function CombatEffectsController.start(options: Options): CombatEffects
 		if kind == "Block" then
 			-- Shield sparks (sparks style for blocks), the bow arrow sticks briefly, perfect flash
 			DamageEffectsController.burst(position, "Boss", scale * (cat.Spark / 6 + 0.4), direction)
-			if category == "Bow" and info.projectile == true and direction then
+			if info.projectile == true and direction then -- blocked projectiles are arrows
 				stickArrow(position, direction.Unit)
 			end
 			if info.perfect == true then

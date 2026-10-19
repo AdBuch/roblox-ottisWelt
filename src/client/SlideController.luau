@@ -58,7 +58,9 @@ function SlideController.play(player: Player, direction: Vector3, distance: numb
 		sliding = false
 		if humanoid.Parent then
 			humanoid:Move(Vector3.zero)
-			humanoid.WalkSpeed = savedSpeed
+			if math.abs(humanoid.WalkSpeed - speed) < 0.01 then
+				humanoid.WalkSpeed = savedSpeed -- only undo our own change; a newer server value stays
+			end
 			humanoid.CameraOffset = savedOffset
 		end
 	end

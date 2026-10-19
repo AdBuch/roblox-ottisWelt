@@ -167,7 +167,7 @@ local momentumHud = MomentumHudController.start(hud.group, visibility, hud.onLay
 local function controlHint(): string
 	local mode = settings.getMode()
 	if scheme == "Gamepad" then
-		return if mode == "Wild" then "Pad: R-stick path · hold centre = block · B Slide · X Special" else "R2 Attack   L2 Block   B Slide   X Special   A Jump"
+		return if mode == "Wild" then "R2 Attack   L2 Block   B Slide   X Special (then right stick)" else "R2 Attack   L2 Block   B Slide   X Special   A Jump"
 	elseif scheme == "Touch" then
 		return ""
 	end
@@ -279,7 +279,7 @@ if feedback and feedback:IsA("RemoteEvent") then
 	feedback.OnClientEvent:Connect(function(kind: string, a: any, b: any, c: any, d: any, e: any)
 		if kind == F.Action then
 			if a == "Special" and typeof(b) == "string" then
-				notify("Info", b .. "!") -- the move name of your special
+				notify("Info", (if typeof(d) == "string" and d ~= "" then d else b) .. "!") -- the special with its tier
 			end
 			hud.fadeHint() -- the control hint fades once you start fighting
 		elseif kind == F.Hit then
