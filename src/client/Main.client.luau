@@ -11,11 +11,11 @@
 --   AuraDisplayController     lobby Aura counter, "+n" rewards in combat
 --   MobileControlsController  touch buttons (ATK, BLOCK, SLIDE, SPECIAL)
 --   GesturePadController      Wild gesture pad, Special Mode drawing, the training trace
---   CombatSettingsController  CLASSIC / WILD, BLOOD and CAMERA pills (saved preferences)
+--   CombatSettingsController  CLASSIC / WILD and CAMERA pills (saved preferences)
 --   InputController           Classic / Wild input -> CombatAction / ShieldBlock intents
 --   SlideController           plays an approved slide on the own character
 --   MomentumHudController     the ARENA MOMENTUM bar
---   CombatEffectsController   hit presentation by category (BloodEffects, SandStains, CombatCamera)
+--   CombatEffectsController   hit presentation by category (sparks, dust, CombatCamera; no blood)
 --   InfoPanelController       optional "i" panel; SpectatorController for the tribunes
 
 local Players = game:GetService("Players")
@@ -72,8 +72,6 @@ local CombatSettingsController = load(script.Parent, "CombatSettingsController")
 local SlideController = load(script.Parent, "SlideController")
 local MomentumHudController = load(script.Parent, "MomentumHudController")
 local CombatEffectsController = load(script.Parent, "CombatEffectsController")
-local BloodEffectsController = load(script.Parent, "BloodEffectsController")
-local SandStainController = load(script.Parent, "SandStainController")
 local CombatCameraController = load(script.Parent, "CombatCameraController")
 local ShopController = load(script.Parent, "ShopController")
 local EffectsController = load(script.Parent, "EffectsController")
@@ -99,7 +97,7 @@ for _, module in {
 	ResponsiveHudController, HudVisibilityController, HudStateController, NotificationController, ContextHealthController,
 	TeamStatusController, BossHudController, AuraDisplayController, MobileControlsController, InfoPanelController,
 	SpectatorController, InputController, GesturePadController, CombatSettingsController, SlideController, MomentumHudController,
-	CombatEffectsController, BloodEffectsController, SandStainController, CombatCameraController,
+	CombatEffectsController, CombatCameraController,
 	ShopController, EffectsController, ZombieAnimator, OttiAnimator, DamageEffectsController, CrowdEffectsController,
 	BowController, ComboFeedbackController, PlayerAnimator, OttiEntranceController, TeleportStatusController,
 } do
@@ -155,7 +153,7 @@ local matchEvent: RemoteEvent? = if matchEventInstance and matchEventInstance:Is
 local preferenceRemote = remotes and remotes:FindFirstChild(Config.PreferenceRemoteName)
 local preferenceEvent: RemoteEvent? = if preferenceRemote and preferenceRemote:IsA("RemoteEvent") then preferenceRemote else nil
 
--- CLASSIC / WILD, BLOOD and CAMERA settings (saved; the mode switch cancels gestures and blocks)
+-- CLASSIC / WILD and CAMERA settings (saved; the mode switch cancels gestures and blocks)
 local settings = CombatSettingsController.start(edge, preferenceEvent, notify)
 
 local aura = AuraDisplayController.start(hud.group, visibility, notify)
@@ -186,8 +184,6 @@ local function refreshSpecials()
 end
 
 ------------------------------------------------------------------ effects (shared by every fight)
-local stains = SandStainController.start()
-local bloodFx = BloodEffectsController.start(stains)
 local cameraFx = CombatCameraController.start()
 cameraFx.setShake(settings.getCameraShake())
 settings.onChanged(function()
@@ -195,20 +191,11 @@ settings.onChanged(function()
 end)
 local combatEffects = CombatEffectsController.start({
 	gui = hud.gui,
-	blood = bloodFx,
 	camera = cameraFx,
-	bloodPreference = settings.getBlood,
-	device = function()
-		return hud.layout.device
-	end,
 	userId = function()
 		return player.UserId
 	end,
 })
-hud.onLayout(function(layout: any)
-	-- smaller sand stain budget on phones (BloodConfig.Quality)
-	bloodFx.setQuality(if layout.device == "Phone" then "Low" elseif layout.device == "Tablet" then "Medium" else "High")
-end)
 
 ------------------------------------------------------------------ input: gesture pad, combat input
 local input: any = nil -- InputController, created below (the pad reports into it)
@@ -316,7 +303,7 @@ if feedback and feedback:IsA("RemoteEvent") then
 			local amount = math.round(tonumber(a) or 0)
 			notify("Heal", ("+%d HEALTH"):format(amount), amount)
 		elseif kind == F.Aura then
-			aura.reward(tonumber(a) or 0)
+			aura.reward(tonumber(a) or 0, tonumber(c)) -- (aura, reason, denarii)
 		elseif kind == F.Shop then
 			notify("Info", tostring(a))
 		elseif kind == F.Slowed then
@@ -389,10 +376,10 @@ if player.Character then
 end
 
 local function refreshInventory()
-	aura.set(tonumber(player:GetAttribute(Config.AuraAttribute)) or 0)
+	aura.set(tonumber(player:GetAttribute(Config.AuraAttribute)) or 0, tonumber(player:GetAttribute(Config.DenariiAttribute)) or 0)
 	refreshSpecials()
 end
-for _, attribute in { Config.AuraAttribute, Config.EquippedWeaponAttribute, Config.EquippedShieldAttribute } do
+for _, attribute in { Config.AuraAttribute, Config.DenariiAttribute, Config.EquippedWeaponAttribute, Config.EquippedShieldAttribute } do
 	player:GetAttributeChangedSignal(attribute):Connect(refreshInventory)
 end
 refreshInventory()
@@ -401,6 +388,7 @@ hud.setHint(controlHint())
 ShopController.start({
 	tag = Config.ShopItemTag,
 	aura = Config.AuraAttribute,
+	denarii = Config.DenariiAttribute,
 	equippedWeapon = Config.EquippedWeaponAttribute,
 	equippedShield = Config.EquippedShieldAttribute,
 	equippedArmor = Config.EquippedArmorAttribute,
@@ -465,12 +453,13 @@ local function refreshMatch()
 		if not resultShown then
 			resultShown = true
 			local earned = tonumber(player:GetAttribute(Config.RunAuraAttribute)) or 0
+			local coins = tonumber(player:GetAttribute(Config.RunDenariiAttribute)) or 0
 			local kills = tonumber(player:GetAttribute(Config.RunKillsAttribute)) or 0
 			local title = if result ~= "" then result elseif state == GameStates.Victory then "VICTORY" else "MATCH COMPLETE"
 			local subtitle = if result == "OTTI DEFEATED" then "CHAMPION OF THE COLOSSEUM" elseif state == GameStates.Victory then "GAME COMPLETE" else nil
 			local stats = if mode == "TeamBattle"
-				then ("Elims %d · Deaths %d · +%d Aura"):format(tonumber(player:GetAttribute(Config.EliminationsAttribute)) or 0, tonumber(player:GetAttribute(Config.DeathsAttribute)) or 0, earned)
-				else ("Kills %d · +%d Aura"):format(kills, earned)
+				then ("Elims %d · Deaths %d · +%d Aura · +%d Denarii"):format(tonumber(player:GetAttribute(Config.EliminationsAttribute)) or 0, tonumber(player:GetAttribute(Config.DeathsAttribute)) or 0, earned, coins)
+				else ("Kills %d · +%d Aura · +%d Denarii"):format(kills, earned, coins)
 			notifier.banner(title, subtitle, stats)
 		end
 		return
@@ -556,15 +545,6 @@ task.spawn(function()
 	} do
 		arenaFolder:GetAttributeChangedSignal(name):Connect(refreshMatch)
 	end
-	-- Each match starts a new stain epoch: older sand stains fade out
-	local function syncEpoch()
-		local epoch = tonumber(arenaFolder:GetAttribute(Config.StainEpochAttribute))
-		if epoch then
-			stains.setEpoch(epoch)
-		end
-	end
-	arenaFolder:GetAttributeChangedSignal(Config.StainEpochAttribute):Connect(syncEpoch)
-	syncEpoch()
 
 	local teamStatus = TeamStatusController.start(hud.group, visibility, arenaFolder, lobby, function()
 		return hud.layout.device == "Phone"
@@ -633,7 +613,8 @@ task.spawn(function()
 		table.insert(lines, "")
 		table.insert(lines, teamStatus.rosterText())
 		table.insert(lines, "")
-		table.insert(lines, "<b>AURA</b>  Zombie kills pay their Aura (co-op assists 30 %). Otti: 500 solo, 400 per surviving co-op player, 250 for defeated helpers. Team Battle: 80 win / 25 loss.")
+		table.insert(lines, "<b>AURA</b>  progress, never spent: it unlocks weapons, shields and armor. Zombie kills pay their Aura (co-op assists 30 %). Otti: 500 solo, 400 per surviving co-op player, 250 for defeated helpers. Team Battle: 80 win / 25 loss.")
+		table.insert(lines, "<b>DENARII</b>  money: every Aura reward also pays Denarii. Buy unlocked gear in the Gladiator Armory.")
 		return table.concat(lines, "\n")
 	end
 	local info = InfoPanelController.start(hud.gui, edge, infoText)

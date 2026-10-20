@@ -13,6 +13,11 @@ local ZombieAnimator = {}
 local STRIDE_SPEED = 0.9
 local LEG_SWING = math.rad(35)
 local ARM_SWING = math.rad(15)
+-- Elbow and knee joints exist only on the jointed legionary (cosmetic; other types have none)
+local KNEE_REST = math.rad(8) -- slightly bent knees while standing
+local KNEE_BEND = math.rad(35) -- extra bend while the leg swings
+local ELBOW_REST = math.rad(20) -- relaxed guard elbows
+local ELBOW_SWING = math.rad(15)
 
 type Joints = {
 	root: BasePart,
@@ -20,6 +25,10 @@ type Joints = {
 	leftHip: Motor6D?,
 	leftShoulder: Motor6D?,
 	rightShoulder: Motor6D?,
+	rightKnee: Motor6D?,
+	leftKnee: Motor6D?,
+	rightElbow: Motor6D?,
+	leftElbow: Motor6D?,
 	phase: number,
 }
 
@@ -50,6 +59,10 @@ function ZombieAnimator.start(tag: string)
 			leftHip = getMotor(torso, "LeftHip"),
 			leftShoulder = getMotor(torso, "LeftShoulder"),
 			rightShoulder = getMotor(torso, "RightShoulder"),
+			rightKnee = getMotor(model:FindFirstChild("RightLeg"), "RightKnee"),
+			leftKnee = getMotor(model:FindFirstChild("LeftLeg"), "LeftKnee"),
+			rightElbow = getMotor(model:FindFirstChild("RightArm"), "RightElbow"),
+			leftElbow = getMotor(model:FindFirstChild("LeftArm"), "LeftElbow"),
 			phase = math.random() * math.pi,
 		}
 		cache[model] = created
@@ -74,6 +87,19 @@ function ZombieAnimator.start(tag: string)
 				end
 				if joints.leftHip then
 					joints.leftHip.Transform = CFrame.Angles(-swing * LEG_SWING * leftLeg, 0, 0)
+				end
+				-- Knees bend backwards while a leg swings; elbows stay relaxed in front (cosmetic only)
+				if joints.rightKnee then
+					joints.rightKnee.Transform = CFrame.Angles(-(KNEE_REST + math.abs(swing) * KNEE_BEND * rightLeg), 0, 0)
+				end
+				if joints.leftKnee then
+					joints.leftKnee.Transform = CFrame.Angles(-(KNEE_REST + math.abs(swing) * KNEE_BEND * leftLeg), 0, 0)
+				end
+				if joints.rightElbow then
+					joints.rightElbow.Transform = CFrame.Angles(ELBOW_REST + math.abs(swing) * ELBOW_SWING, 0, 0)
+				end
+				if joints.leftElbow then
+					joints.leftElbow.Transform = CFrame.Angles(ELBOW_REST + math.abs(swing) * ELBOW_SWING, 0, 0)
 				end
 				if crawl then
 					-- Pulling itself along with both arms

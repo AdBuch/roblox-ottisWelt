@@ -1,5 +1,5 @@
 --!strict
--- Persistent player data (DataStore), identical in the Hub and the Arena place: Aura Points, owned
+-- Persistent player data (DataStore), identical in the Hub and the Arena place: Aura, Denarii, owned
 -- and equipped weapons / shields / armor, statistics and preferences (PlayerDataSchema). The store
 -- name comes from the environment (ExperienceConfig: OttiPlayerData_DEV_v1 / _PROD_v1) and never
 -- changes for normal updates; Studio uses mock data unless StudioMockData = false. The DataStore
@@ -45,6 +45,7 @@ type Session = {
 	saveQueued: boolean,
 	lastPreference: number,
 	auraAtJoin: number,
+	denariiAtJoin: number,
 	transferToken: number,
 }
 
@@ -131,6 +132,7 @@ local function onPlayerAdded(player: Player)
 		saveQueued = false,
 		lastPreference = 0,
 		auraAtJoin = InventoryService.getAura(player),
+		denariiAtJoin = InventoryService.getDenarii(player),
 		transferToken = 0,
 	}
 	sessions[player] = session
@@ -170,10 +172,11 @@ local function onPlayerAdded(player: Player)
 	end
 	local saved = if typeof(result) == "table" then result :: { [string]: any } else nil
 	local earned = math.max(0, InventoryService.getAura(player) - session.auraAtJoin)
-	InventoryService.load(player, saved, earned)
+	local earnedDenarii = math.max(0, InventoryService.getDenarii(player) - session.denariiAtJoin)
+	InventoryService.load(player, saved, earned, earnedDenarii)
 	applyPreferences(player)
 	setStatus(player, session, "Loaded")
-	print(PREFIX, ("Data loaded for %s (%s, %d Aura)"):format(player.Name, if saved then "saved profile" else "new profile", InventoryService.getAura(player)))
+	print(PREFIX, ("Data loaded for %s (%s, %d Aura, %d Denarii)"):format(player.Name, if saved then "saved profile" else "new profile", InventoryService.getAura(player), InventoryService.getDenarii(player)))
 	-- Equipment in the hands / on the body follows the loaded loadout
 	local refresh = loadedCallback
 	if refresh then

@@ -15,7 +15,8 @@ export type WeaponDefinition = {
 	DisplayName: string,
 	Kind: WeaponKind,
 	Order: number,
-	Price: number,
+	Price: number, -- Denarii (CurrencyConfig)
+	AuraRequired: number, -- Aura needed before it can be bought or equipped (Aura is never spent)
 	TwoHanded: boolean, -- uses both hands: no shield, built-in parry instead
 	Basic: string,
 	Aerial: string,
@@ -32,7 +33,8 @@ type WeaponSpec = {
 	Id: string,
 	DisplayName: string,
 	Kind: WeaponKind,
-	Price: number,
+	Price: number, -- Denarii (CurrencyConfig)
+	AuraRequired: number, -- Aura needed before it can be bought or equipped (Aura is never spent)
 	TwoHanded: boolean,
 	Basic: string,
 	Aerial: string,
@@ -41,14 +43,14 @@ type WeaponSpec = {
 }
 
 local specs: { WeaponSpec } = {
-	{ Id = "RustyGladius", DisplayName = "Rusty Gladius", Kind = "Melee", Price = 0, TwoHanded = false, Basic = "Gladius_Basic", Aerial = "Gladius_Aerial", Description = "Starter sword", Row = "Blades" },
-	{ Id = "LegionSword", DisplayName = "Legion Sword", Kind = "Melee", Price = 80, TwoHanded = false, Basic = "Legion_Basic", Aerial = "Legion_Aerial", Description = "Polished bronze and steel", Row = "Blades" },
-	{ Id = "HunterBow", DisplayName = "Hunter Bow", Kind = "Bow", Price = 130, TwoHanded = false, Basic = "Bow_Basic", Aerial = "Bow_Aerial", Description = "Ranged, blocked by walls", Row = "Ranged" },
-	{ Id = "MorningStar", DisplayName = "Gladiator Morning Star", Kind = "Melee", Price = 190, TwoHanded = false, Basic = "MorningStar_Basic", Aerial = "MorningStar_Aerial", Description = "Wide, heavy swings", Row = "Heavy" },
-	{ Id = "Trident", DisplayName = "Gladiator Trident", Kind = "Melee", Price = 260, TwoHanded = false, Basic = "Trident_Basic", Aerial = "Trident_Aerial", Description = "Long thrusts and a net", Row = "Heavy" },
-	{ Id = "HopliteSpear", DisplayName = "Hoplite Spear", Kind = "Melee", Price = 300, TwoHanded = false, Basic = "Hoplite_Basic", Aerial = "Hoplite_Aerial", Description = "Longest reach", Row = "Heavy" },
-	{ Id = "TwinDaggers", DisplayName = "Twin Arena Daggers", Kind = "Melee", Price = 340, TwoHanded = true, Basic = "Daggers_Basic", Aerial = "Daggers_Aerial", Description = "Two-handed: no shield, built-in parry", Row = "Blades" },
-	{ Id = "BattleAxe", DisplayName = "Arena Battle Axe", Kind = "Melee", Price = 380, TwoHanded = false, Basic = "Axe_Basic", Aerial = "Axe_Aerial", Description = "Slow, heavy, devastating", Row = "Heavy" },
+	{ Id = "RustyGladius", DisplayName = "Rusty Gladius", Kind = "Melee", Price = 0, AuraRequired = 0, TwoHanded = false, Basic = "Gladius_Basic", Aerial = "Gladius_Aerial", Description = "Starter sword", Row = "Blades" },
+	{ Id = "LegionSword", DisplayName = "Legion Sword", Kind = "Melee", Price = 80, AuraRequired = 80, TwoHanded = false, Basic = "Legion_Basic", Aerial = "Legion_Aerial", Description = "Polished bronze and steel", Row = "Blades" },
+	{ Id = "HunterBow", DisplayName = "Hunter Bow", Kind = "Bow", Price = 130, AuraRequired = 130, TwoHanded = false, Basic = "Bow_Basic", Aerial = "Bow_Aerial", Description = "Ranged, blocked by walls", Row = "Ranged" },
+	{ Id = "MorningStar", DisplayName = "Gladiator Morning Star", Kind = "Melee", Price = 190, AuraRequired = 190, TwoHanded = false, Basic = "MorningStar_Basic", Aerial = "MorningStar_Aerial", Description = "Wide, heavy swings", Row = "Heavy" },
+	{ Id = "Trident", DisplayName = "Gladiator Trident", Kind = "Melee", Price = 260, AuraRequired = 260, TwoHanded = false, Basic = "Trident_Basic", Aerial = "Trident_Aerial", Description = "Long thrusts and a net", Row = "Heavy" },
+	{ Id = "HopliteSpear", DisplayName = "Hoplite Spear", Kind = "Melee", Price = 300, AuraRequired = 300, TwoHanded = false, Basic = "Hoplite_Basic", Aerial = "Hoplite_Aerial", Description = "Longest reach", Row = "Heavy" },
+	{ Id = "TwinDaggers", DisplayName = "Twin Arena Daggers", Kind = "Melee", Price = 340, AuraRequired = 340, TwoHanded = true, Basic = "Daggers_Basic", Aerial = "Daggers_Aerial", Description = "Two-handed: no shield, built-in parry", Row = "Blades" },
+	{ Id = "BattleAxe", DisplayName = "Arena Battle Axe", Kind = "Melee", Price = 380, AuraRequired = 380, TwoHanded = false, Basic = "Axe_Basic", Aerial = "Axe_Aerial", Description = "Slow, heavy, devastating", Row = "Heavy" },
 }
 
 local CATEGORY: { [string]: string } = {
@@ -73,6 +75,7 @@ for order, spec in specs do
 		Kind = spec.Kind,
 		Order = order,
 		Price = spec.Price,
+		AuraRequired = spec.AuraRequired,
 		TwoHanded = spec.TwoHanded,
 		Basic = spec.Basic,
 		Aerial = spec.Aerial,

@@ -138,7 +138,7 @@ function NotificationController.create(group: (string, Vector2, UDim2, UDim2?) -
 				if slot.kind == kind and slot.frame.Visible and now - slot.started <= UiConfig.AuraCombineWindow + (def.Seconds or 1) then
 					slot.amount += amount
 					slot.expires = now + (def.Seconds or UiConfig.NotificationSeconds)
-					render(slot, if kind == "Aura" then ("+%d"):format(slot.amount) else ("+%d HEALTH"):format(slot.amount))
+					render(slot, if kind == "Aura" then ("+%d"):format(slot.amount) elseif kind == "Denarii" then ("+%d DENARII"):format(slot.amount) else ("+%d HEALTH"):format(slot.amount))
 					slot.offset.Scale = 1.15
 					TweenService:Create(slot.offset, TweenInfo.new(0.15), { Scale = 1 }):Play()
 					return

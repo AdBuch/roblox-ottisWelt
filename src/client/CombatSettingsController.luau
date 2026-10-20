@@ -3,7 +3,6 @@
 --   CLASSIC ⇄ WILD   control mode (ControlModeDefinitions). A switch requested during an attack waits
 --                    until the attack finished; switching cancels unfinished gestures and ends a block
 --                    (InputController.onModeChanged).
---   BLOOD            Auto / Stylized / Reduced / Off (BloodConfig, never changes combat)
 --   CAMERA           camera shake Full / Reduced / Off (CombatEffectsConfig)
 -- Values come from the server-owned Pref_* attributes (the saved profile) and changes are sent
 -- through the SavePreference remote (whitelisted there).
@@ -19,7 +18,6 @@ local UiConfig = require(Shared:WaitForChild("UiConfig"))
 
 export type Settings = {
 	getMode: () -> string,
-	getBlood: () -> string,
 	getCameraShake: () -> string,
 	onModeChanged: (callback: (mode: string) -> ()) -> (),
 	onChanged: (callback: () -> ()) -> (),
@@ -27,7 +25,6 @@ export type Settings = {
 
 local CombatSettingsController = {}
 
-local BLOOD_ORDER = { "Auto", "Stylized", "Reduced", "Off" }
 local CAMERA_ORDER = { "Full", "Reduced", "Off" }
 
 local function pill(parent: Instance, text: string, order: number): TextButton
@@ -54,17 +51,14 @@ function CombatSettingsController.start(edge: Frame, preferenceRemote: RemoteEve
 	local changeListeners: { () -> () } = {}
 	local mode = ControlModeDefinitions.Default :: string
 	local pendingMode: string? = nil
-	local blood = "Auto"
 	local camera = "Full"
 
 	local modeButton = pill(edge, "CLASSIC", 3)
-	local bloodButton = pill(edge, "BLOOD\nAUTO", 4)
-	local cameraButton = pill(edge, "CAM\nFULL", 5)
+	local cameraButton = pill(edge, "CAM\nFULL", 4)
 
 	local function refreshLabels()
 		modeButton.Text = (if pendingMode then pendingMode else mode):upper()
 		modeButton.TextColor3 = if mode == "Wild" then UiConfig.Gold else Color3.new(1, 1, 1)
-		bloodButton.Text = "BLOOD\n" .. blood:upper()
 		cameraButton.Text = "CAM\n" .. camera:upper()
 	end
 
@@ -119,10 +113,6 @@ function CombatSettingsController.start(edge: Frame, preferenceRemote: RemoteEve
 		if typeof(saved) == "string" and saved ~= "" then
 			applyMode(saved, false)
 		end
-		local savedBlood = player:GetAttribute(Config.PreferencePrefix .. "BloodFx")
-		if typeof(savedBlood) == "string" and table.find(BLOOD_ORDER, savedBlood) then
-			blood = savedBlood
-		end
 		local savedCamera = player:GetAttribute(Config.PreferencePrefix .. "CameraShake")
 		if typeof(savedCamera) == "string" and table.find(CAMERA_ORDER, savedCamera) then
 			camera = savedCamera
@@ -136,15 +126,6 @@ function CombatSettingsController.start(edge: Frame, preferenceRemote: RemoteEve
 	modeButton.Activated:Connect(function()
 		applyMode(if (pendingMode or mode) == "Classic" then "Wild" else "Classic", true)
 	end)
-	bloodButton.Activated:Connect(function()
-		blood = BLOOD_ORDER[(table.find(BLOOD_ORDER, blood) or 1) % #BLOOD_ORDER + 1]
-		save("BloodFx", blood)
-		refreshLabels()
-		notify("BLOOD EFFECTS: " .. blood:upper())
-		for _, callback in changeListeners do
-			callback()
-		end
-	end)
 	cameraButton.Activated:Connect(function()
 		camera = CAMERA_ORDER[(table.find(CAMERA_ORDER, camera) or 1) % #CAMERA_ORDER + 1]
 		save("CameraShake", camera)
@@ -154,7 +135,7 @@ function CombatSettingsController.start(edge: Frame, preferenceRemote: RemoteEve
 			callback()
 		end
 	end)
-	for _, key in { "ControlMode", "BloodFx", "CameraShake" } do
+	for _, key in { "ControlMode", "CameraShake" } do
 		player:GetAttributeChangedSignal(Config.PreferencePrefix .. key):Connect(fromAttributes)
 	end
 	fromAttributes()
@@ -162,9 +143,6 @@ function CombatSettingsController.start(edge: Frame, preferenceRemote: RemoteEve
 	return {
 		getMode = function()
 			return mode
-		end,
-		getBlood = function()
-			return blood
 		end,
 		getCameraShake = function()
 			return camera

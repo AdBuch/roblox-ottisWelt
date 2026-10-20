@@ -2,8 +2,9 @@
 -- Gladiator Armory presentation (all decisions happen on the server):
 --   * The displays' ProximityPrompts use the Custom style. When Roblox shows the closest one
 --     (PromptShown), this highlights that display and opens a compact information card: name,
---     section, the stats of its kind, price and OWNED / EQUIPPED state, an action button
---     (BUY / EQUIP / EQUIPPED) and an optional INFO line (special / projectile properties).
+--     section, the stats of its kind, the Aura unlock (LOCKED until reached), the price in Denarii and
+--     OWNED / EQUIPPED state, an action button (LOCKED / BUY / EQUIP / EQUIPPED) and an optional
+--     INFO line (special / projectile properties).
 --   * F (keyboard), X (gamepad) or the card's button (touch / mouse) trigger the same prompt;
 --     the server validates and answers through the Shop feedback notification.
 --   * Equipped items keep a green outline. No large permanent text panels in the world.
@@ -28,6 +29,7 @@ local ShopController = {}
 type Names = {
 	tag: string,
 	aura: string,
+	denarii: string,
 	equippedWeapon: string,
 	equippedShield: string,
 	equippedArmor: string,
@@ -240,14 +242,15 @@ function ShopController.start(names: Names, group: GroupFn)
 	focus.DepthMode = Enum.HighlightDepthMode.Occluded
 	focus.Enabled = false
 
-	local function itemInfo(item: Instance): (string, string, boolean, boolean, number)
+	-- (kind, id, owned, equipped, price in Denarii, Aura required to unlock)
+	local function itemInfo(item: Instance): (string, string, boolean, boolean, number, number)
 		local kind = tostring(item:GetAttribute("ItemKind"))
 		local id = tostring(item:GetAttribute("ItemId"))
 		local ownedName = if kind == "Weapon" then names.ownedWeapons elseif kind == "Shield" then names.ownedShields else names.ownedArmor
 		local equippedName = if kind == "Weapon" then names.equippedWeapon elseif kind == "Shield" then names.equippedShield else names.equippedArmor
 		local owned = splitSet(player:GetAttribute(ownedName))[id] == true
 		local equipped = player:GetAttribute(equippedName) == id
-		return kind, id, owned, equipped, tonumber(item:GetAttribute("Price")) or 0
+		return kind, id, owned, equipped, tonumber(item:GetAttribute("Price")) or 0, tonumber(item:GetAttribute("AuraRequired")) or 0
 	end
 
 	local function keyHint(): string
@@ -266,7 +269,7 @@ function ShopController.start(names: Names, group: GroupFn)
 			focus.Enabled = false
 			return
 		end
-		local kind, id, owned, equipped, price = itemInfo(item)
+		local kind, id, owned, equipped, price, required = itemInfo(item)
 		local card = describe(kind, id)
 		if not card then
 			frame.Visible = false
@@ -280,6 +283,8 @@ function ShopController.start(names: Names, group: GroupFn)
 		end
 		info.Text = card.info
 		local aura = tonumber(player:GetAttribute(names.aura)) or 0
+		local denarii = tonumber(player:GetAttribute(names.denarii)) or 0
+		local unlocked = aura >= required
 		local loading = player:GetAttribute(names.dataStatus) == "Loading"
 		if equipped then
 			status.Text = "EQUIPPED"
@@ -293,11 +298,18 @@ function ShopController.start(names: Names, group: GroupFn)
 			action.Text = keyHint() .. "EQUIP"
 			action.BackgroundColor3 = Color3.fromRGB(46, 96, 150)
 			action.Active = true
+		elseif not unlocked then
+			-- Aura unlocks gear (it is never spent); until then it can't be bought
+			status.Text = ("LOCKED · needs %d AURA · you have %d"):format(required, aura)
+			status.TextColor3 = Color3.fromRGB(190, 190, 200)
+			action.Text = ("LOCKED · %d AURA"):format(required)
+			action.BackgroundColor3 = Color3.fromRGB(70, 66, 64)
+			action.Active = false
 		else
-			local affordable = aura >= price
-			status.Text = if price > 0 then ("PRICE  %d AURA · you have %d"):format(price, aura) else "FREE"
-			status.TextColor3 = if affordable then UiConfig.Gold else Color3.fromRGB(255, 130, 120)
-			action.Text = keyHint() .. (if price > 0 then ("BUY · %d AURA"):format(price) else "TAKE")
+			local affordable = denarii >= price
+			status.Text = if price > 0 then ("PRICE  %d DENARII · you have %d"):format(price, denarii) else "FREE"
+			status.TextColor3 = if affordable then Color3.fromRGB(214, 222, 232) else Color3.fromRGB(255, 130, 120)
+			action.Text = keyHint() .. (if price > 0 then ("BUY · %d DENARII"):format(price) else "TAKE")
 			action.BackgroundColor3 = if affordable then Color3.fromRGB(150, 40, 34) else Color3.fromRGB(90, 60, 56)
 			action.Active = true
 		end
@@ -373,7 +385,7 @@ function ShopController.start(names: Names, group: GroupFn)
 		task.defer(refreshItem, item) -- wait for descendants to replicate
 	end)
 	for _, attribute in {
-		names.aura, names.equippedWeapon, names.equippedShield, names.equippedArmor,
+		names.aura, names.denarii, names.equippedWeapon, names.equippedShield, names.equippedArmor,
 		names.ownedWeapons, names.ownedShields, names.ownedArmor, names.dataStatus,
 	} do
 		player:GetAttributeChangedSignal(attribute):Connect(refreshAll)

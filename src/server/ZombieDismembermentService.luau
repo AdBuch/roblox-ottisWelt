@@ -129,6 +129,8 @@ end
 
 -- Removes one limb or armor group from a living zombie (visual part of the loss).
 function ZombieDismembermentService.detach(rig: ZombieRig, key: LossKey, fromPosition: Vector3)
+	-- Every segment tagged with this limb goes together: the jointed legionary's forearm / shin (Limb
+	-- attribute = its logical arm / leg), hand gear, bracers, sandals and weapon in the hand.
 	local parts = partsOf(rig.model, key)
 	spawnDebris(parts, fromPosition)
 	for _, part in parts do
@@ -140,6 +142,13 @@ function ZombieDismembermentService.detach(rig: ZombieRig, key: LossKey, fromPos
 			elseif child:IsA("ParticleEmitter") then
 				child.Enabled = false
 			end
+		end
+	end
+	-- Joints whose child part is gone (elbow, knee, shoulder, hip) are switched off, so the rest of the
+	-- body never pulls on hidden segments. The dark cap below closes the cut at the shoulder or hip.
+	for _, joint in rig.model:GetDescendants() do
+		if joint:IsA("Motor6D") and joint.Part1 and joint.Part1:GetAttribute("Lost") then
+			joint.Enabled = false
 		end
 	end
 	local limb = if key == "RightArm" then rig.rightArm

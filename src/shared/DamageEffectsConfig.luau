@@ -1,25 +1,15 @@
 --!strict
--- Stylized damage feedback for players and zombies, plus zombie condition states and limb loss.
--- Purely visual switches never change combat logic: with BloodEnabled = false the same hits
--- still land, zombies still change state and lose limbs (if enabled), only the particles change.
---
---   BloodEnabled               brief dark-red stylized particles on validated hits
---   ReducedEffectsMode         replaces blood with orange-red sparks / dust everywhere
---   PlayerBloodEnabled         particles on players (off -> sparks)
---   ZombieDismembermentEnabled zombies may lose limbs/armor after strong hits (never players/Otti)
--- Otti never bleeds: boss hits always use sparks and sand dust.
+-- Hit feedback for players and zombies (always child-friendly: NO blood anywhere), plus zombie
+-- condition states and limb loss. Purely visual switches never change combat logic.
+--   Validated hits show short orange sparks and sand dust; Otti, players and zombies alike.
+--   ZombieDismembermentEnabled  zombies may lose limbs/armor after strong hits (never players/Otti);
+--                               stylized: the parts fall, a dark cap closes the joint, no gore
 
 local DamageEffectsConfig = {
-	BloodEnabled = true,
-	ReducedEffectsMode = false,
-	PlayerBloodEnabled = true,
 	ZombieDismembermentEnabled = true,
 
 	-- Particles
-	BloodColor = Color3.fromRGB(122, 18, 26),
-	BloodHighlight = Color3.fromRGB(176, 36, 40),
-	ZombieBloodColor = Color3.fromRGB(96, 26, 30), -- slightly darker, still stylized
-	SparkColor = Color3.fromRGB(255, 140, 70), -- reduced mode / boss
+	SparkColor = Color3.fromRGB(255, 140, 70),
 	DustColor = Color3.fromRGB(214, 190, 140),
 	ParticleLifetime = 0.35, -- very short; nothing persists
 	MaxBurstsPerSecond = 30, -- client-side safety cap
@@ -52,25 +42,5 @@ local DamageEffectsConfig = {
 		ArmorChanceMultiplier = 1.4, -- helmets/shoulder plates come off a little more easily
 	}),
 }
-
--- The visual mode clients should use for a hit ("Blood" or "Sparks").
-function DamageEffectsConfig.styleFor(kind: string): string
-	if DamageEffectsConfig.ReducedEffectsMode or not DamageEffectsConfig.BloodEnabled or kind == "Boss" then
-		return "Sparks"
-	end
-	if kind == "Player" and not DamageEffectsConfig.PlayerBloodEnabled then
-		return "Sparks"
-	end
-	return "Blood"
-end
-
-function DamageEffectsConfig.modeName(): string
-	if not DamageEffectsConfig.BloodEnabled then
-		return "OFF"
-	elseif DamageEffectsConfig.ReducedEffectsMode then
-		return "REDUCED"
-	end
-	return "STYLIZED"
-end
 
 return table.freeze(DamageEffectsConfig)

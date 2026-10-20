@@ -22,7 +22,7 @@ Units: 1 stud ≈ 28 cm. A default Roblox avatar is about 5 studs tall.
 - **Roman gladiators who came back from the dead.** They wear bronze helmets with green
   oxidation (patina), leather harnesses, pteruges skirts made of leather strips, sandals and greaves.
 - **Damage is stylized only.** It shows as scratches, cracks and torn cloth, never as wounds or
-  gore. The optional blood is a stylized splash and is configurable in the settings.
+  gore. There is no blood at all: the game is meant for children, hits show sparks and dust only.
 - **Readability comes first.** Players must be able to tell each type apart from its silhouette
   and weapon alone, even at mobile resolution and distance.
 

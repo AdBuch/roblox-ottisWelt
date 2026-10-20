@@ -1148,7 +1148,7 @@ function ZombieService.applyDamage(z: Zombie, attacker: Player, amount: number, 
 	flash(z, Color3.new(1, 1, 1))
 	local hitPosition = if extra and extra.hitPosition then extra.hitPosition else z.root.Position + Vector3.new(0, 1, 0)
 	z.humanoid:TakeDamage(amount)
-	-- Presentation of the CONFIRMED hit (blood / sparks / dust by weapon category; stains on the sand)
+	-- Presentation of the CONFIRMED hit (sparks / dust by weapon category; no blood)
 	local weapon = extra and extra.weaponId and WeaponDefinitions.ById[extra.weaponId]
 	DamageEffectsService.hit("Zombie", hitPosition, math.clamp(amount / 30, 0.4, 1.5), CombatUtil.flat(z.root.Position - fromPosition), {
 		category = if weapon then weapon.Category else nil,

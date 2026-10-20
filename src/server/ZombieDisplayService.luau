@@ -53,7 +53,7 @@ local function plaque(parent: Instance, cframe: CFrame, def: ZombieDefinition)
 		{ text = def.DisplayName:upper(), color = GOLD, scale = 0.2, font = Enum.Font.GothamBlack },
 		{ text = def.Role, color = Color3.new(1, 1, 1), scale = 0.13, font = Enum.Font.GothamBold },
 		{ text = ("Health: %d  ·  Damage: %d"):format(def.Health, def.Damage), color = Color3.new(1, 1, 1), scale = 0.13, font = Enum.Font.Gotham },
-		{ text = ("Reward: %d Aura  ·  From round %d"):format(def.Coins, def.AvailableFromRound), color = Color3.fromRGB(255, 220, 120), scale = 0.13, font = Enum.Font.Gotham },
+		{ text = ("Reward: %d Aura + Denarii  ·  From round %d"):format(def.Coins, def.AvailableFromRound), color = Color3.fromRGB(255, 220, 120), scale = 0.13, font = Enum.Font.Gotham },
 		{ text = def.SpecialText, color = Color3.fromRGB(255, 190, 150), scale = 0.13, font = Enum.Font.GothamMedium },
 	}
 	for i, line in lines do

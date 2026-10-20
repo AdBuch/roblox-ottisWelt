@@ -3,7 +3,7 @@
 -- Lower Priority number = more important. Critical warnings and results are never hidden by the
 -- HUD mode; everything else follows the "Notifications" group.
 
-export type Kind = "Critical" | "Result" | "Round" | "Heal" | "Aura" | "Info"
+export type Kind = "Critical" | "Result" | "Round" | "Heal" | "Aura" | "Denarii" | "Info"
 
 export type Definition = {
 	Priority: number,
@@ -19,6 +19,7 @@ local NotificationDefinitions: { [Kind]: Definition } = {
 	Round = { Priority = 3, Color = Color3.fromRGB(255, 215, 90), Seconds = 1.6, AlwaysShown = false, Combine = false },
 	Heal = { Priority = 4, Color = Color3.fromRGB(120, 255, 120), Seconds = 1.4, AlwaysShown = false, Combine = true },
 	Aura = { Priority = 5, Color = Color3.fromRGB(255, 210, 80), Seconds = 1.5, AlwaysShown = false, Combine = true },
+	Denarii = { Priority = 5, Color = Color3.fromRGB(214, 222, 232), Seconds = 1.5, AlwaysShown = false, Combine = true },
 	Info = { Priority = 6, Color = Color3.fromRGB(235, 235, 235), Seconds = 1.6, AlwaysShown = false, Combine = false },
 }
 

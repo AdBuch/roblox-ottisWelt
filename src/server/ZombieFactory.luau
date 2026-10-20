@@ -54,6 +54,17 @@ export type ZombieRig = {
 	deathPuff: ParticleEmitter,
 	guardGlow: PointLight?, -- champion shield telegraph
 	visibleParts: { BasePart },
+	-- Jointed legionary only (Phase 1): elbow and knee segments. For other types the "forearm" and
+	-- "shin" fields point at the upper arm / leg and the elbow / knee joints are nil.
+	jointed: boolean,
+	rightForearm: BasePart,
+	leftForearm: BasePart,
+	rightShin: BasePart,
+	leftShin: BasePart,
+	rightElbow: Motor6D?,
+	leftElbow: Motor6D?,
+	rightKnee: Motor6D?,
+	leftKnee: Motor6D?,
 }
 
 type MeshKind = "Sphere" | "Head"
@@ -164,6 +175,22 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 	local headY = torsoTop + H.Y / 2 - 0.15
 	local frontZ = -H.Z / 2
 
+	-- Jointed legionary (Phase 1): elbow and knee joints split each limb into an upper and a lower
+	-- segment. Upper segments keep the names RightArm / LeftArm / RightLeg / LeftLeg, so every
+	-- existing reference (shoulders, hips, loss keys) still points at the same logical limb.
+	-- Other types keep single-part limbs: the lower-segment fields then just alias the upper part.
+	local jointed = def.Id == "LegionRemnant"
+	local upperArmLen = if jointed then Arm.Y * 0.52 else Arm.Y
+	local lowerArmLen = Arm.Y - upperArmLen
+	local armUpperY = (shoulderY + 0.25) - upperArmLen / 2 -- equals armY when not jointed
+	local elbowY = armUpperY - upperArmLen / 2
+	local lowerArmY = elbowY - lowerArmLen / 2
+	local upperLegLen = if jointed then Leg.Y * 0.5 else Leg.Y
+	local lowerLegLen = Leg.Y - upperLegLen
+	local legUpperY = legLen - upperLegLen / 2 -- equals legLen / 2 when not jointed
+	local kneeY = legLen - upperLegLen
+	local lowerLegY = kneeY - lowerLegLen / 2
+
 	-- Core rig. The root is the zombie's solid body (sized to the torso); everything else is visual.
 	local rootSize = Vector3.new(math.max(2, T.X * 0.8), 2, math.max(1.2, T.Z * 0.85))
 	local root = newPart("HumanoidRootPart", rootSize, CFrame.new(0, legLen + 1, 0), SKIN, smooth)
@@ -178,10 +205,24 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 
 	local torso = newPart("Torso", T, CFrame.new(0, torsoY, 0), SKIN, smooth, nil, "Sphere")
 	local head = newPart("Head", H, CFrame.new(0, headY, 0), SKIN, smooth, nil, "Head")
-	local rightArm = newPart("RightArm", Arm, CFrame.new(shoulderX, armY, 0), SKIN, smooth, nil, "Head")
-	local leftArm = newPart("LeftArm", Arm, CFrame.new(-shoulderX, armY, 0), SKIN, smooth, nil, "Head")
-	local rightLeg = newPart("RightLeg", Leg, CFrame.new(body.HipSpread, legLen / 2, 0), SKIN, smooth, nil, "Head")
-	local leftLeg = newPart("LeftLeg", Leg, CFrame.new(-body.HipSpread, legLen / 2, 0), SKIN, smooth, nil, "Head")
+	local rightArm = newPart("RightArm", Vector3.new(Arm.X, upperArmLen, Arm.Z), CFrame.new(shoulderX, armUpperY, 0), SKIN, smooth, nil, "Head")
+	local leftArm = newPart("LeftArm", Vector3.new(Arm.X, upperArmLen, Arm.Z), CFrame.new(-shoulderX, armUpperY, 0), SKIN, smooth, nil, "Head")
+	local rightLeg = newPart("RightLeg", Vector3.new(Leg.X, upperLegLen, Leg.Z), CFrame.new(body.HipSpread, legUpperY, 0), SKIN, smooth, nil, "Head")
+	local leftLeg = newPart("LeftLeg", Vector3.new(Leg.X, upperLegLen, Leg.Z), CFrame.new(-body.HipSpread, legUpperY, 0), SKIN, smooth, nil, "Head")
+
+	-- Lower segments: plain Parts, clearly marked as interim. They inherit the logical limb through
+	-- the "Limb" attribute, so loss, debris and damage details treat them as part of that arm / leg.
+	local function segment(name: string, size: Vector3, position: Vector3, limbName: string): BasePart
+		local part = newPart(name, size, CFrame.new(position), SKIN, smooth, nil, "Head")
+		part:SetAttribute("Limb", limbName)
+		part:SetAttribute("Segment", name)
+		part:SetAttribute("Interim", true)
+		return part
+	end
+	local rightForearm = if jointed then segment("RightForearm", Vector3.new(Arm.X * 0.92, lowerArmLen, Arm.Z * 0.92), Vector3.new(shoulderX, lowerArmY, 0), "RightArm") else rightArm
+	local leftForearm = if jointed then segment("LeftForearm", Vector3.new(Arm.X * 0.92, lowerArmLen, Arm.Z * 0.92), Vector3.new(-shoulderX, lowerArmY, 0), "LeftArm") else leftArm
+	local rightShin = if jointed then segment("RightShin", Vector3.new(Leg.X * 0.92, lowerLegLen, Leg.Z * 0.92), Vector3.new(body.HipSpread, lowerLegY, 0), "RightLeg") else rightLeg
+	local leftShin = if jointed then segment("LeftShin", Vector3.new(Leg.X * 0.92, lowerLegLen, Leg.Z * 0.92), Vector3.new(-body.HipSpread, lowerLegY, 0), "LeftLeg") else leftLeg
 
 	for _, limb in { torso, head, rightArm, leftArm, rightLeg, leftLeg } do
 		limb:SetAttribute("Limb", limb.Name)
@@ -193,10 +234,15 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 	local leftShoulder = motor("LeftShoulder", torso, leftArm, Vector3.new(-shoulderX, shoulderY, 0))
 	motor("RightHip", torso, rightLeg, Vector3.new(body.HipSpread, legLen, 0))
 	motor("LeftHip", torso, leftLeg, Vector3.new(-body.HipSpread, legLen, 0))
+	-- Elbow and knee joints (jointed legionary only)
+	local rightElbow: Motor6D? = if jointed then motor("RightElbow", rightArm, rightForearm, Vector3.new(shoulderX, elbowY, 0)) else nil
+	local leftElbow: Motor6D? = if jointed then motor("LeftElbow", leftArm, leftForearm, Vector3.new(-shoulderX, elbowY, 0)) else nil
+	local rightKnee: Motor6D? = if jointed then motor("RightKnee", rightLeg, rightShin, Vector3.new(body.HipSpread, kneeY, 0)) else nil
+	local leftKnee: Motor6D? = if jointed then motor("LeftKnee", leftLeg, leftShin, Vector3.new(-body.HipSpread, kneeY, 0)) else nil
 
 	-- Fists
-	for _, arm in { rightArm, leftArm } do
-		add(arm, "Fist", Vector3.one * Arm.X * 1.15, Vector3.new(arm.Position.X / S, handY, 0), SKIN, smooth, nil, BALL)
+	for _, hand in { rightForearm, leftForearm } do
+		add(hand, "Fist", Vector3.one * Arm.X * 1.15, Vector3.new(hand.Position.X / S, handY, 0), SKIN, smooth, nil, BALL)
 	end
 
 	-- Face: glowing amber eyes with pupils, angry brows, toothy (friendly) grin, a few stitches
@@ -367,22 +413,24 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 	end
 
 	-- Bracers
-	for _, arm in { rightArm, leftArm } do
-		add(arm, "Bracer", Vector3.new(Arm.X * 1.15, 0.6, Arm.Z * 1.15), Vector3.new(arm.Position.X / S, handY + Arm.X * 0.55, 0), LEATHER, leather, nil, nil, "Head")
+	for _, hand in { rightForearm, leftForearm } do
+		add(hand, "Bracer", Vector3.new(Arm.X * 1.15, 0.6, Arm.Z * 1.15), Vector3.new(hand.Position.X / S, handY + Arm.X * 0.55, 0), LEATHER, leather, nil, nil, "Head")
 	end
 
 	-- Legs: bronze greaves with patina, knee guards, sandals with straps, green toes
 	for _, leg in { leftLeg, rightLeg } do
 		local x = leg.Position.X / S
-		add(leg, "Greave", Vector3.new(Leg.X * 0.85, Leg.Y * 0.42, 0.4), Vector3.new(x, Leg.Y * 0.38, -Leg.Z * 0.42), BRONZE, metal, nil, nil, "Sphere")
-		add(leg, "Patina", Vector3.new(Leg.X * 0.3, 0.3, 0.08), Vector3.new(x + 0.1, Leg.Y * 0.32, -Leg.Z * 0.6), OXIDE, metal)
+		-- Shin gear follows the lower segment (so it bends with the knee); the knee guard stays on the thigh
+		local shin = if leg == rightLeg then rightShin else leftShin
+		add(shin, "Greave", Vector3.new(Leg.X * 0.85, Leg.Y * 0.42, 0.4), Vector3.new(x, Leg.Y * 0.38, -Leg.Z * 0.42), BRONZE, metal, nil, nil, "Sphere")
+		add(shin, "Patina", Vector3.new(Leg.X * 0.3, 0.3, 0.08), Vector3.new(x + 0.1, Leg.Y * 0.32, -Leg.Z * 0.6), OXIDE, metal)
 		add(leg, "KneeGuard", Vector3.one * Leg.X * 0.55, Vector3.new(x, Leg.Y * 0.66, -Leg.Z * 0.38), BRONZE_DARK, Enum.Material.Metal, nil, BALL)
-		add(leg, "Sole", Vector3.new(Leg.X * 1.15, 0.28, Leg.Z * 1.45), Vector3.new(x, 0.14, -0.2), LEATHER_DARK, leather, nil, nil, "Head")
+		add(shin, "Sole", Vector3.new(Leg.X * 1.15, 0.28, Leg.Z * 1.45), Vector3.new(x, 0.14, -0.2), LEATHER_DARK, leather, nil, nil, "Head")
 		for _, y in { 0.35, 0.8 } do
-			add(leg, "SandalStrap", Vector3.new(Leg.X * 1.1, 0.14, Leg.Z * 1.1), Vector3.new(x, y, 0), LEATHER, leather, nil, nil, "Head")
+			add(shin, "SandalStrap", Vector3.new(Leg.X * 1.1, 0.14, Leg.Z * 1.1), Vector3.new(x, y, 0), LEATHER, leather, nil, nil, "Head")
 		end
 		for t = -1, 1 do
-			add(leg, "Toe", Vector3.one * 0.3, Vector3.new(x + t * Leg.X * 0.28, 0.38, -Leg.Z * 0.62), SKIN, smooth, nil, BALL)
+			add(shin, "Toe", Vector3.one * 0.3, Vector3.new(x + t * Leg.X * 0.28, 0.38, -Leg.Z * 0.62), SKIN, smooth, nil, BALL)
 		end
 	end
 
@@ -390,33 +438,33 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 	local hx = shoulderX
 	if gear.Weapon == "Gladius" or gear.Weapon == "LargeSword" then
 		local k = if gear.Weapon == "LargeSword" then 1.45 else 1
-		add(rightArm, "Grip", Vector3.new(0.26, 0.26, 0.8 * k), Vector3.new(hx, handY, -0.15), LEATHER_DARK, leather)
-		add(rightArm, "Pommel", Vector3.one * 0.38 * k, Vector3.new(hx, handY, 0.35 * k), if k > 1 then GOLD else BRONZE, Enum.Material.Metal, nil, BALL)
-		add(rightArm, "Guard", Vector3.new(0.9 * k, 0.22, 0.22), Vector3.new(hx, handY, -0.62 * k), if k > 1 then GOLD else BRONZE, metal)
-		add(rightArm, "Blade", Vector3.new(0.14, 0.42 * k, 2.0 * k), Vector3.new(hx, handY, -0.62 * k - 1.05 * k), STEEL, Enum.Material.Metal)
-		add(rightArm, "Tip", Vector3.new(0.14, 0.3 * k, 0.3 * k), Vector3.new(hx, handY, -0.62 * k - 2.1 * k), STEEL, Enum.Material.Metal, CFrame.Angles(math.rad(45), 0, 0))
+		add(rightForearm, "Grip", Vector3.new(0.26, 0.26, 0.8 * k), Vector3.new(hx, handY, -0.15), LEATHER_DARK, leather)
+		add(rightForearm, "Pommel", Vector3.one * 0.38 * k, Vector3.new(hx, handY, 0.35 * k), if k > 1 then GOLD else BRONZE, Enum.Material.Metal, nil, BALL)
+		add(rightForearm, "Guard", Vector3.new(0.9 * k, 0.22, 0.22), Vector3.new(hx, handY, -0.62 * k), if k > 1 then GOLD else BRONZE, metal)
+		add(rightForearm, "Blade", Vector3.new(0.14, 0.42 * k, 2.0 * k), Vector3.new(hx, handY, -0.62 * k - 1.05 * k), STEEL, Enum.Material.Metal)
+		add(rightForearm, "Tip", Vector3.new(0.14, 0.3 * k, 0.3 * k), Vector3.new(hx, handY, -0.62 * k - 2.1 * k), STEEL, Enum.Material.Metal, CFrame.Angles(math.rad(45), 0, 0))
 	elseif gear.Weapon == "Club" then
-		add(rightArm, "Shaft", Vector3.new(2.6, 0.5, 0.5), Vector3.new(hx, handY, -1.0), WOOD, Enum.Material.Wood, faceForward, CYLINDER)
-		add(rightArm, "ClubHead", Vector3.new(1.8, 1.1, 1.1), Vector3.new(hx, handY, -2.9), WOOD, Enum.Material.Wood, faceForward, CYLINDER)
+		add(rightForearm, "Shaft", Vector3.new(2.6, 0.5, 0.5), Vector3.new(hx, handY, -1.0), WOOD, Enum.Material.Wood, faceForward, CYLINDER)
+		add(rightForearm, "ClubHead", Vector3.new(1.8, 1.1, 1.1), Vector3.new(hx, handY, -2.9), WOOD, Enum.Material.Wood, faceForward, CYLINDER)
 		for _, z in { -2.3, -3.5 } do
-			add(rightArm, "Band", Vector3.new(0.2, 1.18, 1.18), Vector3.new(hx, handY, z), BRONZE, metal, faceForward, CYLINDER)
+			add(rightForearm, "Band", Vector3.new(0.2, 1.18, 1.18), Vector3.new(hx, handY, z), BRONZE, metal, faceForward, CYLINDER)
 		end
-		add(rightArm, "Stud", Vector3.one * 0.3, Vector3.new(hx, handY + 0.55, -2.9), BRONZE, Enum.Material.Metal, nil, BALL)
-		add(rightArm, "Crack", Vector3.new(0.05, 0.05, 0.9), Vector3.new(hx + 0.55, handY + 0.1, -2.9), CRACK, smooth)
+		add(rightForearm, "Stud", Vector3.one * 0.3, Vector3.new(hx, handY + 0.55, -2.9), BRONZE, Enum.Material.Metal, nil, BALL)
+		add(rightForearm, "Crack", Vector3.new(0.05, 0.05, 0.9), Vector3.new(hx + 0.55, handY + 0.1, -2.9), CRACK, smooth)
 	elseif gear.Weapon == "Bow" then
 		-- Roman recurve bow in the LEFT hand (vertical), the right hand draws
 		local bx, by, bz = -shoulderX, handY, -0.35
-		add(leftArm, "BowGrip", Vector3.new(0.22, 0.5, 0.22), Vector3.new(bx, by, bz), LEATHER_DARK, leather)
+		add(leftForearm, "BowGrip", Vector3.new(0.22, 0.5, 0.22), Vector3.new(bx, by, bz), LEATHER_DARK, leather)
 		for _, dir in { 1, -1 } do
-			add(leftArm, "BowLimb", Vector3.new(0.16, 1.5, 0.16), Vector3.new(bx, by + dir * 0.9, bz - 0.25), WOOD, Enum.Material.Wood, CFrame.Angles(math.rad(dir * 18), 0, 0))
-			add(leftArm, "BowTip", Vector3.new(0.14, 0.45, 0.14), Vector3.new(bx, by + dir * 1.7, bz - 0.2), BRONZE, metal, CFrame.Angles(math.rad(-dir * 35), 0, 0))
+			add(leftForearm, "BowLimb", Vector3.new(0.16, 1.5, 0.16), Vector3.new(bx, by + dir * 0.9, bz - 0.25), WOOD, Enum.Material.Wood, CFrame.Angles(math.rad(dir * 18), 0, 0))
+			add(leftForearm, "BowTip", Vector3.new(0.14, 0.45, 0.14), Vector3.new(bx, by + dir * 1.7, bz - 0.2), BRONZE, metal, CFrame.Angles(math.rad(-dir * 35), 0, 0))
 		end
-		add(leftArm, "BowString", Vector3.new(0.04, 3.5, 0.04), Vector3.new(bx, by, bz + 0.15), NET, fabric)
-		add(rightArm, "DrawGlove", Vector3.one * Arm.X * 0.7, Vector3.new(hx, handY - 0.1, -0.1), LEATHER, leather, nil, BALL)
+		add(leftForearm, "BowString", Vector3.new(0.04, 3.5, 0.04), Vector3.new(bx, by, bz + 0.15), NET, fabric)
+		add(rightForearm, "DrawGlove", Vector3.one * Arm.X * 0.7, Vector3.new(hx, handY - 0.1, -0.1), LEATHER, leather, nil, BALL)
 	else -- Spear (long reach: the visible shaft matches the validated attack range)
-		add(rightArm, "Shaft", Vector3.new(5.6, 0.22, 0.22), Vector3.new(hx, handY, -1.9), WOOD, Enum.Material.Wood, faceForward, CYLINDER)
-		add(rightArm, "SpearTip", Vector3.new(0.1, 0.5, 0.75), Vector3.new(hx, handY, -4.95), BRONZE, metal, CFrame.Angles(math.rad(45), 0, 0))
-		add(rightArm, "Binding", Vector3.one * 0.3, Vector3.new(hx, handY, -4.6), LEATHER_DARK, leather, nil, BALL)
+		add(rightForearm, "Shaft", Vector3.new(5.6, 0.22, 0.22), Vector3.new(hx, handY, -1.9), WOOD, Enum.Material.Wood, faceForward, CYLINDER)
+		add(rightForearm, "SpearTip", Vector3.new(0.1, 0.5, 0.75), Vector3.new(hx, handY, -4.95), BRONZE, metal, CFrame.Angles(math.rad(45), 0, 0))
+		add(rightForearm, "Binding", Vector3.one * 0.3, Vector3.new(hx, handY, -4.6), LEATHER_DARK, leather, nil, BALL)
 	end
 
 	-- Archer extras: quiver with visible arrows on the back, leather wrist guard on the bow arm
@@ -432,7 +480,7 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 		end
 	end
 	if gear.WristGuard then
-		add(leftArm, "WristGuard", Vector3.new(Arm.X * 1.25, 0.9, Arm.Z * 1.25), Vector3.new(-shoulderX, handY + Arm.X * 0.75, 0), LEATHER_DARK, leather, nil, nil, "Head")
+		add(leftForearm, "WristGuard", Vector3.new(Arm.X * 1.25, 0.9, Arm.Z * 1.25), Vector3.new(-shoulderX, handY + Arm.X * 0.75, 0), LEATHER_DARK, leather, nil, nil, "Head")
 	end
 
 	-- Left hand: shield or folded net
@@ -441,19 +489,19 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 		local diameter = if gear.Shield == "Round" then 2.6 elseif gear.Shield == "Ornate" then 3.0 else 1.5
 		local ornate = gear.Shield == "Ornate"
 		local center = Vector3.new(-shoulderX - 0.1, armY - 0.2, -Arm.Z * 0.5 - 0.3)
-		add(leftArm, "ShieldRim", Vector3.new(0.2, diameter, diameter), center, if ornate then GOLD else BRONZE, metal, faceForward, CYLINDER)
-		local face = add(leftArm, "ShieldFace", Vector3.new(0.25, diameter * 0.88, diameter * 0.88), center - Vector3.new(0, 0, 0.06), if ornate then BRONZE else SHIELD_RED, if ornate then Enum.Material.Metal else Enum.Material.WoodPlanks, faceForward, CYLINDER)
-		add(leftArm, "ShieldBoss", Vector3.one * diameter * 0.27, center - Vector3.new(0, 0, 0.2), if ornate then GOLD else BRONZE, Enum.Material.Metal, nil, BALL)
-		add(leftArm, "Patina", Vector3.new(0.06, diameter * 0.25, diameter * 0.2), center + Vector3.new(diameter * 0.3, diameter * 0.25, -0.12), OXIDE, metal)
+		add(leftForearm, "ShieldRim", Vector3.new(0.2, diameter, diameter), center, if ornate then GOLD else BRONZE, metal, faceForward, CYLINDER)
+		local face = add(leftForearm, "ShieldFace", Vector3.new(0.25, diameter * 0.88, diameter * 0.88), center - Vector3.new(0, 0, 0.06), if ornate then BRONZE else SHIELD_RED, if ornate then Enum.Material.Metal else Enum.Material.WoodPlanks, faceForward, CYLINDER)
+		add(leftForearm, "ShieldBoss", Vector3.one * diameter * 0.27, center - Vector3.new(0, 0, 0.2), if ornate then GOLD else BRONZE, Enum.Material.Metal, nil, BALL)
+		add(leftForearm, "Patina", Vector3.new(0.06, diameter * 0.25, diameter * 0.2), center + Vector3.new(diameter * 0.3, diameter * 0.25, -0.12), OXIDE, metal)
 		if gear.Shield == "Round" then
 			for _, x in { -0.55, 0.55 } do
-				add(leftArm, "Plank", Vector3.new(0.05, diameter * 0.78, 0.04), center + Vector3.new(x, 0, -0.2), LEATHER_DARK, Enum.Material.Wood)
+				add(leftForearm, "Plank", Vector3.new(0.05, diameter * 0.78, 0.04), center + Vector3.new(x, 0, -0.2), LEATHER_DARK, Enum.Material.Wood)
 			end
 		elseif ornate then
-			add(leftArm, "ShieldRing", Vector3.new(0.28, diameter * 0.6, diameter * 0.6), center - Vector3.new(0, 0, 0.09), BRONZE_DARK, Enum.Material.Metal, faceForward, CYLINDER)
+			add(leftForearm, "ShieldRing", Vector3.new(0.28, diameter * 0.6, diameter * 0.6), center - Vector3.new(0, 0, 0.09), BRONZE_DARK, Enum.Material.Metal, faceForward, CYLINDER)
 			for i = 0, 5 do
 				local angle = i / 6 * 2 * math.pi
-				add(leftArm, "ShieldStud", Vector3.one * 0.2, center + Vector3.new(math.cos(angle) * diameter * 0.37, math.sin(angle) * diameter * 0.37, -0.2), GOLD, Enum.Material.Metal, nil, BALL)
+				add(leftForearm, "ShieldStud", Vector3.one * 0.2, center + Vector3.new(math.cos(angle) * diameter * 0.37, math.sin(angle) * diameter * 0.37, -0.2), GOLD, Enum.Material.Metal, nil, BALL)
 			end
 			local glow = Instance.new("PointLight")
 			glow.Name = "GuardGlow"
@@ -467,11 +515,11 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 	end
 	if gear.Net then
 		local netCenter = Vector3.new(-shoulderX, handY - 0.1, -0.45)
-		add(leftArm, "Net", Vector3.new(0.95, 0.75, 0.95), netCenter, NET, fabric, nil, nil, "Sphere")
+		add(leftForearm, "Net", Vector3.new(0.95, 0.75, 0.95), netCenter, NET, fabric, nil, nil, "Sphere")
 		for _, rot in { 30, -30 } do
-			add(leftArm, "NetCord", Vector3.new(1.0, 0.06, 0.06), netCenter - Vector3.new(0, 0, 0.42), CRACK, fabric, CFrame.Angles(0, 0, math.rad(rot)))
+			add(leftForearm, "NetCord", Vector3.new(1.0, 0.06, 0.06), netCenter - Vector3.new(0, 0, 0.42), CRACK, fabric, CFrame.Angles(0, 0, math.rad(rot)))
 		end
-		add(leftArm, "NetWeight", Vector3.one * 0.25, netCenter + Vector3.new(0.3, -0.35, -0.3), Color3.fromRGB(90, 90, 95), Enum.Material.Metal, nil, BALL)
+		add(leftForearm, "NetWeight", Vector3.one * 0.25, netCenter + Vector3.new(0.3, -0.35, -0.3), Color3.fromRGB(90, 90, 95), Enum.Material.Metal, nil, BALL)
 	end
 
 	-- Humanoid (R15 rules: HipHeight = ground to bottom of the root part)
@@ -537,6 +585,15 @@ function ZombieFactory.build(def: ZombieDefinition): ZombieRig
 		deathPuff = puff,
 		guardGlow = guardGlow,
 		visibleParts = visibleParts,
+		jointed = jointed,
+		rightForearm = rightForearm,
+		leftForearm = leftForearm,
+		rightShin = rightShin,
+		leftShin = leftShin,
+		rightElbow = rightElbow,
+		leftElbow = leftElbow,
+		rightKnee = rightKnee,
+		leftKnee = leftKnee,
 	}
 end
 

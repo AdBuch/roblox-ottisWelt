@@ -1,9 +1,8 @@
 --!strict
 -- Stylized hit effects, triggered only by validated server combat events (Feedback.DamageFx and
--- PlayerHit). Brief and small: no pools, no wounds, nothing that covers the screen.
---   Blood   a few dark-red particles that vanish in ~0.3 s (zombies, players)
---   Sparks  orange-red sparks + sand dust (reduced mode, blood off, and always for Otti)
--- Your own hits also show a small directional indicator toward the attacker.
+-- PlayerHit). Brief and small, child-friendly: orange sparks and sand dust only (no blood, no wounds),
+-- nothing that covers the screen. Your own hits also show a small directional indicator toward
+-- the attacker.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -56,12 +55,11 @@ local function emitter(parent: Instance, color: ColorSequence, size: NumberSeque
 	return e
 end
 
--- A burst at a validated hit position. kind: "Zombie" | "Player" | "Boss".
-function DamageEffectsController.burst(position: Vector3, kind: string, scale: number, direction: Vector3?)
+-- A burst at a validated hit position. kind: "Zombie" | "Player" | "Boss" | "Block" (same look).
+function DamageEffectsController.burst(position: Vector3, _kind: string, scale: number, direction: Vector3?)
 	if not allow() then
 		return
 	end
-	local style = DamageEffectsConfig.styleFor(kind)
 	local facing = if direction and direction.Magnitude > 0.01 then direction.Unit else Vector3.yAxis
 	local holder = Instance.new("Part")
 	holder.Anchored = true
@@ -74,17 +72,11 @@ function DamageEffectsController.burst(position: Vector3, kind: string, scale: n
 	holder.Parent = container()
 	local life = DamageEffectsConfig.ParticleLifetime
 	local count = math.clamp(math.floor(6 * scale + 0.5), 3, 12)
-	if style == "Blood" then
-		local base = if kind == "Zombie" then DamageEffectsConfig.ZombieBloodColor else DamageEffectsConfig.BloodColor
-		local e = emitter(holder, ColorSequence.new(base, DamageEffectsConfig.BloodHighlight), NumberSequence.new(0.32 * scale, 0.05), NumberRange.new(6, 12), life, 0, 35)
-		e:Emit(count)
-	else
-		local sparks = emitter(holder, ColorSequence.new(DamageEffectsConfig.SparkColor, Color3.fromRGB(255, 220, 140)), NumberSequence.new(0.22 * scale, 0), NumberRange.new(10, 18), life, 1, 10)
-		sparks:Emit(count)
-		local dust = emitter(holder, ColorSequence.new(DamageEffectsConfig.DustColor), NumberSequence.new(0.6 * scale, 1.4 * scale), NumberRange.new(2, 5), life * 1.6, 0, 0)
-		dust.SpreadAngle = Vector2.new(180, 180)
-		dust:Emit(math.max(2, math.floor(count / 2)))
-	end
+	local sparks = emitter(holder, ColorSequence.new(DamageEffectsConfig.SparkColor, Color3.fromRGB(255, 220, 140)), NumberSequence.new(0.22 * scale, 0), NumberRange.new(10, 18), life, 1, 10)
+	sparks:Emit(count)
+	local dust = emitter(holder, ColorSequence.new(DamageEffectsConfig.DustColor), NumberSequence.new(0.6 * scale, 1.4 * scale), NumberRange.new(2, 5), life * 1.6, 0, 0)
+	dust.SpreadAngle = Vector2.new(180, 180)
+	dust:Emit(math.max(2, math.floor(count / 2)))
 	task.delay(life * 2 + 0.2, function()
 		holder:Destroy()
 	end)

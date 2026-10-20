@@ -2,6 +2,10 @@
 
 Last updated: 2026-10-19 · branch `feature/combat-encounter`
 
+> **Update 2026-10-20:** all blood was removed again so the game is suitable for children
+> (`BloodConfig`, `BloodEffectsController`, `SandStainController`, the BLOOD setting and the stain epoch are gone;
+> hits show sparks and dust only). Mentions of blood and stains below describe the earlier state.
+
 This document hands over the combat redesign in progress. Slide, Classic and Wild controls,
 gestures, Momentum, specials, blocks and parries, zombie sequences, blood and stains, crowd zones
 and the training mode are in scope. **The server side is complete; the client side is partly done.**

@@ -2,10 +2,10 @@
 -- Routes server-validated hit events to the presentation controllers (display only):
 --   DamageFx(position, kind, scale, direction, extra)   kind Zombie | Player | Boss | Block
 --   extra { category, attackerId, victimId, heavy, perfect, projectile, killed, armored }
--- Per weapon category (CombatEffectsConfig): sparks and dust (DamageEffectsController), zombie blood
--- and sand stains (BloodEffectsController, by the player's BloodFx preference), a bow arrow that
--- sticks briefly into a shield (pooled), a short camera impulse (only for the own character's hits
--- and damage, scaled by the CameraShake preference) and a perfect-block flash.
+-- Child-friendly: no blood anywhere. Per weapon category (CombatEffectsConfig): sparks and dust
+-- (DamageEffectsController), a bow arrow that sticks briefly into a shield (pooled), a short camera
+-- impulse (only for the own character's hits and damage, scaled by the CameraShake preference) and
+-- a perfect-block flash.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -13,24 +13,17 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local BlockDefinitions = require(Shared:WaitForChild("BlockDefinitions"))
-local BloodConfig = require(Shared:WaitForChild("BloodConfig"))
 local CombatEffectsConfig = require(Shared:WaitForChild("CombatEffectsConfig"))
 
 local DamageEffectsController = require(script.Parent.DamageEffectsController)
 
-type Blood = {
-	zombieHit: (position: Vector3, scale: number, direction: Vector3?, mode: string) -> (),
-}
 type Camera = {
 	impulse: (strength: number) -> (),
 }
 
 export type Options = {
 	gui: ScreenGui,
-	blood: Blood,
 	camera: Camera,
-	bloodPreference: () -> string?,
-	device: () -> string,
 	userId: () -> number,
 }
 
@@ -46,7 +39,6 @@ local ARROW_THICKNESS = 0.12
 
 function CombatEffectsController.start(options: Options): CombatEffects
 	local categories = CombatEffectsConfig.Categories
-	local camera = CombatEffectsConfig.Camera
 
 	-- Pooled embedded arrows: the same few parts are reused round robin, never created per hit
 	local arrowFolder = Instance.new("Folder")
@@ -115,14 +107,13 @@ function CombatEffectsController.start(options: Options): CombatEffects
 		local info = if typeof(extra) == "table" then extra else {}
 		local category = if typeof(info.category) == "string" and categories[info.category] then info.category else "Blade"
 		local cat = categories[category]
-		local mine = info.attackerId == options.userId() or info.victimId == options.userId()
-		local heavy = info.heavy == true
-		local bloodPreference = options.bloodPreference()
-		local mode = BloodConfig.resolve(bloodPreference, options.device())
+		local me = options.userId()
+		local mine = info.attackerId == me or info.victimId == me
+		local impulse = if info.heavy == true then CombatEffectsConfig.Camera.HeavyImpulse else cat.Impulse
 
 		if kind == "Block" then
-			-- Shield sparks (sparks style for blocks), the bow arrow sticks briefly, perfect flash
-			DamageEffectsController.burst(position, "Boss", scale * (cat.Spark / 6 + 0.4), direction)
+			-- Shield sparks, the blocked arrow sticks briefly, perfect flash
+			DamageEffectsController.burst(position, kind, scale * (cat.Spark / 6 + 0.4), direction)
 			if info.projectile == true and direction then -- blocked projectiles are arrows
 				stickArrow(position, direction.Unit)
 			end
@@ -132,29 +123,11 @@ function CombatEffectsController.start(options: Options): CombatEffects
 			if mine then
 				options.camera.impulse(cat.Impulse)
 			end
-		elseif kind == "Zombie" then
-			-- Blood for zombies only, by preference; without blood the dust / sparks remain
-			if mode == "Off" then
-				DamageEffectsController.burst(position, "Boss", scale, direction)
-			else
-				options.blood.zombieHit(position, scale, direction, mode)
-				if cat.Dust > 0 then
-					DamageEffectsController.burst(position, "Boss", scale, direction)
-				end
-			end
-			if mine then
-				options.camera.impulse(if heavy then CombatEffectsConfig.Camera.HeavyImpulse else cat.Impulse)
-			end
-		elseif kind == "Player" then
-			-- Players bleed only when PlayerBlood is on (DamageEffectsController decides by style)
-			DamageEffectsController.burst(position, "Player", scale, direction)
-			if info.victimId == options.userId() then
-				options.camera.impulse(if heavy then CombatEffectsConfig.Camera.HeavyImpulse else cat.Impulse)
-			end
-		elseif kind == "Boss" then
-			DamageEffectsController.burst(position, "Boss", scale, direction)
-			if mine then
-				options.camera.impulse(if heavy then CombatEffectsConfig.Camera.HeavyImpulse else cat.Impulse)
+		else
+			-- Zombies, players and Otti: sparks and dust only
+			DamageEffectsController.burst(position, kind, scale, direction)
+			if (kind == "Player" and info.victimId == me) or (kind ~= "Player" and mine) then
+				options.camera.impulse(impulse)
 			end
 		end
 	end

@@ -3,7 +3,7 @@
 A multiplayer-ready Roblox arena game built with VS Code + Rojo: an underground gladiator complex,
 three game modes (Solo Arena, Co-op Legions, Team Battle), eight weapons with special attacks and combos,
 eight shields, six zombie types with their own AI personalities (incl. the archer **Undead Sagittarius**),
-progressive zombie damage states and stylized limb loss, healing shells, **Aura Points** and a final boss:
+progressive zombie damage states and stylized limb loss, healing shells, **Aura** (progress that unlocks gear), **Denarii** (money) and a final boss:
 **OTTI — CHAMPION OF THE COLOSSEUM** (Round 7).
 
 Otti's procedural boss model (`OttiModel`) follows the Otti the Gladiator reference art.
@@ -59,18 +59,19 @@ src/shared/   -> ReplicatedStorage.Shared
   GameModeDefinitions                Solo / Co-op / Team Battle rules
   WeaponDefinitions                  8 weapons (instant basic attack + aerial attack each)
   ShieldDefinitions                  8 shields (reduction, angle, speed, raise time, bash, arrows, armory class)
-  ArmorDefinitions                   4 armor sets (damage reduction, movement penalty, price)
+  ArmorDefinitions                   4 armor sets (damage reduction, movement penalty, Aura unlock, price in Denarii)
   DamageConfig                       player damage pipeline: minimum damage, PvE / PvP armor effectiveness
   SpecialMoveDefinitions             every basic, aerial and combination move as data (nothing charged)
   WeaponAttackDefinitions / WeaponSpecialDefinitions   contextual attack chains / Special gesture families and tiers
   GestureDefinitions / ControlModeDefinitions / MomentumConfig / SlideDefinitions / BlockDefinitions   gesture recognition / Classic and Wild / Momentum / slide / blocks
-  BloodConfig / CombatEffectsConfig / ZombieAttackDefinitions / SpectatorZoneDefinitions / CrowdQualityConfig   blood and effects / zombie attack sequences / tribune zones and quality
+  CombatEffectsConfig / ZombieAttackDefinitions / SpectatorZoneDefinitions / CrowdQualityConfig   hit effects (no blood) / zombie attack sequences / tribune zones and quality
+  CurrencyConfig                     Aura (progress, unlocks gear) and Denarii (money, buys gear)
   InputDefinitions / PvPBalanceConfig   input timing and mapping / PvP caps for specials and aerials
   OttiEntranceConfig                 imperial box behaviour and the jump into the arena
   ZombieDefinitions                  6 zombie types (stats, Aura, availability, weights, looks)
   ZombieAIProfiles                   6 AI personalities + Wounded/Critical behaviour modifiers
   RoundDefinitions                   round sizes per mode, weighted variant picking, archer caps, Round 7
-  DamageEffectsConfig                stylized blood/sparks switches, condition thresholds, limb-loss chances
+  DamageEffectsConfig                sparks and dust (no blood), condition thresholds, limb-loss chances
   ProjectileDefinitions              player bow range + falloff, enemy arrows, arrow pool limit
   UiConfig / UiStateDefinitions / NotificationDefinitions   HUD sizes, breakpoints, limits / per-state and per-mode groups / notification priorities
   AudioConfig                        optional crowd/boss sound IDs (empty = visual fallback)
@@ -96,8 +97,8 @@ src/server/   -> ServerScriptService.Server   (shared server library: both place
   ZombieDamageStateService           Healthy / Wounded / Critical looks + behaviour modifiers
   ZombieDismembermentService         stylized limb/armor loss (zombies only)
   ZombieArcherAI                     Undead Sagittarius ranged AI
-  InventoryService / AuraService     Aura Points, weapons/shields/armor, preferences, purchases, migration / rewards
-  PlayerDataService                  DataStore load/save (Aura, owned + equipped gear, preferences), autosave, BindToClose
+  InventoryService / AuraService     Aura (unlocks), Denarii (money), weapons/shields/armor, preferences, purchases, migration / rewards (Aura + Denarii)
+  PlayerDataService                  DataStore load/save (Aura, Denarii, owned + equipped gear, preferences), autosave, BindToClose
   EquipmentShopService / EquipmentModels   Gladiator Armory displays / procedural weapons, shields, armor, arrows, nets
   PlayerCombatService                hands, blocking/parry, incoming damage, action requests
   SpecialMoveService                 move execution (melee steps, projectiles, aerials, arrow rain)
@@ -120,19 +121,19 @@ src/client/   -> StarterPlayer.StarterPlayerScripts.Client
   NotificationController             single notification queue + short banners (pooled)
   ContextHealthController            contextual world-space health bars (pooled BillboardGuis)
   TeamStatusController               team score + time, co-op teammate strip, lobby rosters
-  AuraDisplayController              lobby Aura counter, +n rewards in combat
+  AuraDisplayController              lobby Aura and Denarii counters, +n rewards in combat
   MobileControlsController           touch ATK / BLOCK / SLIDE / SPECIAL around the jump button (Wild hides ATK / BLOCK)
   GesturePadController               Wild gesture pad, Special Mode drawing, the training trace
-  CombatSettingsController           CLASSIC / WILD, BLOOD and CAMERA pills (saved preferences)
+  CombatSettingsController           CLASSIC / WILD and CAMERA pills (saved preferences)
   SlideController / MomentumHudController   own-character slide / the ARENA MOMENTUM bar
-  CombatEffectsController / BloodEffectsController / SandStainController / CombatCameraController   hit presentation by category, zombie blood, pooled sand stains, camera impulses
+  CombatEffectsController / CombatCameraController   hit presentation by category (sparks, dust, no blood), camera impulses
   InfoPanelController / SpectatorController   optional i panel / Arena spectator bar + camera modes
   TeleportStatusController           travel / queue chip, START WITH CURRENT PARTY, emergency RETURN TO HUB
   InputController                    Classic and Wild input for mouse/keyboard, gamepad and touch (attack, block, slide, special, gestures); sends intent only
   ComboFeedbackController            tiny input chips, TRAINING board (both modes, Momentum, specials)
   PlayerAnimator                     procedural whole-body attack motion (additive, replaceable)
   OttiEntranceController             local camera for the entrance, landing shake, skip
-  ShopController                     armory info card (BUY / EQUIP / EQUIPPED, INFO), focus highlight, equipped outline
+  ShopController                     armory info card (LOCKED / BUY / EQUIP / EQUIPPED, INFO), focus highlight, equipped outline
   EffectsController                  damage numbers, dash/lunge/knockback on your own character
   ZombieAnimator                     client walk cycle for arena zombies (limp, crawl)
   OttiAnimator                       procedural Otti animation (gaits, stance changes, tail, attack poses)
@@ -222,8 +223,8 @@ enemy in a 75° cone in front (visible line of sight, never teammates, spectator
 targets, Momentum, block / parry and combo success are decided on the server only; clients send intent (an aim point,
 a gesture's normalized samples, a slide request) and never results.
 
-**Presentation settings** (saved): **BLOOD** Auto / Stylized / Reduced / Off (zombies only, arena only, stylized particles
-and sand stains, no gore), **CAMERA** shake Full / Reduced / Off. They never change combat.
+**Presentation settings** (saved): **CAMERA** shake Full / Reduced / Off. It never changes combat.
+**Child-friendly:** there is no blood anywhere; hits show orange sparks and sand dust only.
 
 ## HUD (responsive, mobile first)
 
@@ -251,9 +252,10 @@ centre of the screen stay free; everything is small, anchored to an edge and sca
   change; short `ROUND 4` / `ROUND COMPLETE` / countdown banners in the upper third.
 - **Otti:** slim bar at the top (~60 % width on phones, 45 % on desktop): `OTTI` and `P1`-`P3`; short
   warnings `JUMP!`, `TAIL SLAM!`, `GRAPPLE!` right below it; `CHAMPION OF THE COLOSSEUM` only in the intro.
-- **Aura:** orb + number top-right in the lobby (and so while shopping); in combat only short `+10`
-  notifications with the orb (rapid rewards merged); the results banner shows the match total.
-- **Notifications:** one queue, at most 3 small messages; priorities Critical > Result > Round > Heal > Aura > Info.
+- **Aura and Denarii:** two capsules top-right in the lobby (and so while shopping): gold Aura orb, silver
+  Denarii coin. In combat only short `+10` / `+10 DENARII` notifications (rapid rewards merged); the results
+  banner shows the match totals.
+- **Notifications:** one queue, at most 3 small messages; priorities Critical > Result > Round > Heal > Aura / Denarii > Info.
 - **Controls:** touch ATK / BLOCK / two specials in an arc around Roblox's jump button (50-56 px, cooldown
   overlay); desktop special cards bottom-right; a one-line control hint in the lobby that fades once you fight.
 - **HUD modes** (👁 button on the right edge, **H** on keyboard, remembered for the session):
@@ -284,9 +286,10 @@ banners, bronze section signs, wooden racks, storage shelves, crates and barrels
 - **RANGED & SPECIAL** (east wall): Hunter Bow with quiver and arrows; future ranged / special weapons.
 - **SHIELDS** (south wall): LIGHT · BALANCED · HEAVY. **ARMOR** (centre dais): four mannequins.
 Rows come from `WeaponDefinitions` (`Row`) and `ShieldDefinitions.classOf`, so new items appear automatically.
-Each display has only a small name plate; walking up highlights it and opens a compact card (stats, price, OWNED /
-EQUIPPED, **BUY** / **EQUIP**, optional `i` details). F / gamepad X / the card button use the same server prompt, which
-checks: lobby state, inside the armory, close to the display, data loaded, owned / affordable. Safe zone like the
+Each display has only a small name plate; walking up highlights it and opens a compact card (stats, Aura unlock,
+price in Denarii, OWNED / EQUIPPED, **LOCKED** / **BUY** / **EQUIP**, optional `i` details). F / gamepad X / the card
+button use the same server prompt, which checks: lobby state, inside the armory, close to the display, data loaded,
+unlocked by Aura, owned / affordable in Denarii. Safe zone like the
 whole lobby: no damage, PvP, projectiles or rewards.
 
 ## Game modes
@@ -515,17 +518,23 @@ solo 500 Aura; co-op 400 per survivor, 250 for defeated players who damaged him.
   player, celebration after his defeat.
 - **Audio** (`AudioConfig`): crowd and battle-cry IDs are empty by default; put only Roblox-owned, project-owned or
   licensed IDs there. Without them everything still works (visual crowd + HUD), with one warning in Studio.
-- **Damage effects** (`DamageEffectsConfig`): `BloodEnabled`, `ReducedEffectsMode`, `PlayerBloodEnabled`,
-  `ZombieDismembermentEnabled`. Brief dark-red particles (no pools, no wounds), sparks/dust in reduced mode and always on
-  Otti. Player hits: red edge flash (never the whole screen), a directional indicator and a tiny burst. The boss HUD
-  shows the active mode.
+- **Damage effects** (`DamageEffectsConfig`): child-friendly, no blood. Every validated hit shows brief orange sparks and
+  sand dust (zombies, players and Otti alike). `ZombieDismembermentEnabled` switches the stylized limb / armor loss of
+  zombies. Player hits: red edge flash (never the whole screen), a directional indicator and a tiny burst.
 
 ## Shells, Aura, archive and training
 
 - **Shells:** 12 symmetric spots. Solo uses 8, Co-op 4 + 2 per player (max 12), Team Battle none by default.
   Each heals exactly **+10** (`Config.ShellHealAmount`, never above max, not used at full health), only for the collector, and respawns after 12 s (never right under a player).
-- **Aura Points** replace coins everywhere. `AURA: n` is always shown at the top. Profiles are saved in a DataStore
-  (see *Saving*). Old profiles with `coins` are migrated once (`coins` is added to `auraPoints` and cleared in the same step).
+- **Two currencies** (`CurrencyConfig`):
+  - **Aura** is progress. It is earned by playing (zombie kills, assists, Otti, Team Battle results) and never spent.
+    Every weapon, shield and armor set has an **AuraRequired** value: until your Aura reaches it, the item is
+    **LOCKED** and can neither be bought nor equipped.
+  - **Denarii** (the Roman silver coin) are money. Every Aura reward also pays Denarii (`DenariiPerAura`, 1 per Aura
+    point by default). Unlocked items are bought with Denarii (`Price`).
+  - Profiles are saved in a DataStore (see *Saving*). Old profiles with `coins` are migrated once into Aura. Profiles from
+    before Denarii (schema v4) are converted once: the old Aura balance becomes the Denarii balance, and Aura becomes
+    that balance plus the unlock values of the owned gear, so nothing a player owns gets locked.
 - **Zombie Archive:** six barred cages with the real arena models (anchored, tagged `ZombieDisplay`, never targets, no AI)
   and a plaque each: name, role, health, damage, ability, reward and first round. Otti is not in the archive.
 - **Training yard:** two straw dummies with damage numbers. Specials and combos work, there's no Aura or eliminations, and they refill after 3 s.
@@ -533,7 +542,7 @@ solo 500 Aura; co-op 400 per survivor, 250 for defeated players who damaged him.
 ## Saving (DataStore)
 
 `PlayerDataService` (both places) stores per UserId in the environment store (`OttiPlayerData_DEV_v1` /
-`OttiPlayerData_PROD_v1`, see [Environments and saved data](#environments-and-saved-data)): Aura Points, owned weapons /
+`OttiPlayerData_PROD_v1`, see [Environments and saved data](#environments-and-saved-data)): Aura, Denarii, owned weapons /
 shields / armor, the equipped item of each kind, statistics and preferences (HUD mode, Otti intro seen). Studio uses
 mock data unless `StudioMockData = false`. Loaded data always goes through
 `InventoryService.migrateProfile` (legacy `coins`, missing armor, unknown ids are dropped, starter items guaranteed).
@@ -581,10 +590,10 @@ OTTI HUB (start place, public servers)                COLOSSEUM ARENA (one reser
 | MemoryStore maps | `OttiMatches_DEV_*` | `OttiMatches_PROD_*` |
 | Studio | mock player data (`StudioMockData`), mock MemoryStore | never used in Studio |
 
-The store names never change for normal updates. `PlayerDataSchema.Version` (now 4) only moves forward;
-`InventoryService.migrateProfile` keeps Aura and owned items, adds missing fields (armor, statistics), drops
+The store names never change for normal updates. `PlayerDataSchema.Version` (now 5) only moves forward;
+`InventoryService.migrateProfile` keeps Aura and owned items, adds missing fields (armor, statistics, Denarii), drops
 unknown ids and re-validates equipped items. A pre-multi-place save (`OttiColosseum_PlayerData_v1`) is imported
-once if the environment store has no profile yet. Persisted: Aura, owned + equipped weapon / shield / armor,
+once if the environment store has no profile yet. Persisted: Aura, Denarii, owned + equipped weapon / shield / armor,
 statistics (zombie kills, Otti defeats, runs, victories, team matches / wins, eliminations, deaths, spectated
 matches), HUD mode, intro seen. Never persisted: health, round, scores, match id, cooldowns, projectiles, buffs,
 positions. Before every cross-place teleport the profile is **flushed and frozen** (`beginTransfer`: no
@@ -718,10 +727,11 @@ With Place IDs = 0 or in Studio nothing is teleported (and nothing pretends to b
 **Gladiator Armory, armor and saving (Hub)** (Game Settings → Security → *Enable Studio Access to API Services* for saving)
 1. F5. Follow the `◄ WEAPONS / SHIELDS / ARMOR` signpost to the GLADIATOR ARMORY arch in the hall's west wall.
 2. Walk along BLADES (north), HEAVY & REACH (west), RANGED & SPECIAL (east, bow + quiver), SHIELDS LIGHT / BALANCED / HEAVY
-   (south) and the ARMOR mannequins (centre). Near a display: gold outline + card with stats, price and BUY / EQUIP / EQUIPPED; `i` shows details.
-3. Without enough Aura: BUY says NOT ENOUGH AURA and nothing changes. Recruit Leather is EQUIPPED from the start.
-4. With Aura (e.g. after a Solo run): buy Murmillo Armor → it appears on your character, walk speed drops by 2 %.
-   Pressing again says Already equipped; the card never offers BUY for owned items.
+   (south) and the ARMOR mannequins (centre). Near a display: gold outline + card with stats, Aura unlock, price in Denarii and LOCKED / BUY / EQUIP / EQUIPPED; `i` shows details.
+3. With too little Aura the card shows LOCKED and the button does nothing. Unlocked but too few Denarii: NOT ENOUGH DENARII
+   and nothing changes. Recruit Leather is EQUIPPED from the start.
+4. After a Solo run (Aura and Denarii earned): buy Murmillo Armor once your Aura is 180 → Denarii drop by its price, Aura
+   stays the same; it appears on your character, walk speed drops by 2 %. Pressing again says Already equipped.
 5. Take a zombie hit with and without armor: damage numbers are lower with armor (e.g. 20 → 17 with Murmillo).
    Team Battle: Champion Armor reduces player damage by about 26 % instead of 35 %; armor cloth shows the team color.
 6. Shells now heal +10.
@@ -732,7 +742,8 @@ With Place IDs = 0 or in Studio nothing is teleported (and nothing pretends to b
 2. Walk to the TRAINING yard (south-west), hit a dummy, then try a combo (B → J → A, Enter): `COMBO SUCCESS · …`.
 3. Visit the ZOMBIE ARCHIVE (east): 6 caged zombies with plaques; the Undead Sagittarius draws its bow at you.
 4. Hold F at the SOLO ARENA gate (north-west) or PLAY → SOLO: a reserved Arena server (Studio: open the Arena place). GET READY, then ROUND 1 / 7. Kill zombies: a short `+10` with the Aura orb (no permanent counter in combat).
-5. Die or win: you return to the Hub and keep your Aura. Buy something in the GLADIATOR ARMORY (e.g. Legion Sword for 80).
+5. Die or win: you return to the Hub and keep your Aura and Denarii. Buy something in the GLADIATOR ARMORY (e.g. the
+   Legion Sword: unlocked at 80 Aura, costs 80 Denarii).
 
 **Zombie damage, limbs, archers** (buy the Battle Axe or Morning Star for quick results)
 1. From Round 3: hit a zombie below 65 %: darker skin, scratches, torn cloth; below 30 % it limps and hunches.

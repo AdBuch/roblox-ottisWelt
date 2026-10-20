@@ -369,7 +369,7 @@ function MatchService.startZombies(mode: ModeId, players: { Player }): boolean
 
 	local current = newMatch(mode, valid)
 	match = current
-	DamageEffectsService.newMatch() -- sand stains of an earlier match fade, intensity resets
+	DamageEffectsService.newMatch() -- battle intensity resets
 	if arenaFolder then
 		arenaFolder:SetAttribute(Config.MatchModeAttribute, mode)
 		arenaFolder:SetAttribute(Config.ArenaBusyAttribute, true)

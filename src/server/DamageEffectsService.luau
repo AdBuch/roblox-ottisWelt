@@ -1,18 +1,17 @@
 --!strict
 -- Broadcasts hit effects for validated server combat events only. Clients render them
--- (CombatEffectsController, BloodEffectsController, SandStainController) according to their own
--- visual settings, so blood modes or camera settings never touch combat logic.
---   kind  Zombie (may bleed / stain the sand) · Player · Boss (sparks, never blood) · Block (shield)
+-- (CombatEffectsController) according to their own visual settings, so camera settings never touch
+-- combat logic. Child-friendly: there is no blood, only sparks, dust and shield impacts.
+--   kind  Zombie · Player · Boss · Block (shield)
 --   extra { category, attackerId, victimId, heavy, perfect, projectile, killed, armored }
 -- Also keeps the arena's BattleIntensity (0..1) that makes the animal crowd lean in during long,
--- hard fights, and bumps StainEpoch at match start so old stains fade (no stains between matches).
+-- hard fights.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
 local Config = require(ReplicatedStorage.Shared.Config)
-local DamageEffectsConfig = require(ReplicatedStorage.Shared.DamageEffectsConfig)
 local Remotes = require(script.Parent.Remotes)
 
 export type HitKind = "Zombie" | "Player" | "Boss" | "Block"
@@ -50,16 +49,13 @@ end
 
 function DamageEffectsService.init(arenaFolder: Instance)
 	arena = arenaFolder
-	arenaFolder:SetAttribute(Config.DamageFxModeAttribute, DamageEffectsConfig.modeName())
-	arenaFolder:SetAttribute(Config.StainEpochAttribute, 0)
 	arenaFolder:SetAttribute(Config.BattleIntensityAttribute, 0)
 end
 
--- A new match: old sand stains fade away, the crowd calms down.
+-- A new match: the crowd calms down.
 function DamageEffectsService.newMatch()
 	local folder = arena
 	if folder then
-		folder:SetAttribute(Config.StainEpochAttribute, (tonumber(folder:GetAttribute(Config.StainEpochAttribute)) or 0) + 1)
 		intensity = 0
 		folder:SetAttribute(Config.BattleIntensityAttribute, 0)
 	end

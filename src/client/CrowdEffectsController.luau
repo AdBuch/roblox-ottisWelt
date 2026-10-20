@@ -126,7 +126,7 @@ function CrowdEffectsController.start(arena: Instance, notify: (kind: string, te
 			elseif active == "Gasp" then
 				offset = CFrame.new(0, 0, 0.3) * CFrame.Angles(math.rad(10) * math.max(0, 1 - elapsed), 0, 0)
 			else
-				-- Idle: look left / right, lean in a little more the bloodier the battle gets
+				-- Idle: look left / right, lean in a little more the harder the battle gets
 				local look = math.sin(now * 0.4 + seed * 31) * math.rad(14)
 				offset = CFrame.new(0, math.max(0, math.sin(now * 1.5 + seed * 20)) * 0.08, 0) * CFrame.Angles(math.rad(-intensity * 6), look, 0)
 			end

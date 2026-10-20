@@ -48,7 +48,6 @@ local Config = {
 	ArenaLightAttribute = "ArenaLight", -- -1 dark .. 0 normal .. 1 bright (client color correction)
 	CrowdMoodAttribute = "CrowdMood", -- Idle | Silent | Cheer | Roar | Gasp | Celebrate
 	CrowdPulseAttribute = "CrowdPulse", -- increments with every crowd reaction
-	DamageFxModeAttribute = "DamageFxMode", -- STYLIZED | REDUCED | OFF (HUD display)
 	OttiTag = "OttiBoss", -- the living boss model (never a zombie)
 	OttiSpectatorTag = "OttiSpectator", -- Otti watching from the imperial box (never a target)
 	BossLandingAttribute = "BossLanding", -- increments when Otti lands (client camera shake)
@@ -62,7 +61,8 @@ local Config = {
 	TeamCountdownAttribute = "TeamCountdown",
 
 	-- Player attributes (server-owned, read by the HUD and shop)
-	AuraAttribute = "Aura",
+	AuraAttribute = "Aura", -- progress, never spent: unlocks gear (CurrencyConfig)
+	DenariiAttribute = "Denarii", -- money: buys unlocked gear
 	EquippedWeaponAttribute = "EquippedWeapon",
 	EquippedShieldAttribute = "EquippedShield",
 	OwnedWeaponsAttribute = "OwnedWeapons", -- comma-separated ids
@@ -73,6 +73,7 @@ local Config = {
 	DataStatusAttribute = "DataStatus", -- Loading | Loaded | Unsaved (DataStore unavailable)
 	RunKillsAttribute = "RunKills",
 	RunAuraAttribute = "RunAura",
+	RunDenariiAttribute = "RunDenarii",
 	TeamAttribute = "Team", -- "" | Red | Blue
 	InPartyAttribute = "InParty",
 	ReadyAttribute = "Ready",
@@ -106,7 +107,6 @@ local Config = {
 
 	-- Combat (server-set player / character attributes, display only on clients)
 	MomentumAttribute = "Momentum", -- player: 0..100
-	StainEpochAttribute = "StainEpoch", -- arena folder: sand stains of older epochs fade out
 	BattleIntensityAttribute = "BattleIntensity", -- arena folder: 0..1, crowd leans in
 }
 

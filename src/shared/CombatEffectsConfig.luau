@@ -1,7 +1,7 @@
 --!strict
 -- Client combat presentation by weapon category (CombatEffectsController / CombatCameraController).
 -- Purely visual: hits are already validated before any effect plays.
---   Blade   brief spark on armor, stylized blood on zombies, short target flash, tiny camera impulse
+--   Blade   brief spark on armor and zombies, short target flash, tiny camera impulse
 --   Blunt   dust burst, stronger impulse and knockback presentation
 --   Heavy   (axe) blade + dust, strong impulse
 --   Pierce  narrow focused burst, small backward target reaction

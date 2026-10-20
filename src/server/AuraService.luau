@@ -1,5 +1,6 @@
 --!strict
--- Aura Point rewards. The server decides who is rewarded; clients never report kills.
+-- Play rewards: every reward pays Aura (progress, unlocks gear) AND Denarii (money, buys gear;
+-- CurrencyConfig.denariiFor). The server decides who is rewarded; clients never report kills.
 --   Zombie kills: the killer gets 100 %, every other player who damaged that zombie gets an
 --   assist share (Co-op). A player is rewarded at most once per zombie.
 --   Team Battle: fixed rewards for the winning and losing team at the end of a match.
@@ -8,6 +9,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
 local Config = require(ReplicatedStorage.Shared.Config)
+local CurrencyConfig = require(ReplicatedStorage.Shared.CurrencyConfig)
 local InventoryService = require(script.Parent.InventoryService)
 local Remotes = require(script.Parent.Remotes)
 
@@ -22,9 +24,12 @@ local function grant(event: RewardEvent)
 	for _, recipient in event.recipients do
 		local player = recipient.player
 		if player.Parent and recipient.amount > 0 then
+			local denarii = CurrencyConfig.denariiFor(recipient.amount)
 			InventoryService.addAura(player, recipient.amount)
+			InventoryService.addDenarii(player, denarii)
 			player:SetAttribute(Config.RunAuraAttribute, (tonumber(player:GetAttribute(Config.RunAuraAttribute)) or 0) + recipient.amount)
-			Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Aura, recipient.amount, recipient.kind)
+			player:SetAttribute(Config.RunDenariiAttribute, (tonumber(player:GetAttribute(Config.RunDenariiAttribute)) or 0) + denarii)
+			Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Aura, recipient.amount, recipient.kind, denarii)
 		end
 	end
 end
@@ -73,6 +78,7 @@ end
 function AuraService.resetRunStats(player: Player)
 	player:SetAttribute(Config.RunKillsAttribute, 0)
 	player:SetAttribute(Config.RunAuraAttribute, 0)
+	player:SetAttribute(Config.RunDenariiAttribute, 0)
 end
 
 return AuraService
