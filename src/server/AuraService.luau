@@ -1,5 +1,5 @@
 --!strict
--- Play rewards: every reward pays Aura (progress, unlocks gear) AND Denarii (money, buys gear;
+-- Play rewards: every reward pays Aura (experience -> gladiator level) AND Denarii (money, buys gear;
 -- CurrencyConfig.denariiFor). The server decides who is rewarded; clients never report kills.
 --   Zombie kills: the killer gets 100 %, every other player who damaged that zombie gets an
 --   assist share (Co-op). A player is rewarded at most once per zombie.
@@ -20,11 +20,12 @@ export type RewardEvent = {
 
 local AuraService = {}
 
-local function grant(event: RewardEvent)
+-- Pays every recipient its Aura and Denarii (`fixedDenarii` overrides the Aura-based amount).
+local function grant(event: RewardEvent, fixedDenarii: number?)
 	for _, recipient in event.recipients do
 		local player = recipient.player
 		if player.Parent and recipient.amount > 0 then
-			local denarii = CurrencyConfig.denariiFor(recipient.amount)
+			local denarii = fixedDenarii or CurrencyConfig.denariiFor(recipient.amount)
 			InventoryService.addAura(player, recipient.amount)
 			InventoryService.addDenarii(player, denarii)
 			player:SetAttribute(Config.RunAuraAttribute, (tonumber(player:GetAttribute(Config.RunAuraAttribute)) or 0) + recipient.amount)
@@ -64,6 +65,27 @@ function AuraService.awardMatchResult(winners: { Player }, losers: { Player }, w
 		table.insert(event.recipients, { player = player, amount = loseAmount, kind = "match" })
 	end
 	grant(event)
+end
+
+-- A completed zombie round: every fighter still in it gets the round reward ONCE (match id + round
+-- + player are remembered, so a repeated call can never pay twice).
+local paidRounds: { [string]: boolean } = {}
+local paidMatch = -1
+
+function AuraService.awardRoundComplete(players: { Player }, matchId: number, round: number)
+	if matchId ~= paidMatch then
+		table.clear(paidRounds) -- only the current match needs remembering
+		paidMatch = matchId
+	end
+	local event: RewardEvent = { reason = "round", recipients = {} }
+	for _, player in players do
+		local key = ("%d:%d"):format(round, player.UserId)
+		if player.Parent and not paidRounds[key] then
+			paidRounds[key] = true
+			table.insert(event.recipients, { player = player, amount = CurrencyConfig.RoundCompleteAura, kind = "round" })
+		end
+	end
+	grant(event, CurrencyConfig.RoundCompleteDenarii)
 end
 
 -- Otti defeated (called exactly once per match by MatchService).

@@ -424,7 +424,7 @@ function MatchService.startZombies(mode: ModeId, players: { Player }): boolean
 					setState(player, GameStates.MatchActive)
 				end
 			end,
-			onRoundComplete = function()
+			onRoundComplete = function(round: number)
 				if match ~= current then
 					return
 				end
@@ -432,6 +432,7 @@ function MatchService.startZombies(mode: ModeId, players: { Player }): boolean
 				for _, player in livingParticipants(current) do
 					setState(player, GameStates.RoundComplete)
 				end
+				AuraService.awardRoundComplete(livingParticipants(current), current.id, round) -- once per round and player
 				reviveWaitingPlayers(current)
 				OttiSpectatorService.react("RoundComplete") -- applause from the imperial box
 			end,

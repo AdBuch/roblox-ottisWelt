@@ -1,15 +1,18 @@
 --!strict
--- Aura and Denarii: two compact capsules in the upper-right corner, only in the lobby (where the
--- armory is, so both are visible while buying).
---   AURA (gold orb)       progress, never spent: unlocks gear
---   DENARII (silver coin) money: buys unlocked gear
+-- Gladiator level and Denarii: two compact capsules in the upper-right corner, only in the lobby
+-- (where the armory is, so both are visible while buying).
+--   LEVEL (gold)          "LV 3  GLADIATOR" with a thin bar: progress of the total Aura toward the next
+--                         level (GladiatorLevelDefinitions; Aura is experience and is never spent)
+--   DENARII (silver coin) the money for gear
 -- In combat there is no permanent counter: earned amounts show as short "+n" notifications (rapid
--- rewards are merged).
+-- rewards are merged), and a level-up shows a short banner-style notice.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
-local UiConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("UiConfig"))
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GladiatorLevelDefinitions = require(Shared:WaitForChild("GladiatorLevelDefinitions"))
+local UiConfig = require(Shared:WaitForChild("UiConfig"))
 
 type Visibility = {
 	register: (group: string, element: GuiObject, wanted: (() -> boolean)?, forced: (() -> boolean)?) -> (),
@@ -23,80 +26,97 @@ export type AuraDisplay = {
 local AuraDisplayController = {}
 
 local SILVER = Color3.fromRGB(214, 222, 232)
-local CAPSULE_WIDTH = 96
+local LEVEL_WIDTH = 150
+local COIN_WIDTH = 96
 local GAP = 6
 
-type Capsule = { label: TextLabel, bump: UIScale }
-
-local function capsule(parent: Frame, x: number, color: Color3, glow: Color3, coin: boolean): Capsule
+local function capsuleFrame(parent: Frame, x: number, width: number): Frame
 	local frame = Instance.new("Frame")
 	frame.Position = UDim2.fromOffset(x, 0)
-	frame.Size = UDim2.fromOffset(CAPSULE_WIDTH, 28)
+	frame.Size = UDim2.fromOffset(width, 30)
 	frame.BackgroundColor3 = Color3.new(0, 0, 0)
 	frame.BackgroundTransparency = 0.55
 	frame.Parent = parent
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(1, 0)
 	corner.Parent = frame
-	local icon = Instance.new("Frame")
-	icon.AnchorPoint = Vector2.new(0, 0.5)
-	icon.Position = UDim2.new(0, 6, 0.5, 0)
-	icon.Size = UDim2.fromOffset(16, 16)
-	icon.BackgroundColor3 = color
-	icon.Parent = frame
-	local iconCorner = Instance.new("UICorner")
-	iconCorner.CornerRadius = UDim.new(1, 0)
-	iconCorner.Parent = icon
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = glow
-	stroke.Thickness = if coin then 1.5 else 2
-	stroke.Transparency = if coin then 0 else 0.3
-	stroke.Parent = icon
-	if coin then
-		-- a small "D" stamped on the coin
-		local mark = Instance.new("TextLabel")
-		mark.Size = UDim2.fromScale(1, 1)
-		mark.BackgroundTransparency = 1
-		mark.Font = Enum.Font.GothamBlack
-		mark.TextSize = 10
-		mark.TextColor3 = Color3.fromRGB(110, 116, 126)
-		mark.Text = "D"
-		mark.Parent = icon
-	end
-	local label = Instance.new("TextLabel")
-	label.Position = UDim2.fromOffset(28, 0)
-	label.Size = UDim2.new(1, -34, 1, 0)
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.GothamBlack
-	label.TextSize = 16
-	label.TextColor3 = color
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.Text = "0"
-	label.Parent = frame
-	local bump = Instance.new("UIScale")
-	bump.Parent = frame
-	return { label = label, bump = bump }
+	return frame
 end
 
-local function show(c: Capsule, amount: number)
-	local text = tostring(amount)
-	if c.label.Text ~= text then
-		c.label.Text = text
-		c.bump.Scale = 1.12
-		TweenService:Create(c.bump, TweenInfo.new(0.25), { Scale = 1 }):Play()
-	end
+local function label(parent: Instance, position: UDim2, size: UDim2, textSize: number, color: Color3): TextLabel
+	local text = Instance.new("TextLabel")
+	text.Position = position
+	text.Size = size
+	text.BackgroundTransparency = 1
+	text.Font = Enum.Font.GothamBlack
+	text.TextSize = textSize
+	text.TextColor3 = color
+	text.TextXAlignment = Enum.TextXAlignment.Left
+	text.TextTruncate = Enum.TextTruncate.AtEnd
+	text.Text = ""
+	text.Parent = parent
+	return text
 end
 
 function AuraDisplayController.start(group: (string, Vector2, UDim2, UDim2?) -> Frame, visibility: Visibility, notify: (kind: string, text: string, amount: number?) -> ()): AuraDisplay
-	local frame = group("Aura", Vector2.new(1, 0), UDim2.new(1, -8, 0, 6), UDim2.fromOffset(CAPSULE_WIDTH * 2 + GAP, 28))
-	local aura = capsule(frame, 0, UiConfig.Gold, Color3.fromRGB(255, 240, 160), false)
-	local denarii = capsule(frame, CAPSULE_WIDTH + GAP, SILVER, Color3.fromRGB(150, 156, 166), true)
+	local frame = group("Aura", Vector2.new(1, 0), UDim2.new(1, -8, 0, 6), UDim2.fromOffset(LEVEL_WIDTH + GAP + COIN_WIDTH, 30))
+
+	-- LEVEL capsule: number + title, Aura progress bar underneath
+	local levelCapsule = capsuleFrame(frame, 0, LEVEL_WIDTH)
+	local levelText = label(levelCapsule, UDim2.fromOffset(12, 2), UDim2.new(1, -20, 0, 16), 13, UiConfig.Gold)
+	local track = Instance.new("Frame")
+	track.Position = UDim2.new(0, 12, 1, -9)
+	track.Size = UDim2.new(1, -24, 0, 4)
+	track.BackgroundColor3 = Color3.fromRGB(70, 56, 40)
+	track.BorderSizePixel = 0
+	track.Parent = levelCapsule
+	local trackCorner = Instance.new("UICorner")
+	trackCorner.CornerRadius = UDim.new(1, 0)
+	trackCorner.Parent = track
+	local progress = Instance.new("Frame")
+	progress.Size = UDim2.fromScale(0, 1)
+	progress.BackgroundColor3 = UiConfig.Gold
+	progress.BorderSizePixel = 0
+	progress.Parent = track
+	local progressCorner = Instance.new("UICorner")
+	progressCorner.CornerRadius = UDim.new(1, 0)
+	progressCorner.Parent = progress
+
+	-- DENARII capsule: silver coin + number
+	local coinCapsule = capsuleFrame(frame, LEVEL_WIDTH + GAP, COIN_WIDTH)
+	local coin = Instance.new("Frame")
+	coin.AnchorPoint = Vector2.new(0, 0.5)
+	coin.Position = UDim2.new(0, 6, 0.5, 0)
+	coin.Size = UDim2.fromOffset(16, 16)
+	coin.BackgroundColor3 = SILVER
+	coin.Parent = coinCapsule
+	local coinCorner = Instance.new("UICorner")
+	coinCorner.CornerRadius = UDim.new(1, 0)
+	coinCorner.Parent = coin
+	local coinMark = label(coin, UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), 10, Color3.fromRGB(110, 116, 126))
+	coinMark.TextXAlignment = Enum.TextXAlignment.Center
+	coinMark.Text = "D"
+	local coinText = label(coinCapsule, UDim2.fromOffset(28, 0), UDim2.new(1, -34, 1, 0), 16, SILVER)
+	local bump = Instance.new("UIScale")
+	bump.Parent = coinCapsule
 	visibility.register("Aura", frame)
 
+	local shownLevel = 0
 	return {
-		set = function(auraAmount: number, denariiAmount: number)
-			show(aura, auraAmount)
-			show(denarii, denariiAmount)
+		set = function(aura: number, denarii: number)
+			local current, nextLevel, share = GladiatorLevelDefinitions.levelFor(aura)
+			levelText.Text = ("LV %d  %s"):format(current.Level, current.Title)
+			TweenService:Create(progress, TweenInfo.new(0.25), { Size = UDim2.fromScale(if nextLevel then share else 1, 1) }):Play()
+			if shownLevel ~= 0 and current.Level > shownLevel then
+				notify("Info", ("LEVEL UP · LV %d %s"):format(current.Level, current.Title))
+			end
+			shownLevel = current.Level
+			local text = tostring(denarii)
+			if coinText.Text ~= text then
+				coinText.Text = text
+				bump.Scale = 1.12
+				TweenService:Create(bump, TweenInfo.new(0.25), { Scale = 1 }):Play()
+			end
 		end,
 		reward = function(auraAmount: number, denariiAmount: number?)
 			if auraAmount > 0 then

@@ -8,7 +8,8 @@
 -- Each display has one custom-styled ProximityPrompt (F / gamepad / the card's button on touch).
 -- The client's ShopController draws the compact info card and the highlight; the decision is
 -- made here: lobby state, inside the armory, close to the display, data loaded, then
--- InventoryService buys (only unlocked by Aura, paid in Denarii, never twice, never below 0) or
+-- InventoryService buys (only unlocked by the gladiator level, paid in Denarii, never twice,
+-- never below 0) or
 -- equips (only owned, unlocked items).
 
 local CollectionService = game:GetService("CollectionService")
@@ -145,13 +146,13 @@ local function onTriggered(player: Player, kind: ItemKind, id: string, anchor: B
 	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Shop, message, ok)
 end
 
-local function newItem(kind: ItemKind, id: string, price: number, auraRequired: number): Model
+local function newItem(kind: ItemKind, id: string, price: number, levelRequired: number): Model
 	local item = Instance.new("Model")
 	item.Name = "ShopItem_" .. id
 	item:SetAttribute("ItemKind", kind)
 	item:SetAttribute("ItemId", id)
 	item:SetAttribute("Price", price) -- Denarii
-	item:SetAttribute("AuraRequired", auraRequired) -- unlock (display; the server checks InventoryService)
+	item:SetAttribute("LevelRequired", levelRequired) -- gladiator level unlock (display; the server checks InventoryService)
 	return item
 end
 
@@ -201,7 +202,7 @@ end
 ------------------------------------------------------------------------------------------
 
 local function buildWeaponRack(parent: Instance, slot: CFrame, weapon: WeaponDefinitions.WeaponDefinition)
-	local item = newItem("Weapon", weapon.Id, weapon.Price, weapon.AuraRequired)
+	local item = newItem("Weapon", weapon.Id, weapon.Price, weapon.LevelRequired)
 	local display, core = EquipmentModels.buildWeapon(weapon.Id)
 	display.Name = "Display"
 	local rotation = if weapon.Kind == "Bow" then CFrame.Angles(math.rad(-90), 0, 0) else CFrame.identity
@@ -241,7 +242,7 @@ local function buildWeaponRack(parent: Instance, slot: CFrame, weapon: WeaponDef
 end
 
 local function buildShieldDisplay(parent: Instance, slot: CFrame, shield: ShieldDefinitions.ShieldDefinition)
-	local item = newItem("Shield", shield.Id, shield.Price, shield.AuraRequired)
+	local item = newItem("Shield", shield.Id, shield.Price, shield.LevelRequired)
 	local display, core = EquipmentModels.buildShield(shield.Id)
 	display.Name = "Display"
 	anchorAll(display)
@@ -285,7 +286,7 @@ local function buildMannequin(parent: Instance, base: CFrame): Model
 end
 
 local function buildArmorDisplay(parent: Instance, slot: CFrame, armor: ArmorDefinitions.ArmorDefinition)
-	local item = newItem("Armor", armor.Id, armor.Price, armor.AuraRequired)
+	local item = newItem("Armor", armor.Id, armor.Price, armor.LevelRequired)
 	local base = slot * CFrame.new(0, 0.85, 0)
 	local stand = makePart("Stand", Vector3.new(3, 0.3, 2.4), base * CFrame.new(0, 0.15, 0), DARK_WOOD, Enum.Material.Wood, item)
 	local body = buildMannequin(item, base * CFrame.new(0, 0.3, 0))

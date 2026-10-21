@@ -1,18 +1,20 @@
 --!strict
--- The two currencies (server-owned; clients only display the player attributes):
---   AURA     progress. Earned by playing (zombie kills, assists, Otti, Team Battle results), never
---            spent. It UNLOCKS gear: an item can only be bought and equipped once your Aura has
---            reached its AuraRequired (WeaponDefinitions / ShieldDefinitions / ArmorDefinitions).
---   DENARII  money (the Roman silver denarius). Earned with every Aura reward, spent on gear: the
---            item's Price is in Denarii.
--- Saved in the profile (PlayerDataSchema v5). Profiles from v4 and older are converted once by
--- InventoryService.migrateProfile: the old spendable Aura balance becomes the Denarii balance, and
--- Aura becomes balance + the Aura that was spent on owned gear, so earlier unlocks stay unlocked.
+-- Economy and experience (server-owned; clients only display the player attributes):
+--   AURA     experience points. Earned in fights, rounds and wins; never spent. Total Aura gives the
+--            GLADIATOR LEVEL (GladiatorLevelDefinitions), which unlocks gear (LevelRequired) and is a
+--            matchmaking factor.
+--   DENARII  the money (the Roman silver denarius). Earned in PvE fights, completed rounds and
+--            defined rewards; spent on weapons, shields and armor (their Price). Never negative.
+-- Every reward is decided and paid once by the server (AuraService); purchases are validated by
+-- InventoryService. Both are saved in the profile (PlayerDataSchema).
 
 local CurrencyConfig = {
 	DenariiName = "DENARII",
-	DenariiPerAura = 1, -- every reward pays this many Denarii per Aura point (rounded, at least 1)
+	DenariiPerAura = 1, -- every combat reward pays this many Denarii per Aura point (rounded, at least 1)
 	StarterDenarii = 0,
+	-- A completed zombie round, paid once per round to every fighter still in it
+	RoundCompleteAura = 10,
+	RoundCompleteDenarii = 15,
 }
 
 -- Denarii paid together with an Aura reward of `aura`.

@@ -2,7 +2,7 @@
 -- Gladiator Armory presentation (all decisions happen on the server):
 --   * The displays' ProximityPrompts use the Custom style. When Roblox shows the closest one
 --     (PromptShown), this highlights that display and opens a compact information card: name,
---     section, the stats of its kind, the Aura unlock (LOCKED until reached), the price in Denarii and
+--     section, the stats of its kind, the gladiator level unlock (LOCKED until reached), the price in Denarii and
 --     OWNED / EQUIPPED state, an action button (LOCKED / BUY / EQUIP / EQUIPPED) and an optional
 --     INFO line (special / projectile properties).
 --   * F (keyboard), X (gamepad) or the card's button (touch / mouse) trigger the same prompt;
@@ -17,6 +17,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local ArmorDefinitions = require(Shared:WaitForChild("ArmorDefinitions"))
 local DamageConfig = require(Shared:WaitForChild("DamageConfig"))
+local GladiatorLevelDefinitions = require(Shared:WaitForChild("GladiatorLevelDefinitions"))
 local ShieldDefinitions = require(Shared:WaitForChild("ShieldDefinitions"))
 local SpecialMoveDefinitions = require(Shared:WaitForChild("SpecialMoveDefinitions"))
 local WeaponAttackDefinitions = require(Shared:WaitForChild("WeaponAttackDefinitions"))
@@ -242,7 +243,7 @@ function ShopController.start(names: Names, group: GroupFn)
 	focus.DepthMode = Enum.HighlightDepthMode.Occluded
 	focus.Enabled = false
 
-	-- (kind, id, owned, equipped, price in Denarii, Aura required to unlock)
+	-- (kind, id, owned, equipped, price in Denarii, gladiator level required to unlock)
 	local function itemInfo(item: Instance): (string, string, boolean, boolean, number, number)
 		local kind = tostring(item:GetAttribute("ItemKind"))
 		local id = tostring(item:GetAttribute("ItemId"))
@@ -250,7 +251,7 @@ function ShopController.start(names: Names, group: GroupFn)
 		local equippedName = if kind == "Weapon" then names.equippedWeapon elseif kind == "Shield" then names.equippedShield else names.equippedArmor
 		local owned = splitSet(player:GetAttribute(ownedName))[id] == true
 		local equipped = player:GetAttribute(equippedName) == id
-		return kind, id, owned, equipped, tonumber(item:GetAttribute("Price")) or 0, tonumber(item:GetAttribute("AuraRequired")) or 0
+		return kind, id, owned, equipped, tonumber(item:GetAttribute("Price")) or 0, tonumber(item:GetAttribute("LevelRequired")) or 1
 	end
 
 	local function keyHint(): string
@@ -284,7 +285,8 @@ function ShopController.start(names: Names, group: GroupFn)
 		info.Text = card.info
 		local aura = tonumber(player:GetAttribute(names.aura)) or 0
 		local denarii = tonumber(player:GetAttribute(names.denarii)) or 0
-		local unlocked = aura >= required
+		local level = GladiatorLevelDefinitions.levelFor(aura).Level
+		local unlocked = level >= required
 		local loading = player:GetAttribute(names.dataStatus) == "Loading"
 		if equipped then
 			status.Text = "EQUIPPED"
@@ -299,10 +301,11 @@ function ShopController.start(names: Names, group: GroupFn)
 			action.BackgroundColor3 = Color3.fromRGB(46, 96, 150)
 			action.Active = true
 		elseif not unlocked then
-			-- Aura unlocks gear (it is never spent); until then it can't be bought
-			status.Text = ("LOCKED · needs %d AURA · you have %d"):format(required, aura)
+			-- the gladiator level (from total Aura, never spent) unlocks gear; until then it can't be bought
+			local needed = GladiatorLevelDefinitions.get(required)
+			status.Text = ("LOCKED · needs LV %d %s · you are LV %d"):format(required, if needed then needed.Title else "", level)
 			status.TextColor3 = Color3.fromRGB(190, 190, 200)
-			action.Text = ("LOCKED · %d AURA"):format(required)
+			action.Text = ("LOCKED · LV %d"):format(required)
 			action.BackgroundColor3 = Color3.fromRGB(70, 66, 64)
 			action.Active = false
 		else

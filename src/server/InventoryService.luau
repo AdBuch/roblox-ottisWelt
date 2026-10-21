@@ -2,7 +2,8 @@
 -- Server-owned inventory per player: Aura (progress), Denarii (money), owned weapons/shields/armor,
 -- the equipped item of each kind and a few player preferences. Profiles live in memory keyed by
 -- UserId; PlayerDataService loads them from the DataStore on join (load) and saves serialize().
---   Aura     earned by playing and never spent: an item is UNLOCKED once Aura >= its AuraRequired.
+--   Aura     experience: earned by playing, never spent. It gives the GLADIATOR LEVEL
+--            (GladiatorLevelDefinitions); an item is UNLOCKED at its LevelRequired.
 --   Denarii  earned with every Aura reward and spent on unlocked items (their Price).
 -- Buying needs the item unlocked AND enough Denarii; equipping needs it owned AND unlocked.
 --
@@ -10,7 +11,7 @@
 -- PlayerDataSchema). Migration: version 1 stored `coins` (moved into `auraPoints` once and
 -- cleared); version 2 had no armor (Recruit Leather is granted); version 3 had no statistics
 -- (all start at 0); version 4 spent Aura on gear: the old balance becomes the Denarii balance and
--- Aura becomes balance + the unlock values of the owned gear, so nothing owned gets locked.
+-- Aura becomes balance + what the owned gear cost back then, so nothing owned gets locked.
 -- migrateProfile() is safe to call repeatedly and also removes unknown ids, so a saved profile can
 -- never equip something that no longer exists.
 
@@ -19,6 +20,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ArmorDefinitions = require(ReplicatedStorage.Shared.ArmorDefinitions)
 local Config = require(ReplicatedStorage.Shared.Config)
 local CurrencyConfig = require(ReplicatedStorage.Shared.CurrencyConfig)
+local GladiatorLevelDefinitions = require(ReplicatedStorage.Shared.GladiatorLevelDefinitions)
 local PlayerDataSchema = require(ReplicatedStorage.Shared.PlayerDataSchema)
 local ShieldDefinitions = require(ReplicatedStorage.Shared.ShieldDefinitions)
 local WeaponDefinitions = require(ReplicatedStorage.Shared.WeaponDefinitions)
@@ -95,17 +97,17 @@ local function wholeNumber(value: unknown): number
 	return if n == n then math.max(0, math.floor(n)) else 0
 end
 
--- The Aura needed for everything owned (used once when converting v4 profiles).
-local function unlockValueOf(profile: Profile): number
+-- The Aura spent on everything owned (old prices; used once when converting v4 profiles).
+local function spentOn(profile: Profile): number
 	local total = 0
 	for id in profile.ownedWeapons do
-		total += WeaponDefinitions.ById[id].AuraRequired
+		total += WeaponDefinitions.ById[id].Price
 	end
 	for id in profile.ownedShields do
-		total += ShieldDefinitions.ById[id].AuraRequired
+		total += ShieldDefinitions.ById[id].Price
 	end
 	for id in profile.ownedArmor do
-		total += ArmorDefinitions.ById[id].AuraRequired
+		total += ArmorDefinitions.ById[id].Price
 	end
 	return total
 end
@@ -129,7 +131,7 @@ function InventoryService.migrateProfile(profile: Profile): Profile
 		-- v4 and older spent Aura on gear: the remaining balance keeps its buying power as Denarii,
 		-- and Aura is restored by what the owned gear needs, so earlier unlocks stay unlocked.
 		profile.denarii = profile.auraPoints
-		profile.auraPoints += unlockValueOf(profile)
+		profile.auraPoints += spentOn(profile)
 	end
 	profile.denarii = wholeNumber(profile.denarii)
 	if typeof(profile.equippedWeapon) ~= "string" or not profile.ownedWeapons[profile.equippedWeapon] then
@@ -260,15 +262,15 @@ local function ownedSet(profile: Profile, kind: ItemKind): { [string]: boolean }
 	return if kind == "Weapon" then profile.ownedWeapons elseif kind == "Shield" then profile.ownedShields else profile.ownedArmor
 end
 
--- (display name, price in Denarii, Aura required) of an item, or nil.
+-- (display name, price in Denarii, gladiator level required) of an item, or nil.
 local function lookup(kind: ItemKind, id: string): (string?, number, number)
-	local def: { DisplayName: string, Price: number, AuraRequired: number }? = if kind == "Weapon"
+	local def: { DisplayName: string, Price: number, LevelRequired: number }? = if kind == "Weapon"
 		then WeaponDefinitions.ById[id] :: any
 		elseif kind == "Shield" then ShieldDefinitions.ById[id] :: any
 		elseif kind == "Armor" then ArmorDefinitions.ById[id] :: any
 		else nil
 	if def then
-		return def.DisplayName, def.Price, def.AuraRequired
+		return def.DisplayName, def.Price, def.LevelRequired
 	end
 	return nil, 0, 0
 end
@@ -284,10 +286,26 @@ function InventoryService.owns(player: Player, kind: ItemKind, id: string): bool
 	return ownedSet(getProfile(player), kind)[id] == true
 end
 
--- Enough Aura to buy / use this item?
+-- The player's gladiator level (derived from total Aura; never stored).
+function InventoryService.getLevel(player: Player): number
+	local current = GladiatorLevelDefinitions.levelFor(getProfile(player).auraPoints)
+	return current.Level
+end
+
+-- A readable lock message, or nil when the player's level is high enough.
+local function lockReason(profile: Profile, name: string, required: number): string?
+	local current = GladiatorLevelDefinitions.levelFor(profile.auraPoints)
+	if current.Level >= required then
+		return nil
+	end
+	local needed = GladiatorLevelDefinitions.get(required)
+	return ("LOCKED: %s needs level %d %s (you are level %d)"):format(name, required, if needed then needed.Title else "", current.Level)
+end
+
+-- High enough gladiator level to buy / use this item?
 function InventoryService.isUnlocked(player: Player, kind: ItemKind, id: string): boolean
 	local name, _, required = lookup(kind, id)
-	return name ~= nil and getProfile(player).auraPoints >= required
+	return name ~= nil and lockReason(getProfile(player), name, required) == nil
 end
 
 function InventoryService.isEquipped(player: Player, kind: ItemKind, id: string): boolean
@@ -307,8 +325,9 @@ function InventoryService.purchase(player: Player, kind: ItemKind, id: string): 
 		return false, name .. " is already owned"
 	end
 	local profile = getProfile(player)
-	if profile.auraPoints < required then
-		return false, ("LOCKED: %s needs %d Aura (you have %d)"):format(name, required, profile.auraPoints)
+	local locked = lockReason(profile, name, required)
+	if locked then
+		return false, locked
 	end
 	if price < 0 or profile.denarii < price then
 		return false, ("NOT ENOUGH DENARII for %s (%d needed)"):format(name, price)
@@ -330,8 +349,9 @@ function InventoryService.equip(player: Player, kind: ItemKind, id: string): (bo
 		return false, name .. " is not owned yet"
 	end
 	local profile = getProfile(player)
-	if profile.auraPoints < required then
-		return false, ("LOCKED: %s needs %d Aura"):format(name, required)
+	local locked = lockReason(profile, name, required)
+	if locked then
+		return false, locked
 	end
 	local message = name .. " equipped"
 	if kind == "Weapon" then

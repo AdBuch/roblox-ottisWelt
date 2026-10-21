@@ -53,6 +53,7 @@ local GameModeDefinitions = load(shared, "GameModeDefinitions")
 local WeaponDefinitions = load(shared, "WeaponDefinitions")
 local WeaponAttackDefinitions = load(shared, "WeaponAttackDefinitions")
 local WeaponSpecialDefinitions = load(shared, "WeaponSpecialDefinitions")
+local GladiatorLevelDefinitions = load(shared, "GladiatorLevelDefinitions")
 local ShieldDefinitions = load(shared, "ShieldDefinitions")
 local SpecialMoveDefinitions = load(shared, "SpecialMoveDefinitions")
 local ResponsiveHudController = load(script.Parent, "ResponsiveHudController")
@@ -92,7 +93,7 @@ local placeFolder = script.Parent:FindFirstChild("Place")
 local GameModeMenuController = if not isArena then load(placeFolder, "GameModeMenuController") else nil
 local ActiveBattlesController = if not isArena then load(placeFolder, "ActiveBattlesController") else nil
 for _, module in {
-	Config, CombatConfig, GameStates, GameModeDefinitions, WeaponDefinitions, WeaponAttackDefinitions, WeaponSpecialDefinitions,
+	Config, CombatConfig, GameStates, GameModeDefinitions, WeaponDefinitions, WeaponAttackDefinitions, WeaponSpecialDefinitions, GladiatorLevelDefinitions,
 	ShieldDefinitions, SpecialMoveDefinitions,
 	ResponsiveHudController, HudVisibilityController, HudStateController, NotificationController, ContextHealthController,
 	TeamStatusController, BossHudController, AuraDisplayController, MobileControlsController, InfoPanelController,
@@ -621,8 +622,10 @@ task.spawn(function()
 		table.insert(lines, "")
 		table.insert(lines, teamStatus.rosterText())
 		table.insert(lines, "")
-		table.insert(lines, "<b>AURA</b>  progress, never spent: it unlocks weapons, shields and armor. Zombie kills pay their Aura (co-op assists 30 %). Otti: 500 solo, 400 per surviving co-op player, 250 for defeated helpers. Team Battle: 80 win / 25 loss.")
-		table.insert(lines, "<b>DENARII</b>  money: every Aura reward also pays Denarii. Buy unlocked gear in the Gladiator Armory.")
+		local levelDef, nextLevel = GladiatorLevelDefinitions.levelFor(tonumber(player:GetAttribute(Config.AuraAttribute)) or 0)
+		table.insert(lines, ("<b>GLADIATOR LEVEL</b>  LV %d %s%s"):format(levelDef.Level, levelDef.Title, if nextLevel then (" · next: LV %d at %d Aura"):format(nextLevel.Level, nextLevel.Aura) else " · top level"))
+		table.insert(lines, "<b>AURA</b>  experience, never spent: it raises your gladiator level, which unlocks weapons, shields and armor. Zombie kills pay their Aura (co-op assists 30 %), every completed round +10. Otti: 500 solo, 400 per surviving co-op player, 250 for defeated helpers. Team Battle: 80 win / 25 loss.")
+		table.insert(lines, "<b>DENARII</b>  money: combat rewards also pay Denarii, every completed round +15. Buy unlocked gear in the Gladiator Armory.")
 		return table.concat(lines, "\n")
 	end
 	local info = InfoPanelController.start(hud.gui, edge, infoText)
