@@ -1,7 +1,7 @@
 --!strict
--- The eight shields. Exactly one is equipped (left hand); hold right click to block.
--- Blocking only protects inside the shield's frontal angle (FacingDot) and only after the
--- shield is fully raised (RaiseSeconds).
+-- The eight shields. Exactly one is equipped (left hand). BLOCK toggles the guard; the defense depends
+-- on the hit direction (ShieldDefenseConfig: front, shield side, weapon side, back; passive protection
+-- on the shield side even without blocking). FacingDot is the front zone; RaiseSeconds the raise time.
 
 export type ShieldDefinition = {
 	Id: string,

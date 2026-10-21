@@ -55,7 +55,6 @@ local CombatConfig = {
 	-- Player
 	PlayerMaxHealth = 120,
 	PlayerWalkSpeed = 16,
-	BlockingWalkSpeed = 11,
 	HitImmunitySeconds = 0.35, -- after a landed zombie hit, further zombie hits are ignored briefly
 	CoopRespawnHealthFraction = 0.6,
 	PvPMaxDamageFraction = 0.45, -- no single PvP hit removes more than this share of max health
@@ -63,7 +62,6 @@ local CombatConfig = {
 
 	-- Shields / parry (per-shield values: ShieldDefinitions)
 	ShieldBlockDistance = 12,
-	ShieldMaxBlockSeconds = 4, -- exploit safeguard: release and press again to re-raise
 	ShieldPushBackSpeed = 34,
 	ParryWindowSeconds = 0.4, -- twin daggers: built-in parry instead of a shield
 	ParryCooldownSeconds = 1.2,

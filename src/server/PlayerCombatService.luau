@@ -30,6 +30,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local DamageConfig = require(ReplicatedStorage.Shared.DamageConfig)
 local BlockDefinitions = require(ReplicatedStorage.Shared.BlockDefinitions)
 local PvPBalanceConfig = require(ReplicatedStorage.Shared.PvPBalanceConfig)
+local ShieldDefenseConfig = require(ReplicatedStorage.Shared.ShieldDefenseConfig)
 local SlideDefinitions = require(ReplicatedStorage.Shared.SlideDefinitions)
 local SpecialChargeDefinitions = require(ReplicatedStorage.Shared.SpecialChargeDefinitions)
 local SpecialMoveDefinitions = require(ReplicatedStorage.Shared.SpecialMoveDefinitions)
@@ -200,7 +201,8 @@ local function updateWalkSpeed(player: Player)
 	local factor = 1
 	local shield = InventoryService.getActiveShield(player)
 	if state.blocking and shield then
-		factor = CombatConfig.BlockingWalkSpeed / CombatConfig.PlayerWalkSpeed * shield.BlockSpeedMultiplier
+		-- about 65 % with the guard up; light shields a little faster, heavy ones a little slower
+		factor = ShieldDefenseConfig.BlockWalkFactor * (0.5 + 0.5 * shield.BlockSpeedMultiplier)
 	end
 	if state.chargeStart > 0 then
 		-- charging a special: the stronger of the two slow-downs applies (never multiplied)
@@ -451,14 +453,13 @@ local function setBlocking(player: Player, active: boolean)
 			character:SetAttribute("BlockPose", "Front")
 		end
 	end
-	if active then
-		local myToken = state.blockToken
-		task.delay(CombatConfig.ShieldMaxBlockSeconds, function()
-			if state.blockToken == myToken and state.blocking then
-				setBlocking(player, false)
-			end
-		end)
-	end
+	-- Toggle block: it stays up until BLOCK is pressed again, ATTACK, a fired special, a slide,
+	-- a guard break, a knockdown, a grab, death or a reset lowers it (no timeout)
+end
+
+-- The guard can't come up right now: tell the client so its toggle shows "off" again.
+local function refuseBlock(player: Player)
+	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Block, false)
 end
 
 local function onBlockRequest(player: Player, wantsBlock: unknown)
@@ -475,10 +476,12 @@ local function onBlockRequest(player: Player, wantsBlock: unknown)
 	end
 	local _, humanoid = CombatUtil.getLivingCharacter(player)
 	if not humanoid or not state.offhandWeld or not state.offhandWeld.Parent then
+		refuseBlock(player)
 		return
 	end
 	local now = os.clock()
 	if now < state.heavyReactUntil then
+		refuseBlock(player)
 		return -- pushed back by a heavy blow: the guard comes up again a moment later
 	end
 	if state.shieldId == nil then
@@ -492,13 +495,16 @@ local function onBlockRequest(player: Player, wantsBlock: unknown)
 			end)
 			Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Parry)
 		end
+		refuseBlock(player) -- daggers parry; there is no held guard to show
 		return
 	end
 	local activeShield = InventoryService.getActiveShield(player)
 	if activeShield == nil or state.shieldId ~= activeShield.Id then
+		refuseBlock(player)
 		return -- the shield in the hand must be the owned, equipped one
 	end
 	if now < state.blockLockedUntil then
+		refuseBlock(player)
 		return -- guard broken a moment ago
 	end
 	setBlocking(player, true)
@@ -556,6 +562,28 @@ type Incoming = {
 	training: boolean?, -- training dummy swing: evaluate block / parry / dodge, never damage
 	undodgeable: boolean?,
 }
+
+-- Where a hit comes from, seen from the defender (server-side, ShieldDefenseConfig):
+-- "Front" (inside the shield's block angle), "ShieldSide" (left), "WeaponSide" (right) or "Back".
+local function defenseZone(root: BasePart, fromPosition: Vector3, shield: any): string
+	local toAttacker = CombatUtil.flat(fromPosition - root.Position)
+	if toAttacker.Magnitude < 0.1 then
+		return "Front"
+	end
+	local direction = toAttacker.Unit
+	local look = CombatUtil.flat(root.CFrame.LookVector)
+	local lookDot = if look.Magnitude > 0.01 then direction:Dot(look.Unit) else 1
+	if lookDot >= shield.FacingDot then
+		return "Front"
+	elseif lookDot <= ShieldDefenseConfig.BackDot then
+		return "Back"
+	end
+	local shieldSide = -CombatUtil.flat(root.CFrame.RightVector) -- the shield is on the left arm
+	if shieldSide.Magnitude > 0.01 and direction:Dot(shieldSide.Unit) >= ShieldDefenseConfig.SideDot then
+		return "ShieldSide"
+	end
+	return "WeaponSide"
+end
 
 -- Which block pose meets this attack (BlockDefinitions).
 local function blockPose(root: BasePart, incoming: Incoming): string
@@ -639,13 +667,20 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 	local perfect = false
 	local stagger = 1
 	local shield = InventoryService.getActiveShield(victim)
-	-- 4. Shield block / parry
+	-- 4. Shield defense by hit direction (ShieldDefenseConfig): front / shield side / weapon side /
+	-- back, passive while the shield is only carried, stronger with the guard up
 	if incoming.unblockable then
 		-- grapples can't be blocked
-	elseif state.blocking and shield and state.shieldId == shield.Id and now - state.blockStart >= shield.RaiseSeconds then
+	elseif shield and state.shieldId == shield.Id then
+		local zone = defenseZone(root, incoming.fromPosition, shield)
+		local raised = state.blocking and now - state.blockStart >= shield.RaiseSeconds
 		local inRange = incoming.isProjectile or CombatUtil.flatDistance(root.Position, incoming.fromPosition) <= CombatConfig.ShieldBlockDistance
-		if inRange and CombatUtil.isFacing(root.CFrame, incoming.fromPosition, shield.FacingDot) then
-			local reduction = (if incoming.isProjectile then shield.ProjectileReduction else shield.Reduction) * (1 - incoming.blockPierce)
+		local active = raised and inRange
+		local base = if active then ShieldDefenseConfig.Active[zone] else ShieldDefenseConfig.Passive[zone]
+		local quality = math.clamp(shield.Reduction / ShieldDefenseConfig.ReferenceReduction, ShieldDefenseConfig.QualityMin, ShieldDefenseConfig.QualityMax)
+		local projectileRatio = if incoming.isProjectile then shield.ProjectileReduction / math.max(0.01, shield.Reduction) else 1
+		local reduction = math.clamp((base or 0) * quality * projectileRatio, 0, ShieldDefenseConfig.MaxReduction) * (1 - incoming.blockPierce)
+		if active and zone == "Front" then
 			if incoming.guardBreak then
 				-- The guard breaks: half protection, the shield drops and stays down briefly
 				reduction *= 0.5
@@ -661,6 +696,14 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 			blocked = not incoming.guardBreak
 			stagger = if perfect then 2.5 else shield.StaggerMultiplier
 			shieldFeedback(state)
+		elseif reduction > 0 then
+			-- a side hit on the shield: partial protection only (active guard = still a block)
+			shieldMultiplier = 1 - reduction
+			blocked = active
+			if active then
+				stagger = shield.StaggerMultiplier * 0.6
+				shieldFeedback(state)
+			end
 		end
 	elseif state.shieldId == nil and now < state.parryUntil and CombatUtil.isFacing(root.CFrame, incoming.fromPosition, 0) then
 		-- Twin daggers: the parry is timing-based, so it counts as a perfect deflection
