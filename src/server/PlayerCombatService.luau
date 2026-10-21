@@ -56,6 +56,12 @@ type Anim = SpecialMoveDefinitions.Anim
 
 local PREFIX = "[OttiArena][Server]"
 local MAX_AIM_DISTANCE = 400
+-- Hit reactions: a heavy unblocked hit of at least this share of max health makes the player lose
+-- balance briefly (walk speed x FACTOR for SECONDS), at most once per COOLDOWN (no stun-lock).
+local BALANCE_LOSS_SHARE = 0.08
+local BALANCE_LOSS_FACTOR = 0.55
+local BALANCE_LOSS_SECONDS = 0.4
+local BALANCE_LOSS_COOLDOWN = 1.5
 
 -- Poses relative to the hand's grip attachment (+Y forward when the arm hangs, +Z up the arm).
 local SHIELD_IDLE = CFrame.new(-0.45, 0.1, 0.7) * CFrame.Angles(0, 0, math.rad(90)) -- on the outer forearm
@@ -95,6 +101,9 @@ type PlayerState = {
 	lastHitReact: number,
 	chargeStart: number, -- SPECIAL CHARGE: os.clock() of the start, 0 = not charging
 	chargeToken: number,
+	balanceFactor: number, -- brief loss of balance after a heavy unblocked hit (1 = none)
+	balanceToken: number,
+	lastBalanceLoss: number,
 	trail: Trail?, -- weapon trail during strikes
 	slowFactor: number,
 	slowToken: number,
@@ -142,6 +151,9 @@ local function getState(player: Player): PlayerState
 			lastHitReact = 0,
 			chargeStart = 0,
 			chargeToken = 0,
+			balanceFactor = 1,
+			balanceToken = 0,
+			lastBalanceLoss = -100,
 			trail = nil,
 			slowFactor = 1,
 			slowToken = 0,
@@ -210,7 +222,7 @@ local function updateWalkSpeed(player: Player)
 	end
 	local speed = CombatConfig.PlayerWalkSpeed * factor
 	speed *= 1 - math.clamp(InventoryService.getEquippedArmor(player).MovePenalty, 0, 0.5) -- heavier armor, slower steps
-	humanoid.WalkSpeed = if state.controlLocked then 0 else speed * state.slowFactor
+	humanoid.WalkSpeed = if state.controlLocked then 0 else speed * state.slowFactor * state.balanceFactor
 	humanoid.JumpPower = if state.controlLocked then 0 else 50
 	humanoid.UseJumpPower = true
 end
@@ -828,6 +840,20 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 	if incoming.heavy and not blocked and state.chargeStart > 0 then
 		cancelCharge(victim, "INTERRUPTED") -- a heavy hit that got through breaks the charge, even with the guard up
 	end
+	if incoming.heavy and not blocked and damage >= humanoid.MaxHealth * BALANCE_LOSS_SHARE and now - state.lastBalanceLoss >= BALANCE_LOSS_COOLDOWN then
+		-- A short loss of balance (quiet slow-down), never chained into a stun-lock
+		state.lastBalanceLoss = now
+		state.balanceToken += 1
+		local myToken = state.balanceToken
+		state.balanceFactor = BALANCE_LOSS_FACTOR
+		updateWalkSpeed(victim)
+		task.delay(BALANCE_LOSS_SECONDS, function()
+			if state.balanceToken == myToken then
+				state.balanceFactor = 1
+				updateWalkSpeed(victim)
+			end
+		end)
+	end
 	if incoming.knockdownSeconds and incoming.knockdownSeconds > 0 and not blocked then
 		PlayerCombatService.knockdown(victim, incoming.knockdownSeconds)
 	end
@@ -975,6 +1001,8 @@ function PlayerCombatService.resetCombatState(player: Player)
 	cancelCharge(player, nil)
 	state.controlLocked = false
 	state.slowFactor = 1
+	state.balanceFactor = 1
+	state.balanceToken += 1
 	state.slowToken += 1
 	state.actionToken += 1
 	state.busyUntil = 0
@@ -1337,6 +1365,8 @@ local function onCharacterAdded(player: Player, character: Model)
 	state.chargeStart = 0
 	state.chargeToken += 1
 	state.slowFactor = 1
+	state.balanceFactor = 1
+	state.balanceToken += 1
 	state.slowToken += 1
 	state.actionToken += 1
 	state.busyUntil = 0

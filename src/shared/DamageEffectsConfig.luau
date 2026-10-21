@@ -2,11 +2,11 @@
 -- Hit feedback for players and zombies (always child-friendly: NO blood anywhere), plus zombie
 -- condition states and limb loss. Purely visual switches never change combat logic.
 --   Validated hits show short orange sparks and sand dust; Otti, players and zombies alike.
---   ZombieDismembermentEnabled  zombies may lose limbs/armor after strong hits (never players/Otti);
---                               stylized: the parts fall, a dark cap closes the joint, no gore
+--   ZombieDismembermentEnabled  OFF: the game shows no loss of body parts (Roblox family standards);
+--                               the old stylized limb / armor loss code stays unused behind this switch
 
 local DamageEffectsConfig = {
-	ZombieDismembermentEnabled = true,
+	ZombieDismembermentEnabled = false, -- family-friendly: no body-part or armor-piece loss (keep off)
 
 	-- Particles
 	SparkColor = Color3.fromRGB(255, 140, 70),
