@@ -25,6 +25,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local EnvironmentConfig = require(ReplicatedStorage.Shared.EnvironmentConfig)
 local ExperienceConfig = require(ReplicatedStorage.Shared.ExperienceConfig)
 local InventoryService = require(script.Parent.InventoryService)
+local PlayerDataResetConfig = require(script.Parent.PlayerDataResetConfig)
 local Remotes = require(script.Parent.Remotes)
 
 local PREFIX = "[OttiArena][Server]"
@@ -173,7 +174,13 @@ local function onPlayerAdded(player: Player)
 	local saved = if typeof(result) == "table" then result :: { [string]: any } else nil
 	local earned = math.max(0, InventoryService.getAura(player) - session.auraAtJoin)
 	local earnedDenarii = math.max(0, InventoryService.getDenarii(player) - session.denariiAtJoin)
-	InventoryService.load(player, saved, earned, earnedDenarii)
+	-- Controlled one-time test-data reset (PlayerDataResetConfig, OFF by default, DEV only)
+	local resetToken = PlayerDataResetConfig.tokenFor(player.UserId, EnvironmentConfig.name(), if saved then saved.resetToken else nil)
+	if resetToken and saved then
+		warn(PREFIX, ("TEST DATA RESET for %s (%d) with token %q"):format(player.Name, player.UserId, resetToken))
+		saved = nil
+	end
+	InventoryService.load(player, saved, earned, earnedDenarii, resetToken)
 	applyPreferences(player)
 	setStatus(player, session, "Loaded")
 	print(PREFIX, ("Data loaded for %s (%s, %d Aura, %d Denarii)"):format(player.Name, if saved then "saved profile" else "new profile", InventoryService.getAura(player), InventoryService.getDenarii(player)))

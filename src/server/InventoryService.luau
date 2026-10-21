@@ -44,6 +44,7 @@ export type Profile = {
 	equippedArmor: string,
 	preferences: { [string]: string },
 	stats: { [string]: number },
+	resetToken: string?, -- the last controlled test-data reset applied (PlayerDataResetConfig)
 }
 
 local PROFILE_VERSION = PlayerDataSchema.Version
@@ -160,6 +161,9 @@ function InventoryService.migrateProfile(profile: Profile): Profile
 		stats[key] = if value and value == value then math.max(0, math.floor(value)) else 0
 	end
 	profile.stats = stats
+	if typeof(profile.resetToken) ~= "string" then
+		profile.resetToken = nil
+	end
 	profile.version = math.max(PROFILE_VERSION, savedVersion)
 	return profile
 end
@@ -216,11 +220,14 @@ end
 -- Replaces the in-memory profile with a loaded one. Aura and Denarii earned before the load
 -- finished (`earnedAura`, `earnedDenarii`) are kept on top, so nothing is lost while the
 -- DataStore answers.
-function InventoryService.load(player: Player, saved: { [string]: any }?, earnedAura: number, earnedDenarii: number)
+function InventoryService.load(player: Player, saved: { [string]: any }?, earnedAura: number, earnedDenarii: number, resetToken: string?)
 	local profile: Profile = if saved then (table.clone(saved) :: any) else newProfile()
 	InventoryService.migrateProfile(profile)
 	profile.auraPoints += math.max(0, math.floor(earnedAura))
 	profile.denarii += math.max(0, math.floor(earnedDenarii))
+	if resetToken then
+		profile.resetToken = resetToken -- this profile is reset at most once per token
+	end
 	profiles[player.UserId] = profile
 	InventoryService.publish(player)
 end
@@ -481,6 +488,7 @@ function InventoryService.serialize(player: Player): { [string]: any }
 		equippedArmor = profile.equippedArmor,
 		preferences = table.clone(profile.preferences),
 		stats = table.clone(profile.stats),
+		resetToken = profile.resetToken,
 	}
 end
 
