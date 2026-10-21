@@ -59,11 +59,12 @@ src/shared/   -> ReplicatedStorage.Shared
   GameModeDefinitions                Solo / Co-op / Team Battle rules
   WeaponDefinitions                  8 weapons (instant basic attack + aerial attack each)
   ShieldDefinitions                  8 shields (reduction, angle, speed, raise time, bash, arrows, armory class)
-  ArmorDefinitions                   4 armor sets (damage reduction, movement penalty, Aura unlock, price in Denarii)
+  ArmorDefinitions                   4 armor sets (damage reduction, movement penalty, gladiator level unlock, price in Denarii)
   DamageConfig                       player damage pipeline: minimum damage, PvE / PvP armor effectiveness
   SpecialMoveDefinitions             every basic, aerial and combination move as data (nothing charged)
   WeaponAttackDefinitions / WeaponSpecialDefinitions   contextual attack chains / Special gesture families and tiers
-  GestureDefinitions / ControlModeDefinitions / MomentumConfig / SlideDefinitions / BlockDefinitions   gesture recognition / Classic and Wild / Momentum / slide / blocks
+  ControlModeDefinitions / SpecialChargeDefinitions / ShieldDefenseConfig / MomentumConfig / BlockDefinitions   Classic controls / special charge tiers / shield defense by direction / Momentum / block poses
+  GladiatorLevelDefinitions / WeaponBalanceConfig   gladiator levels, titles, matchmaking gap / separate PvE and PvP weapon values
   CombatEffectsConfig / ZombieAttackDefinitions / SpectatorZoneDefinitions / CrowdQualityConfig   hit effects (no blood) / zombie attack sequences / tribune zones and quality
   CurrencyConfig                     Aura (progress, unlocks gear) and Denarii (money, buys gear)
   InputDefinitions / PvPBalanceConfig   input timing and mapping / PvP caps for specials and aerials
@@ -122,14 +123,14 @@ src/client/   -> StarterPlayer.StarterPlayerScripts.Client
   ContextHealthController            contextual world-space health bars (pooled BillboardGuis)
   TeamStatusController               team score + time, co-op teammate strip, lobby rosters
   AuraDisplayController              lobby Aura and Denarii counters, +n rewards in combat
-  MobileControlsController           touch ATK / BLOCK / SLIDE / SPECIAL around the jump button (Wild hides ATK / BLOCK)
-  GesturePadController               Wild gesture pad, Special Mode drawing, the training trace
+  MobileControlsController           touch ATTACK / SPECIAL (charge fill) / BLOCK (toggle) around Roblox's jump button
+  SpecialChargeHudController         three-phase special charge bar
   CombatSettingsController           CLASSIC / WILD and CAMERA pills (saved preferences)
   SlideController / MomentumHudController   own-character slide / the ARENA MOMENTUM bar
   CombatEffectsController / CombatCameraController   hit presentation by category (sparks, dust, no blood), camera impulses
   InfoPanelController / SpectatorController   optional i panel / Arena spectator bar + camera modes
   TeleportStatusController           travel / queue chip, START WITH CURRENT PARTY, emergency RETURN TO HUB
-  InputController                    Classic and Wild input for mouse/keyboard, gamepad and touch (attack, block, slide, special, gestures); sends intent only
+  InputController                    Classic input for mouse/keyboard, gamepad and touch (attack, block toggle, special hold, soft targeting); sends intent only
   ComboFeedbackController            tiny input chips, TRAINING board (both modes, Momentum, specials)
   PlayerAnimator                     procedural whole-body attack motion (additive, replaceable)
   OttiEntranceController             local camera for the entrance, landing shake, skip
@@ -174,57 +175,76 @@ Build both place files (git-ignored `build/`):
 powershell -File scripts/build-places.ps1
 ```
 
-## Controls
+## Controls (Classic, the only control mode)
 
-Two control modes with identical combat and damage; the choice is a saved preference (**CLASSIC / WILD** pill on the right
-edge). Switching waits until the current attack ends, cancels an unfinished gesture and ends an active block.
+The same combat everywhere: PvE, PvP and boss fights. The PLAY menu and the HUD work on phones, tablets and desktops.
 
 | | Keyboard & mouse | Gamepad | Touch |
 |---|---|---|---|
-| **Classic** attack (contextual chain) | Left click | R2 | ATK |
-| Classic block (hold) | Right click | L2 | BLOCK |
-| Jump | Space | A | Roblox jump button |
-| Slide (dodge + attack, see below) | Left Shift or C | B | SLIDE |
-| Special (Classic: draw with the mouse) | **Q**, then drag | **X**, then right stick | SPECIAL, then the pad |
-| **Wild** gesture pad | drag inside the pad (lower right) | pad + right stick | the pad (above jump) |
-| Wild block / parry | hold pad centre / quick tap | hold / tap centre | hold / tap centre |
-| Interact (shop, doors, posts) | **F** | D-pad up | tap prompt |
+| Move (camera-relative, turns the character) | WASD | left stick | Roblox thumbstick (left) |
+| Camera | mouse | right stick | drag on free screen space |
+| **Attack** (tap again = combo chain) | Left click | R2 | ATTACK (largest button, left of JUMP) |
+| **Block** on / off (toggle) | Right click | L2 | BLOCK (lit ON while active) |
+| **Special** (hold to charge, release to fire) | hold **Q** | hold **X** | hold SPECIAL (above JUMP, fills while charging) |
+| Jump (allowed while blocking) | Space | A | Roblox's own jump button (no second one) |
+| Interact (shop, doors, pads) | **F** | D-pad up | tap the prompt |
 | HUD mode (Full / Minimal / Hidden) | **H** or eye button | eye button | eye button |
-| Info panel | i button | i button | i button |
 
-**Wild gestures:** swipe Left / Right / Up / Down or draw a circle on the pad. The server re-classifies every gesture from
-its normalized samples; the pad's preview is never trusted. **Soft Targeting** turns the player at most 40° toward an
-enemy in a 75° cone in front (visible line of sight, never teammates, spectators or lobby players) and aims there.
+The touch buttons are positioned per device (`UiConfig.TouchLayoutPhone` / `TouchLayoutTablet`) around Roblox's
+jump button, away from the thumbstick and the health bar. **Soft Targeting:** an attack turns the character smoothly,
+at most 40° over 0.1 s, toward the enemy in a 75° cone in front. Only targets with a clear line of sight count; never
+teammates, spectators or lobby players. With the bow and a mouse the cursor aims instead.
 
-**Nothing is charged:** every attack starts when its input arrives; the server decides what happens.
+## Combat (V2)
 
-## Combat (redesign)
+Server-authoritative: clients send intent only (an attack, the block toggle, special start / release, an aim point).
+Damage, reach, hits, cooldowns, block results, charge time, rewards and progress are decided on the server. Details:
+[docs/COMBAT_V2_PLAN.md](docs/COMBAT_V2_PLAN.md).
 
-- **Contextual attack chains:** a basic attack's move depends on the situation (standing, moving, after a previous
-  attack, in the air, sliding). Chains reset after 1.1 s without input. No input codes or combos to memorize.
-- **Slide:** about 12 studs in 0.55 s, cooldown 1.3 s, ground only, stops at walls and solid enemies, never launches
-  upward. A short dodge window (0.15 s) lets an incoming attack miss. A slide can end in one weapon-specific slide
-  attack. Client: `SlideController` moves the own character; the server approves every slide.
-- **Blocks:** poses Front / Left / Right / High / Low chosen from the incoming attack. A **perfect block** (raised at most
-  0.2 s before a valid hit) deals no damage, recoils the attacker and opens a 1 s **counter** window (big Momentum gain).
-  Heavy attacks (Brute, Otti's tail slam, Axe, Morning Star) push the blocker back and briefly prevent slides.
-- **Arena Momentum (0-100):** gained by varied attacks, aerial hits, slide dodges, blocks, perfect blocks, counter hits and
-  varied kills. Repeats give less; it decays after 4 s without meaningful action (5 per second). Elimination rounds start
-  at 20. The server owns it (`MomentumService`).
-- **Specials (gesture families):** direction picks the family per weapon (Left, Right, Up, Down, Circle, Ultimate); the
-  length of the drawn gesture picks the tier. Tier I costs 25 Momentum (100 % damage), tier II 50 (155 %), tier III 75
-  (205 %), the Ultimate 100. PvP uses flatter multipliers (1 / 1.2 / 1.35) and every move keeps its PvP cap.
-- **Sword animations:** each basic attack has its own footwork (lunge, retreat cut, diagonal, flurry, spin); hitboxes
-  sweep along the same path the animation uses (time slices on the server).
-- **Zombie attack sequences:** each type has its own sequence. Heavy blows of zombies are spaced apart so they never land
-  in sync. The archer draws visibly before every shot (single, double or aimed).
+- **Separate combat states** (`PlayerCombatService`): defense (block), attack (busy and cooldowns) and special charge
+  are independent. Block and charge may be active together.
+  - **Attack:** lowers an active block first and does not raise it again. No attacks while charging.
+  - **Special release:** lowers the block, then fires; the block is not raised again.
+  - **Interruptions:** death and respawn, a knockdown, Otti's grab, a match reset, or a heavy hit that was **not**
+    blocked cancel the charge. Block and charge are always reset on death and respawn.
+- **Attack chains:** contextual (standing, moving, after the previous attack, in the air, after a perfect block).
+  Chains reset after 1.1 s.
+- **Special charge** (`SpecialChargeDefinitions`): the hold time is measured on the server; holding longer than 2.5 s
+  adds nothing. While charging, walking slows to 75 %; with the block up as well, the stronger slow (block) applies.
+  Spam is stopped by one shared cooldown and the busy state. A three-phase bar and the SPECIAL button show the charge.
 
-**Server validation:** every request is rate limited and validated against the server state. Hits, damage, direction,
-targets, Momentum, block / parry and combo success are decided on the server only; clients send intent (an aim point,
-a gesture's normalized samples, a slide request) and never results.
+  | Tier | Hold | Move (weapon family) | PvE damage | PvP damage | Cooldown |
+  |---|---|---|---|---|---|
+  | I | under 0.5 s | quick special (Right family) | × 1.0 | × 1.0 | 2.5 s |
+  | II | 0.5–1.5 s | strengthened (Left family) | × 1.3 | × 1.1 | 4 s |
+  | III | 1.5 s or more, full at 2.5 s | maximum (Down family) | × 1.7 | × 1.25 | 6 s |
+  | ULTIMATE | tier III with a full Momentum bar | the weapon's Ultimate | own | own | 8 s |
 
-**Presentation settings** (saved): **CAMERA** shake Full / Reduced / Off. It never changes combat.
-**Child-friendly:** there is no blood anywhere; hits show orange sparks and sand dust only.
+  `specialFor(characterId, weapon, family)` is the one place that picks the move, so Otti, Schili, Krokero and later
+  characters can get their own specials without changing the combat code.
+- **Block and shield defense** (`ShieldDefenseConfig`, by hit direction computed on the server). The shield is on the
+  left arm:
+
+  | Zone | Passive (shield carried) | Active block |
+  |---|---|---|
+  | Front (the shield's block angle) | 0 % | 70 % (perfect block / guard break only here) |
+  | Shield side (left) | 15 % | 40 % |
+  | Weapon side (right) | 0 % | 0 % |
+  | Back | 0 % | 0 % |
+
+  - **Toggle:** block stays up until it is pressed again (no timeout). Walk speed is about 65 %.
+  - **Per shield:** values scale with the shield's quality; arrows use its projectile ratio.
+  - **Perfect block:** raising the block at most 0.2 s before a valid hit stops it and opens a 1 s counter.
+  - **Heavy hits on the block** push the blocker back briefly.
+  - **Twin daggers** parry instead of blocking.
+- **Hit reactions:** knockback, a short stumble pose, and on heavy unblocked hits a brief loss of balance (55 % walk
+  speed for 0.4 s, at most every 1.5 s). Control loss stays short.
+- **Effects:** sparks and dust only. **No blood and no loss of body parts** (Roblox family standards).
+- **Momentum (0-100):** varied attacks, aerial hits, blocks and perfect blocks fill it. A full bar turns the next tier III
+  special into the Ultimate.
+- **Removed in V2:** the Wild mode, the gesture pad and Special gestures (`GesturePadController`, `GestureDefinitions`,
+  `GestureValidationService`). Slide input is removed too, because mobile has four buttons and PvP must not favour a
+  platform; `SlideService` stays on the server, unused.
 
 ## HUD (responsive, mobile first)
 
@@ -298,7 +318,7 @@ shelves, crates and barrels.
 - **RANGED & SPECIAL** (east wall): Hunter Bow with quiver and arrows; future ranged / special weapons.
 - **SHIELDS** (south wall): LIGHT · BALANCED · HEAVY. **ARMOR** (centre dais): four mannequins.
 Rows come from `WeaponDefinitions` (`Row`) and `ShieldDefinitions.classOf`, so new items appear automatically.
-Each display has only a small name plate; walking up highlights it and opens a compact card (stats, Aura unlock,
+Each display has only a small name plate; walking up highlights it and opens a compact card (stats, gladiator level unlock,
 price in Denarii, OWNED / EQUIPPED, **LOCKED** / **BUY** / **EQUIP**, optional `i` details). F / gamepad X / the card
 button use the same server prompt, which checks: lobby state, inside the armory, close to the display, data loaded,
 unlocked by Aura, owned / affordable in Denarii. Safe zone like the
@@ -354,15 +374,21 @@ while the bow is equipped (no aim assistance). Its special shots come from combo
 ## Specials and PvP balance
 
 Each weapon's Special families (Left, Right, Up, Down, Circle, Ultimate) are listed in `WeaponSpecialDefinitions`; the
-Momentum cost and damage tiers are described in *Combat (redesign)* above.
+charge tiers that pick a family are described in *Combat (V2)* above.
+
+**PvE / PvP weapon values** are configured separately (`WeaponBalanceConfig`, applied in `SpecialMoveService`):
+- **PvE:** a weapon's damage grows with its gladiator level (+8 % per level above 1), so progress shows against zombies
+  and bosses. Starter weapons keep their base damage, so beginners can still win.
+- **PvP:** every weapon's basic-attack DPS is normalized to one reference (22). Long reach and bows pay a small tax.
+  Weapons still differ in reach, speed, arc and style, so higher levels bring more choice, not more power.
 
 **PvP balance** (`PvPBalanceConfig`): per-move PvP multipliers (0.35-0.75) and target caps, no single hit above 45 % and
 no whole special or aerial move above 50 % of a player's max health, knockdowns capped, no repeated stagger within
 2.5 s, guard breaks drop the shield for 1.2 s (half protection) instead of ignoring it, counter windows only for the
 first 0.3-0.35 s.
 
-**Training:** the TRAINING board in the training yard explains both modes, Momentum and the equipped weapon's special
-families; the sparring dummy answers attacks; no Aura there.
+**Training:** the TRAINING board in the training yard explains the controls, the block directions, the special charge
+tiers with the equipped weapon's moves and Momentum. The sparring dummy answers attacks; there is no Aura in training.
 
 ## Shields (8)
 
@@ -443,16 +469,11 @@ Corpses stop colliding immediately.
 
 Nothing is rebuilt: prepared detail parts are shown and a few pieces are hidden (`ZombieDamageStateService`).
 
-### Stylized limb loss (zombies only)
+### Limb and armor loss: switched off
 
-Strong hits a zombie survives may remove a **weapon arm, shield arm, leg, helmet or shoulder armor**
-(`ZombieDismembermentService`). Chance = weapon (Battle Axe 50 %, Morning Star 45 %, Legion Sword 28 %, Gladius 22 %,
-Trident/Spear 20 %, Daggers 6 %, Bow 5 %) × 1.5 for specials × hit strength (18+ damage) × remaining health. Projectiles
-use the impact height (head → helmet, low → leg), melee the attacker's side; spinning attacks favour legs. Never the head,
-never both legs, at most 2 limbs. The removed part falls as a harmless, non-colliding, anchored copy that fades after 5 s;
-a dark cap covers the joint (no anatomy). Consequences: **no weapon arm** → weak bites/kicks (55 % damage, shorter
-reach); **no shield arm** → no guard, no shield bash, no net; **lost leg** → 45 % speed, crawling pose, shorter reach;
-**lost armor** → +15 % damage taken per piece (max +30 %). Aura is still paid exactly once per zombie.
+The game shows no loss of body parts (Roblox family standards): `DamageEffectsConfig.ZombieDismembermentEnabled = false`.
+The old stylized code (`ZombieDismembermentService`) stays unused behind that switch and is never called with it off.
+Zombie condition states (darker skin, scratches, torn cloth) still show damage.
 
 ## Round 7: OTTI — CHAMPION OF THE COLOSSEUM
 
@@ -539,15 +560,26 @@ solo 500 Aura; co-op 400 per survivor, 250 for defeated players who damaged him.
 
 - **Shells:** 12 symmetric spots. Solo uses 8, Co-op 4 + 2 per player (max 12), Team Battle none by default.
   Each heals exactly **+10** (`Config.ShellHealAmount`, never above max, not used at full health), only for the collector, and respawns after 12 s (never right under a player).
-- **Two currencies** (`CurrencyConfig`):
-  - **Aura** is progress. It is earned by playing (zombie kills, assists, Otti, Team Battle results) and never spent.
-    Every weapon, shield and armor set has an **AuraRequired** value: until your Aura reaches it, the item is
-    **LOCKED** and can neither be bought nor equipped.
-  - **Denarii** (the Roman silver coin) are money. Every Aura reward also pays Denarii (`DenariiPerAura`, 1 per Aura
-    point by default). Unlocked items are bought with Denarii (`Price`).
-  - Profiles are saved in a DataStore (see *Saving*). Old profiles with `coins` are migrated once into Aura. Profiles from
-    before Denarii (schema v4) are converted once: the old Aura balance becomes the Denarii balance, and Aura becomes
-    that balance plus the unlock values of the owned gear, so nothing a player owns gets locked.
+- **Aura, gladiator levels and Denarii** (`CurrencyConfig`, `GladiatorLevelDefinitions`):
+  - **Aura** is experience. It comes from zombie kills, assists, completed rounds (+10), Otti and Team Battle results;
+    it is never spent and keeps adding up.
+  - **Gladiator levels** come from total Aura. Each has a title, and the HUD shows the level, title and progress to the
+    next one. Levels unlock gear (`LevelRequired`) and are a matchmaking factor.
+
+    | LV | Title | Aura |
+    |---|---|---|
+    | 1 | TIRO | 0 |
+    | 2 | NOVICIUS | 100 |
+    | 3 | GLADIATOR | 300 |
+    | 4 | VETERANUS | 650 |
+    | 5 | PRIMUS PALUS | 1200 |
+    | 6 | CHAMPION | 2000 |
+    | 7 | LEGEND OF THE ARENA | 3200 |
+
+  - **Denarii** (the Roman silver coin) are the money. Combat rewards pay Denarii too (1 per Aura point by default), and
+    every completed round pays +15. Gear that your level has unlocked is bought with Denarii (`Price`); the balance
+    never goes negative.
+  - **Rewards are paid exactly once,** on the server: once per zombie, once per round and player, once per match.
 - **Zombie Archive:** six barred cages with the real arena models (anchored, tagged `ZombieDisplay`, never targets, no AI)
   and a plaque each: name, role, health, damage, ability, reward and first round. Otti is not in the archive.
 - **Training yard:** two straw dummies with damage numbers. Specials and combos work, there's no Aura or eliminations, and they refill after 3 s.
@@ -564,6 +596,14 @@ mock data unless `StudioMockData = false`. Loaded data always goes through
 - **Save:** 8 s after a change (purchase, equip, Aura reward, preference), every 120 s if dirty, on leave and on
   shutdown (`BindToClose`) via `UpdateAsync`; a newer save from another server is kept.
 - **Preferences:** the client may only send whitelisted values (`SavePreference` remote, rate limited).
+- **Schema v6:** Aura is experience; levels are derived, not stored. The old `ControlMode` / `BloodFx` preferences are
+  dropped on load. Moving from v5 to v6 needs no data change.
+- **Controlled test-data reset** (`src/server/PlayerDataResetConfig.luau`): **off by default.**
+  - To use it, set `Enabled = true` and a **new** `Token`, optionally list the test players' `UserIds`, then publish
+    to **DEV** only.
+  - Each listed profile is replaced by a fresh one on its next join, exactly once per token. The token is saved, so the
+    reset never repeats on a server start.
+  - It never runs after a failed load, is logged, and needs explicit approval before any production use.
 
 ## Multi-place architecture
 
@@ -656,6 +696,9 @@ logged and ignored; they never affect the match.
   **START WITH CURRENT PARTY**.
 * **Teams:** only equal sizes (4v4 at once, 3v3 after 15 s, 2v2 after 30 s, 1v1 after 45 s waiting), never 3v1,
   parties are never split and never face themselves (a party is one entry).
+* **Gladiator level as a factor:** each entry carries its average level (`MatchRatingService`). Team battles only match
+  entries within a level window around the oldest entry. The window starts at ±1 and widens by 1 every 15 s, up to ±6.
+  A skill-based rating can be added in `MatchRatingService` later.
 * **Partial teleport failure:** failed players get a message, their profile unfreezes and the party unlocks; the
   Arena waits up to 25 s; Co-op starts with whoever arrived, a team match with unequal teams is **cancelled**
   (MATCH CANCELLED, no rewards) and everybody returns.
@@ -740,10 +783,10 @@ With Place IDs = 0 or in Studio nothing is teleported (and nothing pretends to b
 **Gladiator Armory, armor and saving (Hub)** (Game Settings → Security → *Enable Studio Access to API Services* for saving)
 1. F5. From the spawn go to the back-left corner of the hall: the side passage marked GLADIATOR ARMORY leads past the forge; the armory door is at its end (right).
 2. Walk along BLADES (north), HEAVY & REACH (west), RANGED & SPECIAL (east, bow + quiver), SHIELDS LIGHT / BALANCED / HEAVY
-   (south) and the ARMOR mannequins (centre). Near a display: gold outline + card with stats, Aura unlock, price in Denarii and LOCKED / BUY / EQUIP / EQUIPPED; `i` shows details.
+   (south) and the ARMOR mannequins (centre). Near a display: gold outline + card with stats, level unlock, price in Denarii and LOCKED / BUY / EQUIP / EQUIPPED; `i` shows details.
 3. With too little Aura the card shows LOCKED and the button does nothing. Unlocked but too few Denarii: NOT ENOUGH DENARII
    and nothing changes. Recruit Leather is EQUIPPED from the start.
-4. After a Solo run (Aura and Denarii earned): buy Murmillo Armor once your Aura is 180 → Denarii drop by its price, Aura
+4. After a Solo run (Aura and Denarii earned): buy Murmillo Armor once you are level 3 → Denarii drop by its price, Aura
    stays the same; it appears on your character, walk speed drops by 2 %. Pressing again says Already equipped.
 5. Take a zombie hit with and without armor: damage numbers are lower with armor (e.g. 20 → 17 with Murmillo).
    Team Battle: Champion Armor reduces player damage by about 26 % instead of 35 %; armor cloth shows the team color.
@@ -751,12 +794,12 @@ With Place IDs = 0 or in Studio nothing is teleported (and nothing pretends to b
 7. Change the HUD mode (H), leave and rejoin: Aura, owned/equipped gear and the HUD mode are restored.
 
 **Solo (Arena gameplay: Arena place in Studio with `ArenaMockMode = "SOLO_ZOMBIES"`, or a real Solo start)**
-1. Hub F5. You spawn behind the Otti statue in the central hall, facing the ARENA gate: the Aura and Denarii capsules top-right show 0, Rusty Gladius + Wooden Buckler in your hands, touch: ATK, BLOCK, SLIDE and SPECIAL around the jump button.
-2. Follow the gold strip right to SINGLEPLAYER, walk to the TRAINING yard at the far end and hit a dummy (Classic or Wild controls, specials with Q / X).
+1. Hub F5. You spawn behind the Otti statue in the central hall, facing the ARENA gate: the Aura and Denarii capsules top-right show 0, Rusty Gladius + Wooden Buckler in your hands, touch: ATTACK, SPECIAL and BLOCK around Roblox's jump button, thumbstick left.
+2. Follow the gold strip right to SINGLEPLAYER, walk to the TRAINING yard at the far end and hit a dummy (tap ATTACK for combos, toggle BLOCK, hold Q / X / SPECIAL and watch the three charge phases).
 3. Walk north into the arena corridor: the ZOMBIE ARCHIVE cages line both walls (6 zombies with plaques; the Undead Sagittarius draws its bow at you). Hold F at the portcullis: the PLAY menu opens.
 4. Stand on the ZOMBIE SURVIVAL pad (SINGLEPLAYER, right) for 3 s, press START NOW, or use PLAY → SOLO: a reserved Arena server (Studio: open the Arena place). GET READY, then ROUND 1 / 7. Kill zombies: a short `+10` with the Aura orb (no permanent counter in combat).
 5. Die or win: you return to the Hub and keep your Aura and Denarii. Buy something in the GLADIATOR ARMORY (e.g. the
-   Legion Sword: unlocked at 80 Aura, costs 80 Denarii).
+   Legion Sword: unlocked at level 2, costs 80 Denarii).
 
 **Zombie damage, limbs, archers** (buy the Battle Axe or Morning Star for quick results)
 1. From Round 3: hit a zombie below 65 %: darker skin, scratches, torn cloth; below 30 % it limps and hunches.

@@ -82,9 +82,9 @@ Leather, Fabric, Wood, WoodPlanks (shield faces) and Neon (eyes).
 | Wounded | 65–30 % | darker skin, scratches on chest, head and arms, torn cloth flaps on the skirt; the scarf tail, some strips and the chest discs fall off; slight hunch |
 | Critical | < 30 % | even darker skin, large cracks on the chest and head, scratches on the legs, more armor lost, strong hunch and limp |
 
-**Dismemberment (stylized, non-graphic):** an arm or a leg can come off. The head never comes
-off, and both legs are never lost. A dark cap covers the joint. The falling copy fades out after
-about 5 s. The helmet and each shoulder plate can also be knocked off.
+**No loss of body parts:** limb and armor-piece loss is switched off for family-friendly play
+(`DamageEffectsConfig.ZombieDismembermentEnabled = false`). Damage shows only through the condition
+states above. A redesign should not plan detachable limbs as a visible feature.
 
 ---
 

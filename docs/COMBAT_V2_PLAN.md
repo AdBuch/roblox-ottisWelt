@@ -1,6 +1,6 @@
 # Combat System, Mobile Controls & Progression V2: technical plan
 
-Status: in progress on `feature/combat-encounter`. No push, deploy or publish without approval.
+Status: implemented on `feature/combat-encounter` (local commits). No push, deploy or publish without approval.
 
 ## Current state (analysis)
 
