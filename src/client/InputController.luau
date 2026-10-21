@@ -228,9 +228,8 @@ function InputController.init(options: Options): Input
 		if not root then
 			return
 		end
-		if blockOn then
-			blockOn = false -- the server lowers the guard right before the swing; no re-raise afterwards
-		end
+		-- An active guard is lowered by the SERVER right before the swing (only if the attack really
+		-- happens); its Feedback.Block updates the toggle, so a refused attack keeps the block on.
 		remotes.combatAction:FireServer("Basic", aimFor(root))
 		options.onInput("ATK")
 	end
@@ -256,10 +255,7 @@ function InputController.init(options: Options): Input
 		options.onChargeEnd()
 		local _, root = getParts()
 		local aim = if root then aimFor(root) else nil
-		remotes.combatAction:FireServer("SpecialRelease", aim)
-		if blockOn then
-			blockOn = false -- firing the special lowers the shield (the server confirms)
-		end
+		remotes.combatAction:FireServer("SpecialRelease", aim) -- firing lowers the shield (server-confirmed)
 		options.onInput("SPC")
 	end
 
