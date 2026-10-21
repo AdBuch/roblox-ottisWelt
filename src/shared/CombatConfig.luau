@@ -23,6 +23,7 @@ export type FeedbackKind =
 	| "Dodge"
 	| "PerfectBlock"
 	| "Slide"
+	| "SpecialCharge"
 
 export type ActionName = "Basic" | "Jump" | "Execute"
 
@@ -107,6 +108,7 @@ local CombatConfig = {
 		Dodge = "Dodge" :: FeedbackKind, -- () a slide dodged an attack
 		PerfectBlock = "PerfectBlock" :: FeedbackKind, -- () a perfect block / parry: counter window open
 		Slide = "Slide" :: FeedbackKind, -- (direction, distance, duration) approved slide: the client moves its character
+		SpecialCharge = "SpecialCharge" :: FeedbackKind, -- ("start" | "cancel" | "fire", reason or tier)
 	}),
 }
 

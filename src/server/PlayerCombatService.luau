@@ -3,15 +3,20 @@
 --   * Hands: the equipped weapon (right) and shield (left) are welded and visible together.
 --     Twin daggers are two-handed: a second dagger replaces the shield and blocking becomes a
 --     short parry. Models are always rebuilt from InventoryService (no client claims).
---   * CombatAction(action, payload): "Basic" (Classic: the contextual chain, AttackSequenceService),
---     "Gesture" (Wild swipes / circles and Special gestures, re-classified by
---     GestureValidationService), "Slide" (SlideService). The server rate-limits, checks the combat
---     context (CombatRules), alive, spawn protection, knockdown, busy time, cooldowns and Momentum
---     (MomentumService) and runs the move (SpecialMoveService). Nothing is charged; moves start
---     when the input arrives. Contextual combinations (Slide -> Attack, Block -> Slide -> Attack,
---     Slide -> Jump -> Attack, Perfect Block -> (Slide ->) Counter) need no input codes.
---   * ShieldBlock(boolean): request only; the server owns block/parry state, raise time and the
---     maximum block duration.
+--   * CombatAction(action, payload): "Basic" (attack: the contextual chain, AttackSequenceService),
+--     "SpecialStart" / "SpecialRelease" (hold-to-charge special, SpecialChargeDefinitions: the held
+--     time is measured HERE), "Slide" (SlideService, no client sends it in Classic V2). The server
+--     rate-limits, checks the combat context (CombatRules), alive, spawn protection, knockdown, busy
+--     time, cooldowns and Momentum (Ultimate only) and runs the move (SpecialMoveService).
+--   * ShieldBlock(boolean): the toggled block state the client wants; the server owns block/parry
+--     state, raise time and every reduction.
+--   * Combat state is split, not one state machine: DEFENSE (blocking) and SPECIAL CHARGE
+--     (chargeStart) may be active together; ATTACK (busyUntil / cooldowns) is separate.
+--       ATTACK          drops the block, then attacks; never while charging
+--       SPECIAL START   allowed while blocking; not during an attack or its cooldown
+--       BLOCK toggle    allowed while charging (the defense stays fully effective)
+--       SPECIAL RELEASE drops the block, then fires the reached tier
+--       interruptions   death, respawn, knockdown, grab, match reset, a heavy UNBLOCKED hit
 --   * Incoming damage (zombies and PvP) goes through here: spawn protection, immunity, shield
 --     angle/reduction, parry, PvP caps, knockback and slows.
 
@@ -26,9 +31,8 @@ local DamageConfig = require(ReplicatedStorage.Shared.DamageConfig)
 local BlockDefinitions = require(ReplicatedStorage.Shared.BlockDefinitions)
 local PvPBalanceConfig = require(ReplicatedStorage.Shared.PvPBalanceConfig)
 local SlideDefinitions = require(ReplicatedStorage.Shared.SlideDefinitions)
+local SpecialChargeDefinitions = require(ReplicatedStorage.Shared.SpecialChargeDefinitions)
 local SpecialMoveDefinitions = require(ReplicatedStorage.Shared.SpecialMoveDefinitions)
-local WeaponAttackDefinitions = require(ReplicatedStorage.Shared.WeaponAttackDefinitions)
-local WeaponSpecialDefinitions = require(ReplicatedStorage.Shared.WeaponSpecialDefinitions)
 local AttackSequenceService = require(script.Parent.AttackSequenceService)
 local CombatEffects = require(script.Parent.CombatEffects)
 local CrowdReactionService = require(script.Parent.CrowdReactionService)
@@ -36,7 +40,6 @@ local CombatRules = require(script.Parent.CombatRules)
 local CombatTargets = require(script.Parent.CombatTargets)
 local CombatUtil = require(script.Parent.CombatUtil)
 local DamageEffectsService = require(script.Parent.DamageEffectsService)
-local GestureValidationService = require(script.Parent.GestureValidationService)
 local EquipmentModels = require(script.Parent.EquipmentModels)
 local InventoryService = require(script.Parent.InventoryService)
 local JumpAttackService = require(script.Parent.JumpAttackService)
@@ -89,6 +92,8 @@ type PlayerState = {
 	committedUntil: number, -- a committed special: no slide out of it
 	heavyReactUntil: number, -- pushed back by a heavy blow on the shield
 	lastHitReact: number,
+	chargeStart: number, -- SPECIAL CHARGE: os.clock() of the start, 0 = not charging
+	chargeToken: number,
 	trail: Trail?, -- weapon trail during strikes
 	slowFactor: number,
 	slowToken: number,
@@ -134,6 +139,8 @@ local function getState(player: Player): PlayerState
 			committedUntil = 0,
 			heavyReactUntil = 0,
 			lastHitReact = 0,
+			chargeStart = 0,
+			chargeToken = 0,
 			trail = nil,
 			slowFactor = 1,
 			slowToken = 0,
@@ -190,15 +197,38 @@ local function updateWalkSpeed(player: Player)
 		return
 	end
 	local state = getState(player)
-	local speed = CombatConfig.PlayerWalkSpeed
+	local factor = 1
 	local shield = InventoryService.getActiveShield(player)
 	if state.blocking and shield then
-		speed = CombatConfig.BlockingWalkSpeed * shield.BlockSpeedMultiplier
+		factor = CombatConfig.BlockingWalkSpeed / CombatConfig.PlayerWalkSpeed * shield.BlockSpeedMultiplier
 	end
+	if state.chargeStart > 0 then
+		-- charging a special: the stronger of the two slow-downs applies (never multiplied)
+		factor = math.min(factor, SpecialChargeDefinitions.ChargeMoveFactor)
+	end
+	local speed = CombatConfig.PlayerWalkSpeed * factor
 	speed *= 1 - math.clamp(InventoryService.getEquippedArmor(player).MovePenalty, 0, 0.5) -- heavier armor, slower steps
 	humanoid.WalkSpeed = if state.controlLocked then 0 else speed * state.slowFactor
 	humanoid.JumpPower = if state.controlLocked then 0 else 50
 	humanoid.UseJumpPower = true
+end
+
+-- Ends a special charge without firing (interruption, death, reset). `reason` is shown briefly.
+local function cancelCharge(player: Player, reason: string?)
+	local state = getState(player)
+	if state.chargeStart <= 0 then
+		return
+	end
+	state.chargeStart = 0
+	state.chargeToken += 1
+	local character = player.Character
+	if character then
+		character:SetAttribute("SpecialChargeStart", nil)
+	end
+	updateWalkSpeed(player)
+	if player.Parent then
+		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.SpecialCharge, "cancel", reason)
+	end
 end
 
 ------------------------------------------------------------------------------------------
@@ -752,6 +782,9 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 			character:SetAttribute("HitReactSide", side)
 		end
 	end
+	if incoming.heavy and not blocked and state.chargeStart > 0 then
+		cancelCharge(victim, "INTERRUPTED") -- a heavy hit that got through breaks the charge, even with the guard up
+	end
 	if incoming.knockdownSeconds and incoming.knockdownSeconds > 0 and not blocked then
 		PlayerCombatService.knockdown(victim, incoming.knockdownSeconds)
 	end
@@ -842,6 +875,7 @@ end
 function PlayerCombatService.knockdown(player: Player, seconds: number)
 	local duration = math.min(seconds, 1.2)
 	setBlocking(player, false)
+	cancelCharge(player, "INTERRUPTED")
 	local state = getState(player)
 	state.knockedUntil = os.clock() + duration
 	AttackSequenceService.reset(player) -- a knockdown resets the attack chain
@@ -856,6 +890,7 @@ function PlayerCombatService.setControlLocked(player: Player, locked: boolean)
 	state.controlLocked = locked
 	if locked then
 		setBlocking(player, false)
+		cancelCharge(player, "INTERRUPTED")
 		state.actionToken += 1 -- a running move stops
 	end
 	updateWalkSpeed(player)
@@ -894,6 +929,7 @@ end
 function PlayerCombatService.resetCombatState(player: Player)
 	local state = getState(player)
 	setBlocking(player, false)
+	cancelCharge(player, nil)
 	state.controlLocked = false
 	state.slowFactor = 1
 	state.slowToken += 1
@@ -919,6 +955,7 @@ type RunOptions = {
 	kind: RunKind,
 	slot: string, -- Momentum variety
 	tier: number?, -- Specials: 1-3, 4 = Ultimate
+	damageMultiplier: number?, -- Specials: the charge tier's PvE multiplier
 	pvpScale: number?,
 	cooldownKey: string?,
 	cooldown: number?,
@@ -976,7 +1013,7 @@ local function runMove(player: Player, state: PlayerState, context: CombatRules.
 		character = character,
 		root = root,
 		aimPoint = aimPoint,
-		comboMultiplier = if isSpecial then WeaponSpecialDefinitions.TierDamage[tier] or 1 else 1,
+		comboMultiplier = options.damageMultiplier or 1,
 		pvpScale = options.pvpScale,
 		bonusStagger = 0,
 		bashMultiplier = if shield then shield.BashMultiplier else 1,
@@ -1057,64 +1094,102 @@ local function chooseNormal(player: Player, state: PlayerState, weapon: any, roo
 	return move, { kind = choice.kind, slot = choice.slot }
 end
 
--- Special: Momentum cost by tier, family cooldown, then the weapon's move for that family.
-local function trySpecial(player: Player, state: PlayerState, context: CombatRules.CombatContext, weapon: any, gesture: GestureValidationService.Validated, aim: unknown)
-	local specials = WeaponSpecialDefinitions.forPrefix(WeaponAttackDefinitions.prefixOf(weapon.Basic))
-	if not specials then
-		return
-	end
-	local kind = gesture.kind
-	local family: WeaponSpecialDefinitions.Family
-	if kind == "CircleDown" then
-		family = "Ultimate"
-	elseif kind == "Left" or kind == "Right" or kind == "Up" or kind == "Down" or kind == "Circle" then
-		family = kind :: any
-	else
-		return
-	end
-	local tier = if family == "Ultimate" then 4 elseif family == "Circle" then WeaponSpecialDefinitions.CircleTier else math.clamp(gesture.tier, 1, 3)
-	local move = SpecialMoveDefinitions[specials[family]]
-	if not move then
-		return
-	end
+local SPECIAL_COOLDOWN_KEY = "Special"
+
+-- SPECIAL START: begins a charge (allowed while blocking). Not during an attack or the cooldown.
+local function startSpecial(player: Player, state: PlayerState)
 	local now = os.clock()
-	local key = "Special:" .. family
-	if now < (state.cooldowns[key] or 0) then
-		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.ComboFail, "NOT READY")
+	if state.chargeStart > 0 then
+		return -- already charging (repeated presses can't restart or stack a charge)
+	end
+	if now < state.busyUntil - 0.1 or now < (state.cooldowns[SPECIAL_COOLDOWN_KEY] or 0) then
+		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.SpecialCharge, "cancel", "NOT READY")
 		return
 	end
-	local cost = WeaponSpecialDefinitions.TierCost[tier]
-	if not MomentumService.trySpend(player, cost) then
-		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.ComboFail, "NOT ENOUGH MOMENTUM")
-		return -- nothing deducted, nothing started, the player is not stuck
+	state.chargeStart = now
+	state.chargeToken += 1
+	local myToken = state.chargeToken
+	local character = player.Character
+	if character then
+		character:SetAttribute("SpecialChargeStart", Workspace:GetServerTimeNow()) -- every client shows the charge pose
 	end
+	updateWalkSpeed(player)
+	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.SpecialCharge, "start")
+	-- Safety: a charge that is never released ends by itself (no permanent slow-down)
+	task.delay(SpecialChargeDefinitions.MaxHoldSeconds, function()
+		if state.chargeToken == myToken and state.chargeStart > 0 then
+			cancelCharge(player, nil)
+		end
+	end)
+end
+
+-- SPECIAL RELEASE: fires the tier reached by the SERVER-measured hold time; lowers the shield.
+local function releaseSpecial(player: Player, state: PlayerState, context: CombatRules.CombatContext, weapon: any, aim: unknown)
+	local now = os.clock()
+	if state.chargeStart <= 0 then
+		return -- nothing charging (a release without a start, or the charge was interrupted)
+	end
+	local held = now - state.chargeStart
+	state.chargeStart = 0
+	state.chargeToken += 1
+	local character = player.Character
+	if character then
+		character:SetAttribute("SpecialChargeStart", nil)
+	end
+	updateWalkSpeed(player)
+	local tierDef = SpecialChargeDefinitions.tierFor(if held <= SpecialChargeDefinitions.StartLatency then 0 else held)
+	local family = tierDef.Family
+	local tier = tierDef.Tier
+	-- A full charge with a full Momentum bar: the weapon's ULTIMATE
+	local ultimate = tier == #SpecialChargeDefinitions.Tiers and MomentumService.get(player) >= SpecialChargeDefinitions.UltimateMomentum
+	if ultimate then
+		family = "Ultimate"
+	end
+	local move = SpecialMoveDefinitions[SpecialChargeDefinitions.specialFor(nil, weapon.Basic, family) or ""]
+	if not move then
+		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.SpecialCharge, "cancel", "NO SPECIAL")
+		return
+	end
+	if ultimate and not MomentumService.trySpend(player, SpecialChargeDefinitions.UltimateMomentum) then
+		ultimate = false -- spent elsewhere in between: fire the normal tier III
+		move = SpecialMoveDefinitions[SpecialChargeDefinitions.specialFor(nil, weapon.Basic, tierDef.Family) or ""]
+		if not move then
+			return
+		end
+	end
+	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.SpecialCharge, "fire", tier)
 	runMove(player, state, context, weapon, move, aim, {
 		kind = "Special",
-		slot = "Special" .. family,
-		tier = tier,
-		pvpScale = WeaponSpecialDefinitions.TierPvPDamage[tier],
-		cooldownKey = key,
-		cooldown = WeaponSpecialDefinitions.FamilyCooldown,
-		extraRecovery = WeaponSpecialDefinitions.TierRecovery[tier],
-		label = if tier == 4 then move.Name else ("%s %s"):format(move.Name, WeaponSpecialDefinitions.TierNames[tier]),
+		slot = "Special" .. tierDef.Name,
+		tier = if ultimate then 4 else tier,
+		damageMultiplier = if ultimate then 1 else tierDef.DamageMultiplier,
+		pvpScale = if ultimate then 1 else tierDef.PvPMultiplier,
+		cooldownKey = SPECIAL_COOLDOWN_KEY,
+		cooldown = if ultimate then SpecialChargeDefinitions.UltimateCooldown else tierDef.Cooldown,
+		extraRecovery = if ultimate then 0 else tierDef.Recovery,
+		label = if ultimate then move.Name else ("%s %s"):format(move.Name, tierDef.Name),
 	})
 end
 
 -- CombatAction(action, payload):
---   "Basic"   (aim point)        Classic attack: the contextual chain
---   "Gesture" ({ points, seconds, special, aim })  Wild swipe / circle, or a Special gesture
---   "Slide"                      start a slide (direction from the replicated movement)
---   "Jump"                       legacy jump report (ignored: jumps are measured server-side)
+--   "Basic"          (aim point)  attack: the contextual chain; drops an active block first
+--   "SpecialStart"                start charging the special (block may stay up)
+--   "SpecialRelease" (aim point)  fire the reached tier
+--   "Slide"                       start a slide (not sent by the Classic V2 controls)
+--   "Jump"                        legacy jump report (ignored: jumps are measured server-side)
 local function onActionRequest(player: Player, action: unknown, payload: unknown)
-	if action ~= "Basic" and action ~= "Gesture" and action ~= "Slide" and action ~= "Jump" then
+	if action ~= "Basic" and action ~= "SpecialStart" and action ~= "SpecialRelease" and action ~= "Slide" and action ~= "Jump" then
 		return
 	end
 	local state = getState(player)
-	if not allowRequest(state, "action") then
+	if action ~= "SpecialRelease" and not allowRequest(state, "action") then -- a release must never get lost (it only ends a running charge)
 		return
 	end
 	local context: CombatRules.CombatContext? = CombatRules.getContext(player)
 	if not context then
+		if action == "SpecialRelease" then
+			cancelCharge(player, nil) -- left the fight while charging
+		end
 		return -- lobby (outside training), spectators, defeated players: silently ignored
 	end
 	local character, _, root = CombatUtil.getLivingCharacter(player)
@@ -1155,34 +1230,23 @@ local function onActionRequest(player: Player, action: unknown, payload: unknown
 	end
 
 	local aim: unknown = payload
-	local gestureKind: string? = nil
-	if action == "Gesture" then
-		local gesture, why = GestureValidationService.validate(player, payload)
-		if not gesture then
-			reject(player, "gesture: " .. tostring(why))
-			return
-		end
-		aim = if typeof(payload) == "table" then (payload :: any).aim else nil
-		if gesture.kind == "Tap" then
-			return -- a pad tap is a block press (parry timing comes from ShieldBlock)
-		end
-		if gesture.special then
-			if now < state.busyUntil - 0.1 then
-				Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.ComboFail, "BUSY")
-				return
-			end
-			trySpecial(player, state, context :: CombatRules.CombatContext, weapon, gesture, aim)
-			return
-		end
-		gestureKind = if gesture.kind == "CircleDown" then "Circle" else gesture.kind
+	if action == "SpecialStart" then
+		startSpecial(player, state)
+		return
+	elseif action == "SpecialRelease" then
+		releaseSpecial(player, state, context :: CombatRules.CombatContext, weapon, aim)
+		return
 	end
 
-	if now < state.busyUntil or state.blocking then
-		return -- still performing a move (no macro can skip attack timing) / shield raised
+	if now < state.busyUntil or state.chargeStart > 0 then
+		return -- still performing a move (no macro can skip attack timing) / charging a special
 	end
-	local move, options = chooseNormal(player, state, weapon, root, gestureKind)
+	local move, options = chooseNormal(player, state, weapon, root, nil)
 	if not move or not options or now < (state.cooldowns[move.Id] or 0) then
 		return
+	end
+	if state.blocking then
+		setBlocking(player, false) -- ATTACK drops the guard right before the swing (no re-raise afterwards)
 	end
 	runMove(player, state, context :: CombatRules.CombatContext, weapon, move, aim, options)
 end
@@ -1227,6 +1291,8 @@ local function onCharacterAdded(player: Player, character: Model)
 	local state = getState(player)
 	state.blocking = false
 	state.blockToken += 1
+	state.chargeStart = 0
+	state.chargeToken += 1
 	state.slowFactor = 1
 	state.slowToken += 1
 	state.actionToken += 1
@@ -1252,6 +1318,7 @@ local function onCharacterAdded(player: Player, character: Model)
 	humanoid.Died:Connect(function()
 		state.actionToken += 1
 		setBlocking(player, false)
+		cancelCharge(player, nil)
 		AttackSequenceService.reset(player)
 	end)
 
@@ -1305,7 +1372,6 @@ function PlayerCombatService.init()
 		states[player] = nil
 		AttackSequenceService.forget(player)
 		SlideService.forget(player)
-		GestureValidationService.forget(player)
 	end)
 	MomentumService.init()
 	TrainingService.setSparringHandler(PlayerCombatService.trainingSwing)
