@@ -8,8 +8,11 @@
 -- Authored animations can replace this module later without any server change (same attributes).
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+
+local SpecialChargeDefinitions = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SpecialChargeDefinitions"))
 
 local PlayerAnimator = {}
 
@@ -66,6 +69,9 @@ local SLIDE_BLEND = 0.1
 local SLIDE_POSE: Pose = pose(Vector3.new(-22, 0, 8), Vector3.new(10, 0, -18), Vector3.new(10, 0, 18), Vector3.new(-30, 0, 0), Vector3.new(55, 0, 0), 0.75)
 local HIT_SECONDS = 0.35
 local HIT_POSE: Pose = pose(Vector3.new(-8, 0, 14), Vector3.new(0, 0, -6), Vector3.new(0, 0, 6))
+-- Special charge: the weapon arm (right) draws back and up, the body coils. It never touches the
+-- shield arm, so it combines cleanly with the block layer (block + charge together).
+local CHARGE_POSE: Pose = pose(Vector3.new(4, 26, 0), Vector3.new(55, 0, 35), nil, Vector3.new(-8, 0, 0), Vector3.new(14, 0, 0), 0.25)
 
 local function angles(v: Vector3): CFrame
 	return CFrame.Angles(rad(v.X), rad(v.Y), rad(v.Z))
@@ -195,6 +201,14 @@ function PlayerAnimator.start()
 			if slideLength > 0 and slideElapsed >= 0 and slideElapsed <= slideLength then
 				local w = math.min(1, slideElapsed / SLIDE_BLEND, (slideLength - slideElapsed) / SLIDE_BLEND)
 				total = add(total, scaled(SLIDE_POSE, ease(w)))
+				active = true
+			end
+
+			-- Special charge: the coil grows with the charge (full at MaxChargeSeconds)
+			local chargeStart = tonumber(character:GetAttribute("SpecialChargeStart"))
+			if chargeStart then
+				local held = math.clamp(now - chargeStart, 0, SpecialChargeDefinitions.MaxChargeSeconds)
+				total = add(total, scaled(CHARGE_POSE, ease(0.35 + 0.65 * held / SpecialChargeDefinitions.MaxChargeSeconds)))
 				active = true
 			end
 

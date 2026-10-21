@@ -1,7 +1,7 @@
 --!strict
 -- The ARENA MOMENTUM bar: a narrow gold bar under the round line (group "Momentum"). It shows the
--- server-owned "Momentum" player attribute (0-100) and marks the Special tiers at 25 / 50 / 75 (the
--- Ultimate costs 100). Display only: the server spends and gains Momentum (MomentumService).
+-- server-owned "Momentum" player attribute (0-100). At 100 the next fully charged special (tier III)
+-- becomes the weapon's ULTIMATE (and spends it). Display only: the server owns Momentum (MomentumService).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -10,7 +10,6 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local MomentumConfig = require(Shared:WaitForChild("MomentumConfig"))
 local UiConfig = require(Shared:WaitForChild("UiConfig"))
-local WeaponSpecialDefinitions = require(Shared:WaitForChild("WeaponSpecialDefinitions"))
 
 type Visibility = {
 	register: (group: string, element: GuiObject, wanted: (() -> boolean)?, forced: (() -> boolean)?) -> (),
@@ -53,18 +52,6 @@ function MomentumHudController.start(group: (string, Vector2, UDim2, UDim2?) -> 
 	fillCorner.CornerRadius = UDim.new(1, 0)
 	fillCorner.Parent = fill
 
-	-- Tier marks: the Special costs (25 / 50 / 75) and the Ultimate line (100 is the end)
-	local tiers = { WeaponSpecialDefinitions.TierCost[1], WeaponSpecialDefinitions.TierCost[2], WeaponSpecialDefinitions.TierCost[3] }
-	for _, cost in tiers do
-		local mark = Instance.new("Frame")
-		mark.AnchorPoint = Vector2.new(0.5, 0.5)
-		mark.Position = UDim2.fromScale(cost / MomentumConfig.Max, 0.5)
-		mark.Size = UDim2.fromOffset(2, 12)
-		mark.BackgroundColor3 = Color3.new(1, 1, 1)
-		mark.BackgroundTransparency = 0.45
-		mark.BorderSizePixel = 0
-		mark.Parent = track
-	end
 
 	local label = Instance.new("TextLabel")
 	label.Name = "Value"
@@ -86,7 +73,9 @@ function MomentumHudController.start(group: (string, Vector2, UDim2, UDim2?) -> 
 	local function refresh()
 		local value = math.clamp(tonumber(player:GetAttribute(Config.MomentumAttribute)) or 0, 0, MomentumConfig.Max)
 		TweenService:Create(fill, TweenInfo.new(0.2), { Size = UDim2.fromScale(value / MomentumConfig.Max, 1) }):Play()
-		label.Text = ("MOMENTUM %d"):format(math.floor(value + 0.5))
+		local full = value >= MomentumConfig.Max
+		label.Text = if full then "ULTIMATE READY · full charge" else ("MOMENTUM %d"):format(math.floor(value + 0.5))
+		fill.BackgroundColor3 = if full then Color3.fromRGB(255, 120, 60) else GOLD
 	end
 	player:GetAttributeChangedSignal(Config.MomentumAttribute):Connect(refresh)
 	refresh()

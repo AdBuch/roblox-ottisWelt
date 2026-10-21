@@ -1,14 +1,16 @@
 --!strict
--- All player combat input. The client only sends INTENT; the server validates everything (state,
--- ownership, cooldowns, Momentum, targets, damage) and decides which move actually runs.
---   CLASSIC  LMB / R2 / ATK attack (server picks the contextual chain move), RMB / L2 / BLOCK hold
---            to block, Space / A / jump button jump, Left Shift or C / B / SLIDE slide,
---            Q / X / SPECIAL enters Special Mode (then draw: mouse drag, the touch pad, or flick the
---            right stick)
---   WILD     the gesture pad (GesturePadController): swipes, circle, hold centre = block, tap =
---            parry; Soft Targeting rotates the player moderately toward the enemy in front and
---            aims there; jump / SLIDE / SPECIAL as above
--- Switching modes ends a held block and cancels unfinished gestures (CombatSettingsController).
+-- All player combat input (Classic controls, ControlModeDefinitions). The client only sends INTENT;
+-- the server validates everything (state, ownership, cooldowns, charge time, targets, damage).
+--   ATTACK   LMB / R2 / ATTACK button: one attack per press (tap again for the combo chain).
+--            An active block is lowered first (the server does the same).
+--   BLOCK    RMB / L2 / BLOCK button: toggles the guard on and off. The server confirms the state
+--            (Feedback.Block -> syncBlock), so the toggle never drifts from the real block.
+--   SPECIAL  hold Q / X / SPECIAL to charge, release to fire ("SpecialStart" / "SpecialRelease";
+--            the server measures the hold time). Block may stay on while charging.
+--   JUMP     Space / A / Roblox's own jump button (no second jump button).
+-- Soft Targeting: an attack turns the character smoothly (at most MaxTurnDegrees) toward the enemy
+-- in a cone in front with a clear line of sight and aims there; otherwise it hits straight ahead.
+-- With the bow and a mouse the cursor aims instead.
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
@@ -36,19 +38,17 @@ export type Options = {
 	canAct: () -> boolean,
 	attackButton: TextButton, -- touch buttons come from MobileControlsController
 	blockButton: TextButton,
-	slideButton: TextButton,
 	specialButton: TextButton,
-	pad: any, -- GesturePadController.Pad
-	getMode: () -> string,
 	onSchemeChanged: (scheme: Scheme) -> (),
 	onInput: (input: string) -> (), -- local feedback chips (display only)
+	onChargeStart: () -> (), -- the charge display (SpecialChargeHudController)
+	onChargeEnd: () -> (),
 }
 
 export type Input = {
-	isBlockHeld: () -> boolean,
-	setBlock: (held: boolean) -> (),
-	sendGesture: (payload: any) -> (),
-	onModeChanged: (mode: string) -> (),
+	isBlockOn: () -> boolean,
+	syncBlock: (active: boolean) -> (), -- the server's confirmed block state
+	chargeEnded: () -> (), -- the server cancelled / fired the charge
 	lastTarget: (model: Instance?) -> (),
 }
 
@@ -59,8 +59,10 @@ local AIM_DISTANCE = 300
 function InputController.init(options: Options): Input
 	local player = Players.LocalPlayer
 	local remotes = options.remotes
-	local blockHeld = false
+	local blockOn = false
+	local charging = false
 	local engaged: Instance? = nil -- the enemy we last hit (Soft Targeting prefers it)
+	local turning: RBXScriptConnection? = nil
 
 	local function getParts(): (Humanoid?, BasePart?)
 		local character = player.Character
@@ -72,11 +74,33 @@ function InputController.init(options: Options): Input
 		return nil, nil
 	end
 
-	local function faceDirection(root: BasePart, direction: Vector3)
+	local function equippedWeapon(): any
+		return WeaponDefinitions.ById[tostring(player:GetAttribute(Config.EquippedWeaponAttribute))] or WeaponDefinitions.ById[WeaponDefinitions.Starter]
+	end
+
+	-- Turns the character toward `direction` over TurnSeconds (never a snap).
+	local function turnToward(root: BasePart, direction: Vector3)
 		local flat = Vector3.new(direction.X, 0, direction.Z)
-		if flat.Magnitude > 0.01 then
-			root.CFrame = CFrame.lookAt(root.Position, root.Position + flat)
+		if flat.Magnitude < 0.01 then
+			return
 		end
+		if turning then
+			turning:Disconnect()
+		end
+		local from = root.CFrame.LookVector
+		local started = os.clock()
+		local seconds = ControlModeDefinitions.TurnSeconds
+		turning = RunService.RenderStepped:Connect(function()
+			local t = math.clamp((os.clock() - started) / seconds, 0, 1)
+			local look = from:Lerp(flat.Unit, t)
+			if look.Magnitude > 0.01 and root.Parent then
+				root.CFrame = CFrame.lookAt(root.Position, root.Position + Vector3.new(look.X, 0, look.Z))
+			end
+			if t >= 1 and turning then
+				turning:Disconnect()
+				turning = nil
+			end
+		end)
 	end
 
 	local function cursorAim(root: BasePart): Vector3
@@ -84,13 +108,8 @@ function InputController.init(options: Options): Input
 		if not camera then
 			return root.Position + root.CFrame.LookVector * 50
 		end
-		local ray: Ray
-		if UserInputService.MouseEnabled and UserInputService:GetLastInputType() ~= Enum.UserInputType.Gamepad1 and UserInputService:GetLastInputType() ~= Enum.UserInputType.Touch then
-			local mouse = UserInputService:GetMouseLocation()
-			ray = camera:ViewportPointToRay(mouse.X, mouse.Y)
-		else
-			ray = Ray.new(camera.CFrame.Position, camera.CFrame.LookVector)
-		end
+		local mouse = UserInputService:GetMouseLocation()
+		local ray = camera:ViewportPointToRay(mouse.X, mouse.Y)
 		local params = RaycastParams.new()
 		params.FilterType = Enum.RaycastFilterType.Exclude
 		params.FilterDescendantsInstances = { player.Character :: Instance }
@@ -101,8 +120,7 @@ function InputController.init(options: Options): Input
 	-- Soft Targeting (presentation + aim hint; the server re-validates every target):
 	-- the enemy we already fight, else the closest visible enemy inside the forward cone.
 	local function softTarget(root: BasePart): BasePart?
-		local weapon = WeaponDefinitions.ById[tostring(player:GetAttribute(Config.EquippedWeaponAttribute))] or WeaponDefinitions.ById[WeaponDefinitions.Starter]
-		local basic = (SpecialMoveDefinitions :: any)[weapon.Basic]
+		local basic = (SpecialMoveDefinitions :: any)[equippedWeapon().Basic]
 		local range = math.min(if basic then basic.Range else 8, 60) + ControlModeDefinitions.SoftTargetExtraRange
 		local look = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z).Unit
 		local minDot = math.cos(math.rad(ControlModeDefinitions.SoftTargetCone / 2))
@@ -144,6 +162,7 @@ function InputController.init(options: Options): Input
 			if distance > 0.1 and distance <= range and math.abs(part.Position.Y - root.Position.Y) <= 8 then
 				local dot = offset.Unit:Dot(look)
 				if dot >= minDot then
+					-- no targeting through walls or other obstacles
 					local hit = Workspace:Raycast(root.Position, part.Position - root.Position, params)
 					local visible = hit == nil or hit.Instance:IsDescendantOf(part.Parent :: Instance)
 					if visible then
@@ -158,168 +177,132 @@ function InputController.init(options: Options): Input
 		return best
 	end
 
-	-- Aim for an attack: Wild -> Soft Target (moderate turn, never a teleport), else the cursor.
+	-- The aim of an attack: the soft target (turning smoothly toward it), the cursor for the bow
+	-- with a mouse, else straight ahead in the movement / facing direction.
 	local function aimFor(root: BasePart): Vector3
-		if options.getMode() == "Wild" then
-			local target = softTarget(root)
-			if target then
-				local look = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z).Unit
-				local wanted = Vector3.new(target.Position.X - root.Position.X, 0, target.Position.Z - root.Position.Z).Unit
-				local angle = math.acos(math.clamp(look:Dot(wanted), -1, 1))
-				local maxTurn = math.rad(ControlModeDefinitions.MaxTurnDegrees)
-				if angle > maxTurn then
-					local sign = if look:Cross(wanted).Y >= 0 then 1 else -1
-					wanted = CFrame.fromAxisAngle(Vector3.yAxis, sign * maxTurn):VectorToWorldSpace(look)
-				end
-				faceDirection(root, wanted)
-				return target.Position
-			end
-			return root.Position + root.CFrame.LookVector * 30
+		local weapon = equippedWeapon()
+		if weapon.Kind == "Bow" and UserInputService.MouseEnabled and UserInputService:GetLastInputType() ~= Enum.UserInputType.Touch then
+			local point = cursorAim(root)
+			turnToward(root, point - root.Position)
+			return point
 		end
-		local point = cursorAim(root)
-		faceDirection(root, point - root.Position)
-		return point
+		local target = softTarget(root)
+		if target then
+			local look = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z).Unit
+			local wanted = Vector3.new(target.Position.X - root.Position.X, 0, target.Position.Z - root.Position.Z).Unit
+			local angle = math.acos(math.clamp(look:Dot(wanted), -1, 1))
+			local maxTurn = math.rad(ControlModeDefinitions.MaxTurnDegrees)
+			if angle > maxTurn then
+				local sign = if look:Cross(wanted).Y >= 0 then 1 else -1
+				wanted = CFrame.fromAxisAngle(Vector3.yAxis, sign * maxTurn):VectorToWorldSpace(look)
+			end
+			turnToward(root, wanted)
+			return target.Position
+		end
+		return root.Position + root.CFrame.LookVector * 30
+	end
+
+	local function setBlock(on: boolean)
+		if blockOn == on then
+			return
+		end
+		blockOn = on
+		remotes.shieldBlock:FireServer(on)
+		if on then
+			options.onInput("BLK")
+		end
+	end
+
+	local function toggleBlock()
+		if not options.canAct() and not blockOn then
+			return
+		end
+		setBlock(not blockOn)
 	end
 
 	local function attack()
-		if not options.canAct() or blockHeld then
+		if not options.canAct() or charging then
 			return
 		end
 		local _, root = getParts()
 		if not root then
 			return
+		end
+		if blockOn then
+			blockOn = false -- the server lowers the guard right before the swing; no re-raise afterwards
 		end
 		remotes.combatAction:FireServer("Basic", aimFor(root))
 		options.onInput("ATK")
 	end
 
-	local function setBlock(held: boolean)
-		if blockHeld == held then
-			return
-		end
-		blockHeld = held
-		local humanoid = getParts()
-		if humanoid then
-			humanoid.AutoRotate = not held
-		end
-		remotes.shieldBlock:FireServer(held)
-		if held and options.canAct() then
-			options.onInput("BLK")
-		end
-	end
-
-	local function slide()
-		if not options.canAct() then
-			return
-		end
-		remotes.combatAction:FireServer("Slide")
-		options.onInput("SLD")
-	end
-
-	local function sendGesture(payload: any)
-		if not options.canAct() then
+	local function startCharge()
+		if charging or not options.canAct() then
 			return
 		end
 		local _, root = getParts()
 		if not root then
 			return
 		end
-		payload.aim = aimFor(root)
-		remotes.combatAction:FireServer("Gesture", payload)
-		options.onInput(if payload.special then "SPC" else "PAD")
+		charging = true
+		remotes.combatAction:FireServer("SpecialStart")
+		options.onChargeStart()
 	end
 
-	local function enterSpecial()
-		if options.canAct() then
-			options.pad.enterSpecial()
-			options.onInput("SPC")
+	local function releaseCharge()
+		if not charging then
+			return
 		end
+		charging = false
+		options.onChargeEnd()
+		local _, root = getParts()
+		local aim = if root then aimFor(root) else nil
+		remotes.combatAction:FireServer("SpecialRelease", aim)
+		if blockOn then
+			blockOn = false -- firing the special lowers the shield (the server confirms)
+		end
+		options.onInput("SPC")
 	end
-
-	-- Gamepad special: the right stick path while in Special Mode becomes the gesture
-	local stickPath: { Vector2 }? = nil
-	local stickStart = 0
 
 	UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
 		if gameProcessed then
 			return
 		end
 		local inputType, key = input.UserInputType, input.KeyCode
-		local wild = options.getMode() == "Wild"
-		if inputType == Enum.UserInputType.MouseButton1 then
-			if options.pad.captureMouse(input) then
-				return -- Special Mode: this press draws the gesture
-			end
-			if not wild then
-				attack()
-			end
-		elseif key == Enum.KeyCode.ButtonR2 then
+		if inputType == Enum.UserInputType.MouseButton1 or key == ControlModeDefinitions.GamepadAttack then
 			attack()
-		elseif inputType == Enum.UserInputType.MouseButton2 or key == Enum.KeyCode.ButtonL2 then
-			setBlock(true)
-		elseif table.find(ControlModeDefinitions.SlideKeys, key) or key == ControlModeDefinitions.GamepadSlide then
-			slide()
+		elseif inputType == Enum.UserInputType.MouseButton2 or key == ControlModeDefinitions.GamepadBlock then
+			toggleBlock()
 		elseif key == ControlModeDefinitions.SpecialKey or key == ControlModeDefinitions.GamepadSpecial then
-			enterSpecial()
+			startCharge()
 		end
 	end)
 	UserInputService.InputEnded:Connect(function(input: InputObject)
-		if input.UserInputType == Enum.UserInputType.MouseButton2 or input.KeyCode == Enum.KeyCode.ButtonL2 then
-			setBlock(false)
-		end
-	end)
-	UserInputService.InputChanged:Connect(function(input: InputObject)
-		if input.KeyCode ~= Enum.KeyCode.Thumbstick2 or not options.pad.isSpecial() then
-			return
-		end
-		local value = Vector2.new(input.Position.X, input.Position.Y)
-		local path = stickPath
-		if value.Magnitude >= ControlModeDefinitions.GamepadStickDeadzone then
-			if not path then
-				stickPath = { Vector2.zero }
-				stickStart = os.clock()
-				path = stickPath
-			end
-			local current = path :: { Vector2 }
-			if #current < 40 and (value - current[#current]).Magnitude >= 0.08 then
-				table.insert(current, value * 1.6)
-			end
-		elseif path then
-			stickPath = nil
-			options.pad.cancel()
-			sendGesture({ points = path, seconds = os.clock() - stickStart, special = true })
-		end
-	end)
-
-	-- While blocking, keep facing where the camera looks (so the shield points at the enemy)
-	RunService.RenderStepped:Connect(function()
-		if not blockHeld then
-			return
-		end
-		local _, root = getParts()
-		local camera = Workspace.CurrentCamera
-		if root and camera then
-			faceDirection(root, camera.CFrame.LookVector)
+		local key = input.KeyCode
+		if key == ControlModeDefinitions.SpecialKey or key == ControlModeDefinitions.GamepadSpecial then
+			releaseCharge()
 		end
 	end)
 
 	player.CharacterAdded:Connect(function()
-		blockHeld = false
-		options.pad.cancel()
+		-- death / respawn: the server resets block and charge, so does the client
+		blockOn = false
+		if charging then
+			charging = false
+			options.onChargeEnd()
+		end
 	end)
 
 	-- Touch buttons (drawn by MobileControlsController)
 	options.attackButton.Activated:Connect(attack)
-	options.slideButton.Activated:Connect(slide)
-	options.specialButton.Activated:Connect(enterSpecial)
-	options.blockButton.InputBegan:Connect(function(input: InputObject)
+	options.blockButton.Activated:Connect(toggleBlock)
+	options.specialButton.InputBegan:Connect(function(input: InputObject)
 		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-			setBlock(true)
+			startCharge()
 		end
 	end)
-	options.blockButton.InputEnded:Connect(function(input: InputObject)
+	options.specialButton.InputEnded:Connect(function(input: InputObject)
 		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-			setBlock(false)
+			releaseCharge()
 		end
 	end)
 
@@ -351,16 +334,17 @@ function InputController.init(options: Options): Input
 	end
 
 	return {
-		isBlockHeld = function()
-			return blockHeld
+		isBlockOn = function()
+			return blockOn
 		end,
-		setBlock = setBlock,
-		sendGesture = sendGesture,
-		onModeChanged = function(_mode: string)
-			-- switching modes: no block stays up, no half-drawn gesture survives
-			setBlock(false)
-			options.pad.cancel()
-			stickPath = nil
+		syncBlock = function(active: boolean)
+			blockOn = active
+		end,
+		chargeEnded = function()
+			if charging then
+				charging = false
+				options.onChargeEnd()
+			end
 		end,
 		lastTarget = function(model: Instance?)
 			engaged = model

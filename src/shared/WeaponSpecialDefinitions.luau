@@ -1,18 +1,11 @@
 --!strict
--- Special moves by gesture family (Special button -> one gesture -> release). Direction picks the
--- family, gesture LENGTH (relative to the pad radius, GestureDefinitions) picks the tier:
---   Tier I   100 % base special damage · 25 Momentum
---   Tier II  155 %                     · 50 Momentum
---   Tier III 205 %                     · 75 Momentum
---   Circle   the circular special at a fixed tier (II)
---   Ultimate Circle followed by Down · 100 Momentum · a unique move (not just more damage)
--- Tiers also lengthen the commitment (extra recovery) and raise the visual intensity
--- (AttackTier). PvP uses its own, flatter tier multipliers plus every move's PvP cap.
+-- Each weapon's special moves, grouped in families (Left, Right, Up, Down, Circle, Ultimate).
+-- SpecialChargeDefinitions picks the family by charge tier (I -> Right, II -> Left, III -> Down,
+-- full charge with full Momentum -> Ultimate) and owns the damage multipliers and cooldowns.
 -- Families reuse the weapons' named combination moves where they fit and generated moves
 -- (SpecialMoveDefinitions: <Prefix>_SpecCleave / _SpecCombination / _SpecHeavy / ...) elsewhere.
 
 export type Family = "Left" | "Right" | "Up" | "Down" | "Circle" | "Ultimate"
-export type Tier = number -- 1-3, 4 = Ultimate
 
 export type WeaponSpecials = { [Family]: string }
 
@@ -33,13 +26,6 @@ local byPrefix: { [string]: WeaponSpecials } = {
 
 local WeaponSpecialDefinitions = {
 	ByPrefix = table.freeze(byPrefix),
-	TierDamage = table.freeze({ [1] = 1, [2] = 1.55, [3] = 2.05, [4] = 1 }) :: { [number]: number },
-	TierPvPDamage = table.freeze({ [1] = 1, [2] = 1.2, [3] = 1.35, [4] = 1 }) :: { [number]: number },
-	TierRecovery = table.freeze({ [1] = 0, [2] = 0.12, [3] = 0.25, [4] = 0 }) :: { [number]: number },
-	TierCost = table.freeze({ [1] = 25, [2] = 50, [3] = 75, [4] = 100 }) :: { [number]: number },
-	CircleTier = 2,
-	FamilyCooldown = 1.5, -- seconds before the same family can be used again
-	TierNames = table.freeze({ [1] = "I", [2] = "II", [3] = "III", [4] = "ULTIMATE" }) :: { [number]: string },
 }
 
 function WeaponSpecialDefinitions.forPrefix(prefix: string): WeaponSpecials?

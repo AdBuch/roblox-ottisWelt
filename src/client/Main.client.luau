@@ -9,10 +9,10 @@
 --   TeamStatusController      team score + time, co-op teammate strip, lobby rosters
 --   BossHudController         slim Otti bar + short warnings
 --   AuraDisplayController     lobby Aura counter, "+n" rewards in combat
---   MobileControlsController  touch buttons (ATK, BLOCK, SLIDE, SPECIAL)
---   GesturePadController      Wild gesture pad, Special Mode drawing, the training trace
---   CombatSettingsController  CLASSIC / WILD and CAMERA pills (saved preferences)
---   InputController           Classic / Wild input -> CombatAction / ShieldBlock intents
+--   MobileControlsController  touch buttons (ATTACK, SPECIAL, BLOCK around Roblox's jump button)
+--   SpecialChargeHudController the three-phase special charge bar (and the touch button fill)
+--   CombatSettingsController  CAMERA pill (saved preference); Classic is the only control mode
+--   InputController           Classic input -> CombatAction / ShieldBlock intents (block toggle, special hold)
 --   SlideController           plays an approved slide on the own character
 --   MomentumHudController     the ARENA MOMENTUM bar
 --   CombatEffectsController   hit presentation by category (sparks, dust, CombatCamera; no blood)
@@ -67,7 +67,7 @@ local MobileControlsController = load(script.Parent, "MobileControlsController")
 local InfoPanelController = load(script.Parent, "InfoPanelController")
 local SpectatorController = load(script.Parent, "SpectatorController")
 local InputController = load(script.Parent, "InputController")
-local GesturePadController = load(script.Parent, "GesturePadController")
+local SpecialChargeHudController = load(script.Parent, "SpecialChargeHudController")
 local CombatSettingsController = load(script.Parent, "CombatSettingsController")
 local SlideController = load(script.Parent, "SlideController")
 local MomentumHudController = load(script.Parent, "MomentumHudController")
@@ -96,7 +96,7 @@ for _, module in {
 	ShieldDefinitions, SpecialMoveDefinitions,
 	ResponsiveHudController, HudVisibilityController, HudStateController, NotificationController, ContextHealthController,
 	TeamStatusController, BossHudController, AuraDisplayController, MobileControlsController, InfoPanelController,
-	SpectatorController, InputController, GesturePadController, CombatSettingsController, SlideController, MomentumHudController,
+	SpectatorController, InputController, SpecialChargeHudController, CombatSettingsController, SlideController, MomentumHudController,
 	CombatEffectsController, CombatCameraController,
 	ShopController, EffectsController, ZombieAnimator, OttiAnimator, DamageEffectsController, CrowdEffectsController,
 	BowController, ComboFeedbackController, PlayerAnimator, OttiEntranceController, TeleportStatusController,
@@ -181,7 +181,7 @@ if not isArena and GameModeMenuController and ActiveBattlesController then
 	end
 end
 
--- CLASSIC / WILD and CAMERA settings (saved; the mode switch cancels gestures and blocks)
+-- CAMERA setting (saved)
 local settings = CombatSettingsController.start(edge, preferenceEvent, notify)
 
 local aura = AuraDisplayController.start(hud.group, visibility, notify)
@@ -191,24 +191,23 @@ end)
 MomentumHudController.start(hud.group, visibility, hud.onLayout, player)
 
 local function controlHint(): string
-	local mode = settings.getMode()
 	if scheme == "Gamepad" then
-		return if mode == "Wild" then "R2 Attack   L2 Block   B Slide   X Special (then right stick)" else "R2 Attack   L2 Block   B Slide   X Special   A Jump"
+		return "R2 Attack   L2 Block on/off   hold X Special   A Jump"
 	elseif scheme == "Touch" then
 		return ""
 	end
-	return if mode == "Wild" then "Gesture pad: swipes · hold centre = block · Shift Slide · Q Special" else "LMB Attack   RMB Block   Shift Slide   Q Special   Space Jump   F Interact"
+	return "LMB Attack   RMB Block on/off   hold Q Special   Space Jump   F Interact"
 end
 
 local function equippedWeapon(): any
 	return WeaponDefinitions.ById[tostring(player:GetAttribute(Config.EquippedWeaponAttribute))] or WeaponDefinitions.ById[WeaponDefinitions.Starter]
 end
 
--- The TRAINING board (lobby training yard) shows Classic / Wild, Momentum and the weapon's specials
+-- The TRAINING board (lobby training yard) shows the controls, the special tiers and Momentum
 local lobbyFolder = if isArena then nil else Workspace:WaitForChild(Config.LobbyFolderName, WAIT_TIMEOUT)
 local comboFeedback = ComboFeedbackController.start(hud.group, visibility, hud.onLayout, lobbyFolder)
 local function refreshSpecials()
-	comboFeedback.showBoard(equippedWeapon(), settings.getMode())
+	comboFeedback.showBoard(equippedWeapon())
 end
 
 ------------------------------------------------------------------ effects (shared by every fight)
@@ -225,43 +224,9 @@ local combatEffects = CombatEffectsController.start({
 	end,
 })
 
------------------------------------------------------------------- input: gesture pad, combat input
-local input: any = nil -- InputController, created below (the pad reports into it)
-local pad = GesturePadController.start({
-	gui = hud.gui,
-	onGesture = function(payload: any)
-		if input then
-			input.sendGesture(payload)
-		end
-	end,
-	onBlock = function(held: boolean)
-		if input then
-			input.setBlock(held)
-		end
-	end,
-	isTouch = function()
-		return hud.layout.touch
-	end,
-	device = function()
-		return hud.layout.device
-	end,
-	showTrace = function()
-		return visibility.getState() == "Lobby" -- the training area only
-	end,
-})
-pad.setWild(settings.getMode() == "Wild")
-controls.setMode(settings.getMode())
-
-settings.onModeChanged(function(mode: string)
-	pad.setWild(mode == "Wild")
-	controls.setMode(mode)
-	if input then
-		input.onModeChanged(mode)
-	end
-	hud.setHint(controlHint())
-	refreshSpecials()
-end)
-
+------------------------------------------------------------------ input: Classic controls + charge display
+local chargeHud = SpecialChargeHudController.start(hud.group, visibility, controls.setCharge)
+local input: any = nil
 if combatAction and shieldBlock and shieldBlock:IsA("RemoteEvent") then
 	input = InputController.init({
 		remotes = { combatAction = combatAction, shieldBlock = shieldBlock },
@@ -271,10 +236,9 @@ if combatAction and shieldBlock and shieldBlock:IsA("RemoteEvent") then
 		end,
 		attackButton = controls.attackButton,
 		blockButton = controls.blockButton,
-		slideButton = controls.slideButton,
 		specialButton = controls.specialButton,
-		pad = pad,
-		getMode = settings.getMode,
+		onChargeStart = chargeHud.start,
+		onChargeEnd = chargeHud.stop,
 		onInput = comboFeedback.input,
 		onSchemeChanged = function(newScheme: string)
 			scheme = newScheme
@@ -306,6 +270,21 @@ if feedback and feedback:IsA("RemoteEvent") then
 			end
 		elseif kind == F.Block then
 			controls.setBlocking(a == true)
+			if input then
+				input.syncBlock(a == true) -- the toggle follows the server's real block state
+			end
+		elseif kind == F.SpecialCharge then
+			if a == "cancel" then
+				if input then
+					input.chargeEnded()
+				end
+				chargeHud.stop()
+				if typeof(b) == "string" then
+					notify("Info", b) -- NOT READY / INTERRUPTED
+				end
+			elseif a == "fire" then
+				chargeHud.stop()
+			end
 		elseif kind == F.Parry then
 			notify("Info", "PARRY!")
 		elseif kind == F.Dodge then
@@ -611,11 +590,12 @@ task.spawn(function()
 			table.insert(lines, ("Round %d / %d · %d zombies left · players %d / %d"):format(round, tonumber(arenaFolder:GetAttribute(Config.RoundMaxAttribute)) or 7, tonumber(arenaFolder:GetAttribute(Config.ZombiesAliveAttribute)) or 0, tonumber(arenaFolder:GetAttribute(Config.PlayersAliveAttribute)) or 0, tonumber(arenaFolder:GetAttribute(Config.PlayersTotalAttribute)) or 0))
 		end
 		table.insert(lines, "")
-		table.insert(lines, ("<b>CONTROLS</b>  ·  %s"):format(settings.getMode()))
-		table.insert(lines, "Classic: LMB attack · RMB block (hold) · Shift / C slide · Space jump · Q special, then draw (mouse drag)")
-		table.insert(lines, "Wild: gesture pad, swipes Left / Right / Up / Down, circle · hold centre = block · quick tap = parry")
-		table.insert(lines, "Gamepad: R2 attack · L2 block · B slide · X special · A jump   ·   Touch: ATK · BLOCK · SLIDE · SPECIAL")
-		table.insert(lines, "Switch CLASSIC / WILD on the right edge (saved). F interact · H HUD mode")
+		table.insert(lines, "<b>CONTROLS</b>")
+		table.insert(lines, "Keyboard: WASD move · LMB attack (tap again = combo) · RMB block on / off · hold Q special, release to fire · Space jump")
+		table.insert(lines, "Gamepad: left stick · R2 attack · L2 block on / off · hold X special · A jump")
+		table.insert(lines, "Touch: thumbstick left · ATTACK · SPECIAL (hold) · BLOCK (on / off) · JUMP right · drag free screen space = camera")
+		table.insert(lines, "Special tiers: I (tap) · II (hold 0.5 s) · III (hold 1.5 s, full at 2.5 s) · full Momentum + III = ULTIMATE")
+		table.insert(lines, "F interact · H HUD mode")
 		table.insert(lines, "")
 		table.insert(lines, ("<b>WEAPON</b>  %s"):format(weapon.DisplayName))
 		for _, moveId in { weapon.Basic, weapon.Aerial } do
@@ -671,4 +651,4 @@ BowController.start(hud.gui, Config.EquippedWeaponAttribute, function()
 	return GameStates.isFighter(state) or GameStates.isInLobby(state)
 end)
 
-print(PREFIX, "Ready: responsive HUD (Full / Minimal / Hidden), Classic + Wild controls, touch + gamepad + keyboard")
+print(PREFIX, "Ready: responsive HUD (Full / Minimal / Hidden), Classic controls, touch + gamepad + keyboard")

@@ -1,10 +1,9 @@
 --!strict
 -- Training feedback (display only; the server decides what every action does):
---   * tiny input chips (ATK, BLK, SLD, SPC, PAD) near the combat controls that fade after a moment
---   * the TRAINING board in the lobby training yard: Classic and Wild in short steps, Momentum and
---     the equipped weapon's Special families with their costs (local SurfaceGui per player)
--- Nothing large stays on screen during combat. The gesture trace is drawn by GesturePadController
--- and only shown in the training area.
+--   * tiny input chips (ATK, BLK, SPC) near the combat controls that fade after a moment
+--   * the TRAINING board in the lobby training yard: the Classic controls, block directions, the
+--     special charge tiers with the equipped weapon's moves, and Momentum (local SurfaceGui)
+-- Nothing large stays on screen during combat.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -13,8 +12,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local MomentumConfig = require(Shared:WaitForChild("MomentumConfig"))
 local SpecialMoveDefinitions = require(Shared:WaitForChild("SpecialMoveDefinitions"))
 local UiConfig = require(Shared:WaitForChild("UiConfig"))
-local WeaponAttackDefinitions = require(Shared:WaitForChild("WeaponAttackDefinitions"))
-local WeaponSpecialDefinitions = require(Shared:WaitForChild("WeaponSpecialDefinitions"))
+local SpecialChargeDefinitions = require(Shared:WaitForChild("SpecialChargeDefinitions"))
 
 type Visibility = {
 	register: (group: string, element: GuiObject, wanted: (() -> boolean)?, forced: (() -> boolean)?) -> (),
@@ -24,7 +22,7 @@ type Layout = { device: string, touch: boolean }
 export type ComboFeedback = {
 	input: (label: string) -> (),
 	clear: () -> (),
-	showBoard: (weapon: any, mode: string) -> (),
+	showBoard: (weapon: any) -> (),
 }
 
 local ComboFeedbackController = {}
@@ -34,12 +32,9 @@ local CHIP_GAP = 1.1 -- seconds of silence before a new chip row starts
 local COLORS: { [string]: Color3 } = {
 	ATK = Color3.fromRGB(230, 90, 60),
 	BLK = Color3.fromRGB(80, 140, 230),
-	SLD = Color3.fromRGB(120, 200, 255),
 	SPC = UiConfig.Gold,
-	PAD = Color3.fromRGB(150, 220, 150),
 }
 
-local FAMILY_ORDER = { "Left", "Right", "Up", "Down", "Circle", "Ultimate" }
 
 function ComboFeedbackController.start(group: (string, Vector2, UDim2, UDim2?) -> Frame, visibility: Visibility, onLayout: ((Layout) -> ()) -> (), lobby: Instance?): ComboFeedback
 	local frame = group("ComboInputs", Vector2.new(0.5, 1), UDim2.new(0.5, 0, 1, -34), UDim2.fromOffset(CHIP_LIMIT * 46, 22))
@@ -153,33 +148,28 @@ function ComboFeedbackController.start(group: (string, Vector2, UDim2, UDim2?) -
 			end)
 		end,
 		clear = clear,
-		showBoard = function(weapon: any, mode: string)
+		showBoard = function(weapon: any)
 			local label = boardText
 			if not label or not weapon then
 				return
 			end
-			local lines = { '<font size="22" color="#FFD246"><b>TRAINING</b></font>', ("<b>%s</b>  ·  %s"):format(weapon.DisplayName:upper(), mode:upper()) }
-			if mode == "Wild" then
-				table.insert(lines, "Swipe the pad: Left / Right / Up / Down, or a circle for the spin.")
-				table.insert(lines, "Hold the pad centre = block · quick tap = parry · SLIDE for mobility.")
-			else
-				table.insert(lines, "LMB / R2 / ATK: attack chain (moving changes the move).")
-				table.insert(lines, "RMB / L2 / BLOCK hold = block · Shift / C / SLIDE · Space / A jump.")
-			end
-			table.insert(lines, ('<font color="#BBBBBB">MOMENTUM 0-100: vary your attacks, slide-dodge, perfect-block. Start: %d in Elimination rounds.</font>'):format(MomentumConfig.Start.EliminationRound))
+			local lines = { '<font size="22" color="#FFD246"><b>TRAINING</b></font>', ("<b>%s</b>"):format(weapon.DisplayName:upper()) }
+			table.insert(lines, "ATTACK (LMB / R2): tap again for the combo · movement turns you.")
+			table.insert(lines, "BLOCK (RMB / L2): on / off · front 70 %, shield side 40 %, back 0 %.")
+			table.insert(lines, "Blocking while charging works · ATTACK or firing a special lowers the shield.")
 			table.insert(lines, "")
-			local prefix = WeaponAttackDefinitions.prefixOf(weapon.Basic)
-			local families = WeaponSpecialDefinitions.forPrefix(prefix)
-			if families then
-				table.insert(lines, '<font color="#FFD246"><b>SPECIALS</b></font>  Q / X / SPECIAL, then draw: tier by length (25 / 50 / 75)')
-				for _, family in FAMILY_ORDER do
-					local moveId = (families :: any)[family]
-					local move = moveId and (SpecialMoveDefinitions :: any)[moveId]
-					if move then
-						table.insert(lines, ("%s  %s"):format(family:upper(), move.Name))
-					end
-				end
+			table.insert(lines, '<font color="#FFD246"><b>SPECIAL</b></font>  hold Q / X / SPECIAL, release to fire')
+			for _, def in SpecialChargeDefinitions.Tiers do
+				local moveId = SpecialChargeDefinitions.specialFor(nil, weapon.Basic, def.Family)
+				local move = moveId and (SpecialMoveDefinitions :: any)[moveId]
+				table.insert(lines, ("%s  from %.1f s  %s"):format(def.Name, def.From, if move then move.Name else "-"))
 			end
+			local ultimateId = SpecialChargeDefinitions.specialFor(nil, weapon.Basic, "Ultimate")
+			local ultimate = ultimateId and (SpecialMoveDefinitions :: any)[ultimateId]
+			if ultimate then
+				table.insert(lines, ("ULTIMATE  full charge with full Momentum: %s"):format(ultimate.Name))
+			end
+			table.insert(lines, ('<font color="#BBBBBB">MOMENTUM 0-%d: varied attacks and good blocks fill it.</font>'):format(MomentumConfig.Max))
 			table.insert(lines, '<font color="#BBBBBB">Practise on the dummies: no Aura here.</font>')
 			label.Text = table.concat(lines, "\n")
 		end,

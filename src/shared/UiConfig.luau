@@ -50,25 +50,21 @@ local UiConfig = {
 	HudToggleKey = Enum.KeyCode.H,
 	InfoPanelOpenInLobbyOnDesktop = false,
 
-	-- Touch controls (button centres measured from the bottom-right corner, base pixels).
-	-- They sit around Roblox's jump button, never on it.
+	-- Touch controls (button centres measured from the bottom-right corner, base pixels). They sit
+	-- around Roblox's own jump button (= JUMP), never on it: on phones Roblox draws it 70 px at about
+	-- (60, 55) from the corner, on tablets 120 px at about (110, 150).
 	TouchButtonSize = 56,
-	TouchSpecialSize = 50,
+	TouchAttackSize = 66, -- ATTACK is the largest, most-used button
 	TouchLayoutPhone = table.freeze({
-		Attack = Vector2.new(60, 160),
-		Block = Vector2.new(140, 60),
-		Slide = Vector2.new(140, 140), -- Roblox's jump button stays the Jump input
-		Special = Vector2.new(215, 95),
-		Pad = Vector2.new(110, 255), -- Wild gesture pad centre (above the jump button)
+		Attack = Vector2.new(145, 60), -- left of JUMP
+		Special = Vector2.new(60, 160), -- above JUMP
+		Block = Vector2.new(150, 150), -- diagonal
 	}),
 	TouchLayoutTablet = table.freeze({
-		Attack = Vector2.new(110, 290),
-		Block = Vector2.new(235, 150),
-		Slide = Vector2.new(235, 255),
-		Special = Vector2.new(330, 190),
-		Pad = Vector2.new(150, 330),
+		Attack = Vector2.new(245, 150),
+		Special = Vector2.new(110, 290),
+		Block = Vector2.new(250, 275),
 	}),
-	DesktopPad = Vector2.new(170, 190), -- Wild pad centre on desktop (from the bottom-right corner)
 
 	-- Colors
 	Gold = Color3.fromRGB(255, 205, 70),

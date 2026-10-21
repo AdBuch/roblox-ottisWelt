@@ -32,7 +32,6 @@ local PlayerDataSchema = {
 	Preferences = table.freeze({
 		HudMode = table.freeze({ "Full", "Minimal", "Hidden" }),
 		BossIntro = table.freeze({ "Seen", "" }),
-		ControlMode = table.freeze({ "Classic", "Wild" }),
 		CameraShake = table.freeze({ "Full", "Reduced", "Off" }),
 	}),
 }
