@@ -153,6 +153,34 @@ local matchEvent: RemoteEvent? = if matchEventInstance and matchEventInstance:Is
 local preferenceRemote = remotes and remotes:FindFirstChild(Config.PreferenceRemoteName)
 local preferenceEvent: RemoteEvent? = if preferenceRemote and preferenceRemote:IsA("RemoteEvent") then preferenceRemote else nil
 
+-- Match menus (Hub) / travel status (both): their own ScreenGui above the HUD
+local menuGui = Instance.new("ScreenGui")
+menuGui.Name = "MatchMenus"
+menuGui.ResetOnSpawn = false
+menuGui.DisplayOrder = 20
+menuGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+menuGui.Parent = playerGui
+TeleportStatusController.start(menuGui, matchRequest, matchEvent, isArena)
+if not isArena and GameModeMenuController and ActiveBattlesController then
+	local modeMenu: any = nil
+	local live = ActiveBattlesController.start(menuGui, matchRequest, matchEvent, function()
+		if modeMenu then
+			modeMenu.open(nil)
+		end
+	end)
+	modeMenu = GameModeMenuController.start(menuGui, edge, matchRequest, matchEvent, function()
+		live.open()
+	end, function(text: string)
+		notify("Info", text)
+	end)
+	-- the overlay's MODE SELECTION button closes it and opens the menu
+	local openMenu = modeMenu.open
+	modeMenu.open = function(tab: string?)
+		live.close()
+		openMenu(tab)
+	end
+end
+
 -- CLASSIC / WILD and CAMERA settings (saved; the mode switch cancels gestures and blocks)
 local settings = CombatSettingsController.start(edge, preferenceEvent, notify)
 
@@ -160,7 +188,7 @@ local aura = AuraDisplayController.start(hud.group, visibility, notify)
 local controls = MobileControlsController.start(hud.group, visibility, hud.onLayout, function()
 	return hud.layout.touch
 end)
-local momentumHud = MomentumHudController.start(hud.group, visibility, hud.onLayout, player)
+MomentumHudController.start(hud.group, visibility, hud.onLayout, player)
 
 local function controlHint(): string
 	local mode = settings.getMode()

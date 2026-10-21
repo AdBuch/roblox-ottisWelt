@@ -3,10 +3,11 @@
 --   create / invite (players in this Hub server) / accept / leave / ready, leader = first member;
 --   leadership passes on when the leader leaves. A party is LOCKED while it is queued or being
 --   teleported: membership can't change until the queue / teleport ends.
--- The CO-OP LEGIONS posts in the basement use the "open" post party (JOIN joins it, READY,
--- START = leader starts Co-op with the READY members). The menu (MatchRequest) offers the same
--- for private parties plus invites. Friends outside the server are invited with Roblox's own
--- game-invite prompt (client), they then join here and accept.
+-- The walk-on group pads in the lobby's MULTIPLAYER wing (LobbyPadService) each own one public
+-- "pad party": stepping on the carpet joins it, stepping off leaves it, the first member leads and
+-- presses START. The menu (MatchRequest) offers private parties plus invites; a private party can
+-- start from any pad too. Friends outside the server are invited with Roblox's own game-invite
+-- prompt (client), they then join here and accept.
 -- Published to clients: PartyId / InParty / Ready attributes and a MatchEvent "Party" snapshot.
 
 local Players = game:GetService("Players")
@@ -29,8 +30,11 @@ export type Party = {
 	ready: { [Player]: boolean },
 	invites: { [Player]: number },
 	locked: boolean,
-	open: boolean, -- the CO-OP posts' party
+	open: boolean, -- public (a pad party)
+	pad: string?, -- the group pad this party belongs to (LobbyPadDefinitions id)
 }
+
+local ROSTER_PAD = "ZombieCoop" -- its group is published as the lobby's CO-OP roster
 
 local PartyService = {}
 
@@ -93,12 +97,14 @@ local function publish(party: Party?)
 			end
 		end
 	end
-	-- The CO-OP board shows the open post party
+	-- The CO-OP roster shows the Zombie Co-op pad's group (else any public party)
 	local openParty: Party? = nil
 	for _, p in parties do
-		if p.open then
+		if p.pad == ROSTER_PAD then
 			openParty = p
 			break
+		elseif p.open and not openParty then
+			openParty = p
 		end
 	end
 	local lines, roster = {}, {}
@@ -110,7 +116,7 @@ local function publish(party: Party?)
 	end
 	local currentBoard = board
 	if currentBoard then
-		currentBoard.Text = if #lines > 0 then table.concat(lines, "\n") else "No party yet · hold F at JOIN"
+		currentBoard.Text = if #lines > 0 then table.concat(lines, "\n") else "No group yet · step on the carpet"
 	end
 	if lobbyFolder then
 		lobbyFolder:SetAttribute(Config.CoopRosterAttribute, table.concat(roster, ";"))
@@ -131,8 +137,8 @@ local function clearPlayer(player: Player)
 	end
 end
 
-local function newParty(leader: Player, open: boolean): Party
-	local party: Party = { id = MemoryStoreAdapter.newId("p"), members = { leader }, ready = {}, invites = {}, locked = false, open = open }
+local function newParty(leader: Player, open: boolean, pad: string?): Party
+	local party: Party = { id = MemoryStoreAdapter.newId("p"), members = { leader }, ready = {}, invites = {}, locked = false, open = open, pad = pad }
 	parties[party.id] = party
 	partyOf[leader] = party
 	return party
@@ -275,25 +281,55 @@ function PartyService.setReady(player: Player, ready: boolean?): (boolean, strin
 	return true, if value then "READY" else "Not ready"
 end
 
--- CO-OP posts: JOIN / LEAVE the open post party.
-function PartyService.togglePostParty(player: Player): (boolean, string)
+-- Group pads: stepping on the carpet joins the pad's public party (or founds it).
+-- Returns (joined, message); "" = nothing to tell (already in this pad's group).
+function PartyService.joinPadParty(player: Player, padId: string): (boolean, string)
 	local current = partyOf[player]
 	if current then
-		return PartyService.leave(player), "You left the party"
+		if current.pad == padId then
+			return true, ""
+		end
+		return false, "You are in a party already · its leader can start from this pad"
 	end
-	if not GameStates.isInLobby(player:GetAttribute(GameStates.StateAttribute)) then
+	local queue = player:GetAttribute(Config.QueueStatusAttribute)
+	if not GameStates.isInLobby(player:GetAttribute(GameStates.StateAttribute)) or (queue ~= nil and queue ~= "") then
 		return false, "Finish what you are doing first"
 	end
 	for _, party in parties do
-		if party.open and not party.locked and #party.members < MAX_MEMBERS then
+		if party.pad == padId then
+			if party.locked then
+				return false, "This group is searching for a match · wait a moment"
+			end
+			if #party.members >= MAX_MEMBERS then
+				return false, ("This group is full (%d players)"):format(MAX_MEMBERS)
+			end
 			table.insert(party.members, player)
 			partyOf[player] = party
 			publish(party)
-			return true, "You joined the co-op party"
+			return true, ("You joined %s's group"):format(party.members[1].DisplayName)
 		end
 	end
-	publish(newParty(player, true))
-	return true, "You lead the co-op party"
+	publish(newParty(player, true, padId))
+	return true, "You lead this group · press START when everybody is here"
+end
+
+-- Stepping off the carpet leaves the pad's party (never while it is queued or travelling).
+function PartyService.leavePadParty(player: Player, padId: string): boolean
+	local party = partyOf[player]
+	if party and party.pad == padId and not party.locked then
+		return PartyService.leave(player, true)
+	end
+	return false
+end
+
+-- The current group of a pad, if any.
+function PartyService.padParty(padId: string): Party?
+	for _, party in parties do
+		if party.pad == padId then
+			return party
+		end
+	end
+	return nil
 end
 
 -- Snapshot for the menu (MatchRequest "Party").
@@ -301,7 +337,7 @@ function PartyService.snapshotFor(player: Player): { [string]: any }
 	return snapshot(partyOf[player], player)
 end
 
-function PartyService.init(folder: Instance, coopBoard: TextLabel)
+function PartyService.init(folder: Instance, coopBoard: TextLabel?)
 	lobbyFolder = folder
 	board = coopBoard
 	Players.PlayerRemoving:Connect(function(player)

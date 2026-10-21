@@ -268,19 +268,31 @@ centre of the screen stay free; everything is small, anchored to an edge and sca
   Results (summary banner).
 
 
-## The basement (lobby)
+## The lobby: the gladiator dungeon under the Colosseum
 
-About twice the old lobby, with wide open floors: arrival hall with the welcome board (spawn), the **GLADIATOR ARMORY** (west),
-mode area (north) with the **SOLO ARENA** gate, **CO-OP LEGIONS** posts (JOIN / READY / START / FIND PLAYERS) and
-**TEAM BATTLES** posts (TIME BATTLE / FIRST TO 20 / ELIMINATION / LEAVE QUEUE), **ZOMBIE ARCHIVE** gallery (east annex),
-**TRAINING** yard (south-west), the **WATCH LIVE** door with the LIVE IN THE COLOSSEUM board (east), a barred prison
-corridor and storage corners. The same actions are in the **PLAY** menu (right edge). The lobby is a safe zone: no damage, no PvP. Attacks only hit the training dummies.
+Details, coordinates and how to add a mode: [docs/LOBBY_LAYOUT.md](docs/LOBBY_LAYOUT.md). Seen from the spawn (looking
+north at the large **Otti statue** in the middle of the central hall):
+- **Front:** the **ARENA** gate. A corridor lined with zombie and gladiator cages (the **ZOMBIE ARCHIVE**) rises gently
+  to a portcullis; the sunlit arena is visible behind it. Hold F at the portcullis to open the **PLAY** menu.
+- **Back:** the closed **GATE TO ROME** (later the way into the open Roman world).
+- **Left:** **MULTIPLAYER**: four large group rooms with walk-on carpet pads and floor mosaics (Otti / Schili).
+  Stepping on a carpet joins its group, the board lists the members, the leader (★) presses **START** or a queue
+  button. ZOMBIE CO-OP (START, FIND PLAYERS) and TEAM DEATHMATCH (TIME BATTLE, FIRST TO 20, ELIMINATION) are live;
+  BOSS FIGHT CO-OP and ARENA CO-OP are built and signed COMING SOON.
+- **Right:** **SINGLEPLAYER**: four pads right at the entrance. Stand on **ZOMBIE SURVIVAL** for 3 s (or press START
+  NOW) to start a solo run; BOSS FIGHT, ARENA FIGHT and CHAOS GAMES are COMING SOON. The **TRAINING** yard is behind.
+- **Sides:** stone stairs in the front corners up to the **TRIBUNES** doors (WATCH LIVE), the LIVE IN THE COLOSSEUM
+  board on the floor.
+- **Back-left:** a side passage with a forge to the **GLADIATOR ARMORY** (and a closed UPGRADES door for later).
+Colour-coded floor strips lead from the spawn: blue to multiplayer, gold to singleplayer, red to the arena. The PLAY
+menu (right edge) offers every action too. The lobby is a safe zone: no damage, no PvP, no blood. Attacks only hit the
+training dummies.
 
 ### GLADIATOR ARMORY
 
-A separate vaulted sandstone chamber (100 × 76 studs) behind an arch in the hall's west wall, marked
-`GLADIATOR ARMORY`, with `WEAPONS / SHIELDS / ARMOR` signposts in the hall and inside. Thick columns, torches, red
-banners, bronze section signs, wooden racks, storage shelves, crates and barrels.
+A separate vaulted sandstone chamber (100 × 76 studs) at the end of the side passage behind the hall's south-west
+corner, marked `GLADIATOR ARMORY`. Thick columns, torches, red banners, bronze section signs, wooden racks, storage
+shelves, crates and barrels.
 - **BLADES** (north wall): Rusty Gladius, Legion Sword, Twin Arena Daggers.
 - **HEAVY & REACH** (west wall): Morning Star, Trident, Hoplite Spear, Battle Axe (wider spacing).
 - **RANGED & SPECIAL** (east wall): Hunter Bow with quiver and arrows; future ranged / special weapons.
@@ -306,8 +318,9 @@ All Team Battles: winners +80 Aura, losers +25, draw +40; shells off by default 
 
 **Co-op:** SOLO / START WITH CURRENT PARTY start at once on a new reserved Arena server (no waiting for 4
 players). Parties: CREATE PARTY, invite players of the same Hub server (or friends via Roblox invite, then invite
-them here), ACCEPT, READY. The basement posts use an open party: JOIN, READY, the leader (★) holds START (only READY
-members fight; nobody ready = everybody). **FIND PLAYERS** queues the party for co-op matchmaking.
+them here), ACCEPT, READY. The lobby's group pads form public groups: stepping on the carpet joins, stepping off leaves,
+the leader (★) presses START (only READY members fight; nobody ready = everybody). **FIND PLAYERS** queues the group for
+co-op matchmaking.
 
 **Team Battles:** choose a submode (post or menu); the party queues together. Teams are formed by the matchmaker
 (equal sizes only, see below), never by clients. In the Arena: one match id, protected team spawns behind closed
@@ -725,7 +738,7 @@ With Place IDs = 0 or in Studio nothing is teleported (and nothing pretends to b
   HUD mode and statistics are still there (same `OttiPlayerData_DEV_v1`).
 
 **Gladiator Armory, armor and saving (Hub)** (Game Settings → Security → *Enable Studio Access to API Services* for saving)
-1. F5. Follow the `◄ WEAPONS / SHIELDS / ARMOR` signpost to the GLADIATOR ARMORY arch in the hall's west wall.
+1. F5. From the spawn go to the back-left corner of the hall: the side passage marked GLADIATOR ARMORY leads past the forge; the armory door is at its end (right).
 2. Walk along BLADES (north), HEAVY & REACH (west), RANGED & SPECIAL (east, bow + quiver), SHIELDS LIGHT / BALANCED / HEAVY
    (south) and the ARMOR mannequins (centre). Near a display: gold outline + card with stats, Aura unlock, price in Denarii and LOCKED / BUY / EQUIP / EQUIPPED; `i` shows details.
 3. With too little Aura the card shows LOCKED and the button does nothing. Unlocked but too few Denarii: NOT ENOUGH DENARII
@@ -738,10 +751,10 @@ With Place IDs = 0 or in Studio nothing is teleported (and nothing pretends to b
 7. Change the HUD mode (H), leave and rejoin: Aura, owned/equipped gear and the HUD mode are restored.
 
 **Solo (Arena gameplay: Arena place in Studio with `ArenaMockMode = "SOLO_ZOMBIES"`, or a real Solo start)**
-1. Hub F5. You spawn in the arrival hall: the Aura orb top-right shows 0, Rusty Gladius + Wooden Buckler in your hands, touch: ATK, BLOCK and COMBO around the jump button.
-2. Walk to the TRAINING yard (south-west), hit a dummy, then try a combo (B → J → A, Enter): `COMBO SUCCESS · …`.
-3. Visit the ZOMBIE ARCHIVE (east): 6 caged zombies with plaques; the Undead Sagittarius draws its bow at you.
-4. Hold F at the SOLO ARENA gate (north-west) or PLAY → SOLO: a reserved Arena server (Studio: open the Arena place). GET READY, then ROUND 1 / 7. Kill zombies: a short `+10` with the Aura orb (no permanent counter in combat).
+1. Hub F5. You spawn behind the Otti statue in the central hall, facing the ARENA gate: the Aura and Denarii capsules top-right show 0, Rusty Gladius + Wooden Buckler in your hands, touch: ATK, BLOCK, SLIDE and SPECIAL around the jump button.
+2. Follow the gold strip right to SINGLEPLAYER, walk to the TRAINING yard at the far end and hit a dummy (Classic or Wild controls, specials with Q / X).
+3. Walk north into the arena corridor: the ZOMBIE ARCHIVE cages line both walls (6 zombies with plaques; the Undead Sagittarius draws its bow at you). Hold F at the portcullis: the PLAY menu opens.
+4. Stand on the ZOMBIE SURVIVAL pad (SINGLEPLAYER, right) for 3 s, press START NOW, or use PLAY → SOLO: a reserved Arena server (Studio: open the Arena place). GET READY, then ROUND 1 / 7. Kill zombies: a short `+10` with the Aura orb (no permanent counter in combat).
 5. Die or win: you return to the Hub and keep your Aura and Denarii. Buy something in the GLADIATOR ARMORY (e.g. the
    Legion Sword: unlocked at 80 Aura, costs 80 Denarii).
 

@@ -320,6 +320,9 @@ function GameModeMenuController.start(gui: ScreenGui, edge: Frame, request: Remo
 				end
 			elseif kind == "Teleport" and data == "Travelling" then
 				close()
+			elseif kind == "OpenMenu" then
+				-- the arena portcullis in the lobby (server prompt)
+				open(if typeof(data) == "string" then data else nil)
 			end
 		end)
 	end

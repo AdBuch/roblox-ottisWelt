@@ -7,9 +7,10 @@
 --   Queue / LeaveQueue matchmaking for COOP_ZOMBIES, TIME_BATTLE, FIRST_TO, ELIMINATION
 --   ListBattles        the LIVE IN THE COLOSSEUM sections (filter)
 --   Watch / WatchRandom spectate one battle (slot reserved atomically)
--- The basement prompts (SOLO gate, CO-OP posts, TEAM BATTLES posts, WATCH LIVE door) call the
--- same functions. Clients never send match ids for fighting, teams, roles, rewards, ids of
--- places or servers, Aura or inventory: those come from the server-side records.
+-- The lobby's walk-on pads (LobbyPadService), the arena portcullis (opens the PLAY menu), the
+-- tribune doors (WATCH LIVE) and the Gate to Rome call the same functions. Clients never send
+-- match ids for fighting, teams, roles, rewards, ids of places or servers, Aura or inventory:
+-- those come from the server-side records.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -30,6 +31,7 @@ local ArenaReservationService = require(script.Parent.ArenaReservationService)
 local FriendBattleService = require(script.Parent.FriendBattleService)
 local HubTeleportService = require(script.Parent.HubTeleportService)
 local LiveBattlesService = require(script.Parent.LiveBattlesService)
+local LobbyPadService = require(script.Parent.LobbyPadService)
 local MatchmakingService = require(script.Parent.MatchmakingService)
 local PartyService = require(script.Parent.PartyService)
 local SpectatorJoinService = require(script.Parent.SpectatorJoinService)
@@ -282,16 +284,15 @@ local function addPrompt(host: BasePart, actionText: string, objectText: string,
 	end)
 end
 
-local function queuePrompt(mode: MatchTypes.MatchMode): (Player) -> (boolean, string)
-	return function(player: Player)
-		if MatchmakingService.isQueued(player) then
-			return MatchmakingService.leave(player)
-		end
-		if not inLobby(player) then
-			return false, "Finish what you are doing first"
-		end
-		return MatchmakingService.join(player, mode)
+-- Search / stop: a second press leaves the queue again.
+local function toggleQueue(player: Player, mode: string): (boolean, string)
+	if MatchmakingService.isQueued(player) then
+		return MatchmakingService.leave(player)
 	end
+	if not inLobby(player) then
+		return false, "Finish what you are doing first"
+	end
+	return MatchmakingService.join(player, mode)
 end
 
 local function updateLiveBoard()
@@ -341,26 +342,31 @@ end
 function HubMatchService.init(lobby: LobbyService.LobbyLayout)
 	layout = lobby
 	FriendBattleService.init()
-	PartyService.init(lobby.folder, lobby.coopBoard)
+	PartyService.init(lobby.folder, nil)
 	MatchmakingService.init()
 	LiveBattlesService.init()
 	Remotes.MatchRequest.OnServerInvoke = onRequest
 
-	lobby.soloLabel.Text = "Your own arena · hold F"
-	addPrompt(lobby.soloGate, "Start Solo Arena", "SOLO ARENA", HubMatchService.playSolo)
-	addPrompt(lobby.coopJoin, "Join / Leave", "CO-OP PARTY", PartyService.togglePostParty)
-	addPrompt(lobby.coopReady, "Ready / Unready", "CO-OP PARTY", function(player)
-		return PartyService.setReady(player, nil)
-	end)
-	addPrompt(lobby.coopStart, "Start Co-op", "PARTY LEADER", HubMatchService.startCoop)
-	addPrompt(lobby.coopQueue, "Find players / Stop", "CO-OP MATCHMAKING", queuePrompt("COOP_ZOMBIES"))
-	addPrompt(lobby.timePost, "Search / Stop", "TIME BATTLE", queuePrompt("TIME_BATTLE"))
-	addPrompt(lobby.firstToPost, "Search / Stop", "FIRST TO 20", queuePrompt("FIRST_TO"))
-	addPrompt(lobby.elimPost, "Search / Stop", "ELIMINATION", queuePrompt("ELIMINATION"))
-	addPrompt(lobby.leaveQueuePost, "Leave queue", "MATCHMAKING", MatchmakingService.leave)
-	addPrompt(lobby.tribuneDoor, "Watch live", "WATCH LIVE", function(player)
-		Remotes.MatchEvent:FireClient(player, "OpenLive")
+	-- Walk-on pads (singleplayer + multiplayer wings)
+	LobbyPadService.init(lobby.pads, {
+		playSolo = HubMatchService.playSolo,
+		startCoop = HubMatchService.startCoop,
+		toggleQueue = toggleQueue,
+		message = HubTeleportService.message,
+	})
+	-- The arena portcullis opens the PLAY menu (every mode in one place)
+	addPrompt(lobby.arenaGate, "Choose a battle", "THE ARENA", function(player)
+		Remotes.MatchEvent:FireClient(player, "OpenMenu")
 		return true, ""
+	end)
+	for _, door in lobby.tribuneDoors do
+		addPrompt(door, "Watch live", "TRIBUNES", function(player)
+			Remotes.MatchEvent:FireClient(player, "OpenLive")
+			return true, ""
+		end)
+	end
+	addPrompt(lobby.romeGate, "Open", "GATE TO ROME", function()
+		return false, "The gate to Rome is still barred · the road opens soon"
 	end)
 
 	Players.PlayerAdded:Connect(function(player)
