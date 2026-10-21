@@ -20,6 +20,7 @@ local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
 local InputDefinitions = require(ReplicatedStorage.Shared.InputDefinitions)
 local ProjectileDefinitions = require(ReplicatedStorage.Shared.ProjectileDefinitions)
 local PvPBalanceConfig = require(ReplicatedStorage.Shared.PvPBalanceConfig)
+local WeaponBalanceConfig = require(ReplicatedStorage.Shared.WeaponBalanceConfig)
 local SpecialMoveDefinitions = require(ReplicatedStorage.Shared.SpecialMoveDefinitions)
 local Arena = require(script.Parent.Arena)
 local CombatEffects = require(script.Parent.CombatEffects)
@@ -94,9 +95,13 @@ local function hitInfo(execution: Execution, damage: number, target: Target?): C
 			cap = math.max(0, humanoid.MaxHealth * PvPBalanceConfig.MaxMoveFraction - (execution.dealtTo[target.player] or 0))
 		end
 	end
+	-- PvE and PvP values are separate (WeaponBalanceConfig): `damage` carries the PvE multiplier,
+	-- `pvpMultiplier` (used only against players) removes it again and applies the normalization
+	local pve = WeaponBalanceConfig.pveFactor(attacker.weaponId)
+	local pvp = WeaponBalanceConfig.pvpFactor(attacker.weaponId)
 	return {
-		damage = damage * attacker.comboMultiplier,
-		pvpMultiplier = move.PvPMultiplier * (attacker.pvpScale or attacker.comboMultiplier) / math.max(0.01, attacker.comboMultiplier),
+		damage = damage * attacker.comboMultiplier * pve,
+		pvpMultiplier = move.PvPMultiplier * pvp * (attacker.pvpScale or attacker.comboMultiplier) / math.max(0.01, attacker.comboMultiplier * pve),
 		height = move.Height,
 		heavy = move.Impact ~= nil or move.Ultimate == true or move.Stagger >= 0.45,
 		label = move.Name,

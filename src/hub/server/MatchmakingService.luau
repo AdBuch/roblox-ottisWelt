@@ -13,6 +13,8 @@
 --   Co-op   oldest entry first, fill up to 4; start at 4 or after CoopFillSeconds.
 --   Teams   equal team sizes only (4v4 .. 1v1; smaller sizes allowed only after
 --           TeamSizeWaitSeconds), parties are never split and never face themselves.
+--           Levels: only entries whose average gladiator level is within a window of the oldest entry
+--           (GladiatorLevelDefinitions.matchGap, widening with waiting time; MatchRatingService).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -21,6 +23,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local EnvironmentConfig = require(ReplicatedStorage.Shared.EnvironmentConfig)
 local ExperienceConfig = require(ReplicatedStorage.Shared.ExperienceConfig)
 local GameStates = require(ReplicatedStorage.Shared.GameStates)
+local GladiatorLevelDefinitions = require(ReplicatedStorage.Shared.GladiatorLevelDefinitions)
 local MatchDefinitions = require(ReplicatedStorage.Shared.MatchDefinitions)
 local MatchTypes = require(ReplicatedStorage.Shared.MatchTypes)
 local Server = script.Parent.Parent
@@ -29,6 +32,7 @@ local MemoryStoreAdapter = require(Server.MemoryStoreAdapter)
 local Remotes = require(Server.Remotes)
 local ArenaReservationService = require(script.Parent.ArenaReservationService)
 local HubTeleportService = require(script.Parent.HubTeleportService)
+local MatchRatingService = require(script.Parent.MatchRatingService)
 local PartyService = require(script.Parent.PartyService)
 
 local PREFIX = "[OttiArena][Matchmaking]"
@@ -43,6 +47,7 @@ type QueueEntry = {
 	size: number,
 	homeJobId: string,
 	enqueuedAt: number,
+	level: number?, -- average gladiator level of the entry (MatchRatingService); battles match close levels
 	claimed: string?,
 }
 
@@ -136,6 +141,7 @@ function MatchmakingService.join(player: Player, mode: unknown): (boolean, strin
 		size = #players,
 		homeJobId = game.JobId,
 		enqueuedAt = os.time(),
+		level = MatchRatingService.ratingOf(players).level,
 		claimed = nil,
 	}
 	if not queueMap(definition.Id).set(token, entry, MM.QueueEntrySeconds) then
@@ -345,12 +351,21 @@ local function tickMode(mode: MatchTypes.MatchMode)
 		end
 		return
 	end
-	-- Team modes: the largest equal team size the waiting time allows
+	-- Team modes: the largest equal team size the waiting time allows, among entries whose gladiator
+	-- levels are close to the oldest entry's (the allowed gap widens while it waits)
 	local waited = now - entries[1].enqueuedAt
+	local anchorLevel = entries[1].level or 1
+	local gap = GladiatorLevelDefinitions.matchGap(waited)
+	local close: { QueueEntry } = {}
+	for _, entry in entries do
+		if math.abs((entry.level or anchorLevel) - anchorLevel) <= gap then
+			table.insert(close, entry)
+		end
+	end
 	local waits = MM.TeamSizeWaitSeconds :: { [number]: number }
 	for size = 4, 1, -1 do
 		if waited >= (waits[size] or 0) then
-			local red, blue = findTeams(entries, size)
+			local red, blue = findTeams(close, size)
 			if red and blue then
 				createAndAssign(mode, { { entries = red, team = "Red" }, { entries = blue, team = "Blue" } })
 				return -- one match per tick and mode; the next tick continues
