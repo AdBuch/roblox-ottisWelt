@@ -9,7 +9,7 @@
 
 local Mosaics = {}
 
-local PALETTE: { [string]: Color3 } = {
+local PALETTE: { [string]: Color3? } = {
 	G = Color3.fromRGB(226, 182, 74), -- gold ring
 	B = Color3.fromRGB(112, 73, 46), -- Otti fur
 	D = Color3.fromRGB(58, 36, 24), -- dark fur / ears

@@ -7,7 +7,7 @@ anchored, use built-in materials and need no asset ids. The lobby is a safe zone
 
 | Function | Module | Change in the redesign |
 |---|---|---|
-| Spawn (`LobbySpawn`) and the fall-out safety net | `LobbyService`, `hub/server/Main.server` | Moved behind the Otti statue. `isInside` now checks a list of walkable zones. |
+| Arrival / respawn (`LobbyArrivalSpawn` / `LobbyRespawn`) and the fall-out safety net | `LobbyService`, `hub/server/Main.server` | Direct joins face the clear arena route; later respawns use the side of the hall. `isInside` now checks a list of walkable zones. |
 | GLADIATOR ARMORY: displays, buying, equipping | `EquipmentShopService`, `ShopController`, `InventoryService` | Unchanged. The chamber is moved as a whole (`ARMORY_OFFSET`) to the end of a new side passage, and its display lines move with it. |
 | ZOMBIE ARCHIVE: six caged display zombies | `ZombieDisplayService` | The cages now line the main arena corridor (3 per side). The slots and plaques use the same API. |
 | Training dummies and the training board | `TrainingService`, `ComboFeedbackController` | Moved to the far end of the singleplayer wing. The board keeps its name `ComboTrainingBoard`. |
@@ -16,7 +16,7 @@ anchored, use built-in materials and need no asset ids. The lobby is a safe zone
 | Matchmaking (Co-op, Time Battle, First to 20, Elimination) | `MatchmakingService` | Called by the pad queue buttons; a second press stops the search. |
 | Parties | `PartyService` | Pad parties: one public group per pad (`joinPadParty`, `leavePadParty`, `padParty`). The post party `togglePostParty` is replaced. |
 | WATCH LIVE and the live board | `HubMatchService` | Two tribune doors at the top of the side stairs. The live board stands on the hall floor. |
-| PLAY menu, live overlay, travel status | `GameModeMenuController`, `ActiveBattlesController`, `TeleportStatusController` | Unchanged. New: the arena portcullis opens the PLAY menu (`MatchEvent "OpenMenu"`). |
+| PLAY menu, live overlay, travel status | `GameModeMenuController`, `ActiveBattlesController`, `TeleportStatusController` | Unchanged. The main arena entrance starts Solo Zombies directly; other modes remain available from the wings and PLAY menu. |
 
 Removed: the old mode posts (JOIN / READY / START / FIND PLAYERS / TIME / FIRST TO / ELIMINATION / LEAVE QUEUE), the
 solo gate, the barred prison corridor and the east archive annex. Their functions now run through the pads, the
@@ -26,7 +26,7 @@ arena corridor and the PLAY menu.
 
 ```
                          sunlit ARENA (view only)
-                               ║ portcullis  (z -112, hold F = PLAY menu)
+                               ║ portcullis  (z -112, walk in = SOLO ZOMBIES)
                                ║ ramp +6 studs (z -88 .. -104)
             gladiator cell ┌───╫───┐ gladiator cell
               zombie cage  │ ARENA │ zombie cage        ZOMBIE ARCHIVE (6 cages)
@@ -43,7 +43,7 @@ arena corridor and the PLAY menu.
 
 | Area | Extent (x, z) | Notes |
 |---|---|---|
-| Central hall | -40..40, -36..36, height 26 | Otti statue (`LobbyStatue`, scale 1.7) on a pedestal at the centre, 4 braziers, spawn at (0, 24) facing north, signpost, two light shafts, guide strips |
+| Central hall | -40..40, -36..36, height 26 | Otti statue (`LobbyStatue`, scale 1.7) on a pedestal beside the central route at (-18, 0), 4 braziers, direct-arrival spawn at (0, 28) facing north; respawns and Arena returns at (18, 12), signpost, two light shafts, guide strips |
 | Arena corridor | -10..10, -38..-112 | 3 zombie cages and 1 gladiator cell per side, ramp, landing, portcullis, arena view beyond (not walkable) |
 | Multiplayer wing | -42..-154, -34..34 | Four group rooms around a central aisle. Pads 24 × 16 with a 15 × 15 floor mosaic. Board, banners and start pedestals per room |
 | Singleplayer wing | 42..124, -28..28 | Four pads of 14 × 11 at x 58 / 84, training yard at x 98..122 |
@@ -104,7 +104,7 @@ Configuration: `src/shared/LobbyPadDefinitions.luau`. Builder: `LobbyService.bui
 
 ## 6. Studio test checklist
 
-1. Spawn: the statue is in front of you, the arena gate is visible behind it, and the Gate to Rome is behind you.
+1. Direct join: Otti is to your left and the ZOMBIE SOLO entrance is straight ahead. Walk straight to enter a solo run; reset your character to check the separate side-hall respawn.
 2. Multiplayer: two players step on ZOMBIE CO-OP. The board shows ★ and both names. The leader presses START, a
    non-leader gets a message. Stepping off leaves the group.
 3. Team Deathmatch: the leader presses FIRST TO 20 → the board shows SEARCHING; a second press stops the search.
@@ -113,7 +113,16 @@ Configuration: `src/shared/LobbyPadDefinitions.luau`. Builder: `LobbyService.bui
 6. Armory: buying and equipping work, and the cards appear only inside the chamber.
 7. Archive: 6 zombies in the corridor cages.
 8. Training: the dummies take hits and the training board text appears.
-9. Tribune doors: WATCH LIVE opens the live overlay. The portcullis opens the PLAY menu. The Gate to Rome shows its
+9. Tribune doors: WATCH LIVE opens the live overlay. The portcullis starts Solo Zombies directly, with no mode picker. The Gate to Rome shows its
    message.
 10. Fall out of the level: you are sent back to the spawn.
 11. Check on a phone: readability of the pads, prompts and signs, and the frame rate.
+
+## Direct arrival and default arena entrance
+
+- Otti's entire monument stands west of the centre line so the statue remains visible beside the unobstructed route to the games.
+- A direct Hub join starts at (0, 28), facing north toward ZOMBIE SOLO. Character placement is also applied to players already present during initialization.
+- Later character respawns and fighter returns from the Arena use (18, 12). Returning spectators retain their position near the live board.
+- Walking straight along the red guide into the main arena gate starts the existing Solo Zombies countdown on a 14 x 6 pad, at height +6 and z -108. Stepping off cancels it.
+- The gate prompt is an optional immediate Solo Zombies start. It never opens the mode picker. Existing side-wing modes and the PLAY menu remain available.
+- Studio checks required: fresh join camera/sightline, unobstructed walk to Solo Zombies, step-off cancellation, death/reset spawn, fighter/spectator returns, existing-player initialization and phone controls.

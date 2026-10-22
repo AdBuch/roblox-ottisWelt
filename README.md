@@ -291,9 +291,9 @@ centre of the screen stay free; everything is small, anchored to an edge and sca
 ## The lobby: the gladiator dungeon under the Colosseum
 
 Details, coordinates and how to add a mode: [docs/LOBBY_LAYOUT.md](docs/LOBBY_LAYOUT.md). Seen from the spawn (looking
-north at the large **Otti statue** in the middle of the central hall):
+north along the clear arena approach, with the **Otti statue** to the left):
 - **Front:** the **ARENA** gate. A corridor lined with zombie and gladiator cages (the **ZOMBIE ARCHIVE**) rises gently
-  to a portcullis; the sunlit arena is visible behind it. Hold F at the portcullis to open the **PLAY** menu.
+  to a portcullis; the sunlit arena is visible behind it. Walk into the entrance pad to start **Solo Zombies**, or hold F at the portcullis to start directly.
 - **Back:** the closed **GATE TO ROME** (later the way into the open Roman world).
 - **Left:** **MULTIPLAYER**: four large group rooms with walk-on carpet pads and floor mosaics (Otti / Schili).
   Stepping on a carpet joins its group, the board lists the members, the leader (★) presses **START** or a queue
@@ -794,9 +794,9 @@ With Place IDs = 0 or in Studio nothing is teleported (and nothing pretends to b
 7. Change the HUD mode (H), leave and rejoin: Aura, owned/equipped gear and the HUD mode are restored.
 
 **Solo (Arena gameplay: Arena place in Studio with `ArenaMockMode = "SOLO_ZOMBIES"`, or a real Solo start)**
-1. Hub F5. You spawn behind the Otti statue in the central hall, facing the ARENA gate: the Aura and Denarii capsules top-right show 0, Rusty Gladius + Wooden Buckler in your hands, touch: ATTACK, SPECIAL and BLOCK around Roblox's jump button, thumbstick left.
+1. Hub F5. You arrive in the central hall with Otti to the left and the Solo Zombies entrance straight ahead: the Aura and Denarii capsules top-right show 0, Rusty Gladius + Wooden Buckler in your hands, touch: ATTACK, SPECIAL and BLOCK around Roblox's jump button, thumbstick left.
 2. Follow the gold strip right to SINGLEPLAYER, walk to the TRAINING yard at the far end and hit a dummy (tap ATTACK for combos, toggle BLOCK, hold Q / X / SPECIAL and watch the three charge phases).
-3. Walk north into the arena corridor: the ZOMBIE ARCHIVE cages line both walls (6 zombies with plaques; the Undead Sagittarius draws its bow at you). Hold F at the portcullis: the PLAY menu opens.
+3. Walk north into the arena corridor: the ZOMBIE ARCHIVE cages line both walls (6 zombies with plaques; the Undead Sagittarius draws its bow at you). Walk straight onto the gate pad: Solo Zombies starts after the countdown (step off to cancel). Hold F at the portcullis to start directly, without a menu.
 4. Stand on the ZOMBIE SURVIVAL pad (SINGLEPLAYER, right) for 3 s, press START NOW, or use PLAY → SOLO: a reserved Arena server (Studio: open the Arena place). GET READY, then ROUND 1 / 7. Kill zombies: a short `+10` with the Aura orb (no permanent counter in combat).
 5. Die or win: you return to the Hub and keep your Aura and Denarii. Buy something in the GLADIATOR ARMORY (e.g. the
    Legion Sword: unlocked at level 2, costs 80 Denarii).
@@ -866,3 +866,7 @@ With Place IDs = 0 or in Studio nothing is teleported (and nothing pretends to b
 - **"This place was not built as the Hub / Arena":** the Studio window is synced with the wrong project file (each place needs its own `rojo serve` port).
 - **Everything says STUDIO MOCK in a published place:** the Place IDs in `ExperienceConfig` are still 0 or belong to another environment.
 - **Players land in a public Arena server:** they are sent back to the Hub automatically (matches only run on reserved servers).
+
+### Lobby arrival and the default battle
+
+Direct Hub arrivals face the central path to Solo Zombies, with Otti's monument beside the route. Walk straight into the main arena entrance to start the existing solo countdown; leaving the pad cancels it. The gate prompt starts Solo Zombies directly without a choice menu. Respawns and Arena returns use a separate safe lobby position, while returning spectators appear near the live board. Other modes are still available through their wing pads and the PLAY menu.

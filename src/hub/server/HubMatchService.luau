@@ -306,35 +306,50 @@ local function updateLiveBoard()
 	current.folder:SetAttribute(Config.LiveBattleCountAttribute, count)
 end
 
--- Arriving from an Arena: compact message, spectators appear near the live board.
+-- Direct joins see the games ahead. Respawns and Arena returns use a separate safe position.
+-- Track the first character per join, rather than treating every CharacterAdded as a new arrival.
 local function onArrival(player: Player)
-	local payload = TeleportUtil.joinPayload(player)
-	if not payload or payload.kind ~= "ToHub" then
+	local current = layout
+	if not current then
 		return
 	end
-	local code = if typeof(payload.message) == "string" then payload.message else nil
-	local text = if code then (MatchTypes.Messages :: any)[code] else nil
-	if typeof(text) == "string" then
-		task.delay(3, function()
-			if player.Parent then
-				HubTeleportService.message(player, text, false)
-			end
-		end)
-	end
-	local current = layout
-	if payload.fromSpectating == true and current then
-		local target = current.liveCFrame
-		local function place(character: Model)
-			local root = character:WaitForChild("HumanoidRootPart", 10)
-			if root and root:IsA("BasePart") then
-				task.wait(0.2)
-				character:PivotTo(target)
+	local payload = TeleportUtil.joinPayload(player)
+	local returning = payload ~= nil and payload.kind == "ToHub"
+	local firstCharacter = true
+	local initialSpawn = if returning then current.respawnSpawn else current.arrivalSpawn
+	player.RespawnLocation = initialSpawn
+	local function place(character: Model)
+		local first = firstCharacter
+		firstCharacter = false
+		local target = if first then initialSpawn.CFrame else current.spawnCFrame
+		if first and returning and payload and payload.fromSpectating == true then
+			target = current.liveCFrame
+		end
+		local root = character:WaitForChild("HumanoidRootPart", 10)
+		-- Let Roblox finish its own spawn placement before applying the exact arrival position.
+		task.wait(0.2)
+		if root and root:IsA("BasePart") and player.Character == character and character.Parent then
+			player.RespawnLocation = current.respawnSpawn
+			root.AssemblyLinearVelocity = Vector3.zero
+			character:PivotTo(target + Vector3.new(0, 3.5, 0))
+			if first and not returning then
+				player:SetAttribute("HubArrivalCFrame", target + Vector3.new(0, 3.5, 0))
 			end
 		end
-		if player.Character then
-			task.spawn(place, player.Character)
-		else
-			player.CharacterAdded:Once(place)
+	end
+	player.CharacterAdded:Connect(place)
+	if player.Character then
+		task.spawn(place, player.Character)
+	end
+	if returning and payload then
+		local code = if typeof(payload.message) == "string" then payload.message else nil
+		local text = if code then (MatchTypes.Messages :: any)[code] else nil
+		if typeof(text) == "string" then
+			task.delay(3, function()
+				if player.Parent then
+					HubTeleportService.message(player, text, false)
+				end
+			end)
 		end
 	end
 end
@@ -354,11 +369,8 @@ function HubMatchService.init(lobby: LobbyService.LobbyLayout)
 		toggleQueue = toggleQueue,
 		message = HubTeleportService.message,
 	})
-	-- The arena portcullis opens the PLAY menu (every mode in one place)
-	addPrompt(lobby.arenaGate, "Choose a battle", "THE ARENA", function(player)
-		Remotes.MatchEvent:FireClient(player, "OpenMenu")
-		return true, ""
-	end)
+	-- Walking to the gate starts Solo Zombies via the entrance pad; no choice menu here.
+	addPrompt(lobby.arenaGate, "Start Solo Zombies", "THE ARENA", HubMatchService.playSolo)
 	for _, door in lobby.tribuneDoors do
 		addPrompt(door, "Watch live", "TRIBUNES", function(player)
 			Remotes.MatchEvent:FireClient(player, "OpenLive")
@@ -379,6 +391,7 @@ function HubMatchService.init(lobby: LobbyService.LobbyLayout)
 		player:SetAttribute(Config.QueueStatusAttribute, "")
 		player:SetAttribute(GameStates.StateAttribute, GameStates.Lobby)
 		player:SetAttribute(GameStates.LocationAttribute, "Lobby")
+		onArrival(player)
 	end
 	Players.PlayerRemoving:Connect(function(player)
 		starting[player] = nil

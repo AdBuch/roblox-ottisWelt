@@ -1,6 +1,6 @@
 --!strict
 -- Builds the Hub lobby: a gladiator dungeon beneath the Colosseum. Seen from the spawn (looking
--- north, the big Otti statue in the middle of the hall):
+-- north, the Otti statue beside the central approach):
 --   FRONT  the ARENA GATE: a main corridor lined with zombie and gladiator cages (the ZOMBIE ARCHIVE)
 --          rises gently to a portcullis; the sunlit arena is visible behind it (sealed, decor)
 --   BACK   the monumental GATE TO ROME (closed for now; later the way into the open Roman world)
@@ -92,10 +92,12 @@ export type PadLayout = {
 
 export type LobbyLayout = {
 	folder: Folder,
-	spawnCFrame: CFrame,
+	spawnCFrame: CFrame, -- safe return / respawn position
+	arrivalSpawn: SpawnLocation, -- first character on a direct Hub join
+	respawnSpawn: SpawnLocation, -- later characters and Arena returns
 	armory: ArmoryLayout,
 	pads: { PadLayout },
-	arenaGate: BasePart, -- portcullis at the end of the main corridor (opens the PLAY menu)
+	arenaGate: BasePart, -- portcullis at the end of the main corridor (starts Solo Zombies)
 	romeGate: BasePart, -- the closed gate to Rome
 	tribuneDoors: { BasePart }, -- WATCH LIVE entrances at the top of the side stairs
 	liveBoard: TextLabel,
@@ -405,7 +407,7 @@ end
 -- Central hall: spawn, Otti statue, signs, guide strips, columns, light shafts
 ------------------------------------------------------------------------------------------
 
-local function buildHall(folder: Folder): CFrame
+local function buildHall(folder: Folder): (CFrame, SpawnLocation, SpawnLocation)
 	local hall = Instance.new("Model")
 	hall.Name = "CentralHall"
 	local hx, hz, h = HALL_HX, HALL_HZ, HALL_H
@@ -448,27 +450,33 @@ local function buildHall(folder: Folder): CFrame
 		brazier(monument, corner.X, corner.Y, 4)
 	end
 	LobbyStatue.build(monument, facing(0, 5.8, 0, SOUTH), 1.7) -- Otti faces the spawn (about 16 studs tall)
+	-- Keep the entire monument beside the approach, including its pedestal and braziers.
+	-- The spawn-to-arena centre line must stay walkable and visible.
+	monument:PivotTo(monument:GetPivot() + Vector3.new(-18, 0, 0))
 	monument.Parent = hall
 
-	-- Spawn just behind the statue: the arena gate lies straight ahead (north)
-	local spawnPosition = Vector3.new(0, FLOOR_Y + 0.5, 24)
-	local spawnCFrame = CFrame.lookAt(spawnPosition, spawnPosition + NORTH)
-	local spawn = Instance.new("SpawnLocation")
-	spawn.Name = "LobbySpawn"
-	spawn.Anchored = true
-	spawn.Size = Vector3.new(10, 1, 10)
-	spawn.CFrame = spawnCFrame
-	spawn.Color = SANDSTONE
-	spawn.Material = Enum.Material.Limestone
-	spawn.Neutral = true
-	spawn.Duration = 0
-	spawn.Parent = folder
-
+	-- Direct arrivals face the unobstructed central route; later spawns use the side of the hall.
+	local function makeSpawn(name: string, x: number, z: number): SpawnLocation
+		local spawn = Instance.new("SpawnLocation")
+		spawn.Name = name
+		spawn.Anchored = true
+		spawn.Size = Vector3.new(6, 1, 6)
+		spawn.CFrame = facing(x, 0.5, z, NORTH)
+		spawn.Color = SANDSTONE
+		spawn.Material = Enum.Material.Limestone
+		spawn.Neutral = true
+		spawn.Duration = 0
+		spawn.Parent = folder
+		return spawn
+	end
+	local arrivalSpawn = makeSpawn("LobbyArrivalSpawn", 0, 28)
+	local respawnSpawn = makeSpawn("LobbyRespawn", 18, 12)
+	local spawnCFrame = respawnSpawn.CFrame
 	-- Direction signs right at the spawn and big signs over every way out
-	signpost(hall, 7, 22, NORTH, { "▲ THE ARENA", "◄ MULTIPLAYER", "SINGLEPLAYER ►", "▼ ROMA · closed" })
+	signpost(hall, 7, 22, NORTH, { "▲ ZOMBIE SOLO · walk in", "◄ MULTIPLAYER", "SINGLEPLAYER ►", "▼ ROMA · closed" })
 	sign(hall, "ArenaSign", Vector3.new(20, 4.4, 0.5), facing(0, GATE_H + 2.6, -hz + 0.3, SOUTH), {
-		{ text = "THE ARENA", color = GOLD, scale = 0.55 },
-		{ text = "start your match on the pads · or hold F at the portcullis", color = WHITE, scale = 0.25 },
+		{ text = "ZOMBIE SOLO", color = GOLD, scale = 0.55 },
+		{ text = "walk straight ahead to enter the arena", color = WHITE, scale = 0.25 },
 	}, RED)
 	sign(hall, "MultiplayerSign", Vector3.new(20, 4.4, 0.5), facing(-hx + 0.3, WING_OPEN_H + 2.6, 0, EAST), {
 		{ text = "MULTIPLAYER", color = GOLD, scale = 0.55 },
@@ -489,8 +497,8 @@ local function buildHall(folder: Folder): CFrame
 	-- Colour-coded guide strips on the floor: blue to MULTIPLAYER, gold to SINGLEPLAYER
 	guide(hall, { Vector2.new(-6, 24), Vector2.new(-30, 24), Vector2.new(-30, 0), Vector2.new(-hx, 0) }, Color3.fromRGB(70, 110, 190))
 	guide(hall, { Vector2.new(6, 24), Vector2.new(30, 24), Vector2.new(30, 0), Vector2.new(hx, 0) }, GOLD)
-	guide(hall, { Vector2.new(0, 16), Vector2.new(0, 11) }, RED)
-	guide(hall, { Vector2.new(0, -11), Vector2.new(0, -hz) }, RED)
+	guide(hall, { Vector2.new(0, 24), Vector2.new(0, 0) }, RED)
+	guide(hall, { Vector2.new(0, 0), Vector2.new(0, -hz) }, RED)
 
 	-- Torches and banners on the walls
 	for _, x in { -32, -16, 16, 32 } do
@@ -512,7 +520,7 @@ local function buildHall(folder: Folder): CFrame
 		end
 	end
 	hall.Parent = folder
-	return spawnCFrame
+	return spawnCFrame, arrivalSpawn, respawnSpawn
 end
 
 ------------------------------------------------------------------------------------------
@@ -1097,13 +1105,23 @@ function LobbyService.build(): LobbyLayout
 	local folder = Instance.new("Folder")
 	folder.Name = Config.LobbyFolderName
 
-	local spawnCFrame = buildHall(folder)
+	local spawnCFrame, arrivalSpawn, respawnSpawn = buildHall(folder)
 	local romeGate = buildRomeGate(folder)
 	local corridor = buildCorridor(folder)
 	local tribunes = buildTribunes(folder)
 	local pads: { PadLayout } = {}
 	buildMultiplayer(folder, pads)
 	local training = buildSingleplayer(folder, pads)
+	-- The main arena entrance is the default Solo Zombies walk-on pad, not a mode picker.
+	-- No start pedestal in the middle of the approach; the gate prompt is the optional shortcut.
+	local entranceDef: PadDefinition = {
+		Id = "ArenaSoloEntrance", Wing = "Single", Kind = "Solo", Title = "ZOMBIE SOLO",
+		Subtitle = "Walk in · 6 rounds, then Otti", Enabled = true, Mode = "SOLO_ZOMBIES",
+		Actions = {}, Color = RED,
+	}
+	table.insert(pads, buildPad(folder, entranceDef,
+		facing(0, RAMP_RISE, -108, NORTH), Vector2.new(14, 6),
+		facing(0, RAMP_RISE + 12, -111.5, SOUTH), 1))
 	buildPassage(folder)
 	local armory = buildArmory(folder)
 	applyLighting()
@@ -1112,6 +1130,8 @@ function LobbyService.build(): LobbyLayout
 	return {
 		folder = folder,
 		spawnCFrame = spawnCFrame,
+		arrivalSpawn = arrivalSpawn,
+		respawnSpawn = respawnSpawn,
 		armory = armory,
 		pads = pads,
 		arenaGate = corridor.portcullis,
