@@ -80,7 +80,13 @@ local function start()
 	end
 	started = true
 	local ok: boolean
-	if def.Kind == "Zombies" then
+	if def.Id == "BOSS_SOLO" then
+		local players = {}
+		for _, entry in arrived do
+			table.insert(players, entry.player)
+		end
+		ok = MatchService.startBoss(players, record.boss or "Otti") -- the boss chosen in the Hub
+	elseif def.Kind == "Zombies" then
 		local players = {}
 		for _, entry in arrived do
 			table.insert(players, entry.player)

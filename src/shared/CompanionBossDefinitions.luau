@@ -37,6 +37,7 @@ export type Personality = {
 	RepeatPenalty: number, -- weight multiplier for repeating the last role (lower = avoids repeats)
 	RecklessBelow: number, -- boss health share below which the personality turns reckless (Kroko) or cautious (Schili)
 	PacingSeconds: { number }, -- {min, max} pause between sequences at full health
+	Health: number, -- health in a solo fight (one player); scaled by the encounter like Otti's table is later
 }
 
 local function role(def: RoleDefinition): RoleDefinition
@@ -61,6 +62,7 @@ local CompanionBossDefinitions = {
 		RepeatPenalty = 1.1, -- repeats his favourite moves happily
 		RecklessBelow = 0.35, -- below a third of his health he stops holding back
 		PacingSeconds = { 1.0, 2.0 },
+		Health = 900,
 		Roles = {
 			Strike = role({ Weight = 1.4, MinRange = 0, MaxRange = 6.5, Cooldown = 1.6, Telegraph = 0.45, Recovery = 0.7, Damage = 1.0 }),
 			Charge = role({ Weight = 1.2, MinRange = 6, MaxRange = 18, Cooldown = 4.0, Telegraph = 0.9, Recovery = 1.0, Damage = 1.2 }),
@@ -85,6 +87,7 @@ local CompanionBossDefinitions = {
 		RepeatPenalty = 0.4, -- avoids repeating a move, keeps changing its approach
 		RecklessBelow = 0.35, -- below a third of its health it turns cautious and retreats more
 		PacingSeconds = { 2.0, 3.5 },
+		Health = 1100,
 		Roles = {
 			Strike = role({ Weight = 0.9, MinRange = 0, MaxRange = 6.5, Cooldown = 2.0, Telegraph = 0.5, Recovery = 0.6, Damage = 0.9 }),
 			Charge = role({ Weight = 0.2, MinRange = 7, MaxRange = 14, Cooldown = 6.0, Telegraph = 0.9, Recovery = 1.0, Damage = 0.9 }),

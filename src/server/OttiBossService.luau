@@ -33,6 +33,8 @@ local OttiBossAI = require(script.Parent.OttiBossAI)
 local OttiEntranceService = require(script.Parent.OttiEntranceService)
 local OttiModel = require(script.Parent.OttiModel)
 local OttiSpectatorService = require(script.Parent.OttiSpectatorService)
+local CompanionModel = require(script.Parent.CompanionModel)
+local CompanionBossDefinitions = require(ReplicatedStorage.Shared.CompanionBossDefinitions)
 
 type Boss = OttiAnimationService.Boss
 type BossContext = OttiAnimationService.BossContext
@@ -46,6 +48,7 @@ export type Handlers = {
 }
 
 export type EncounterOptions = {
+	companion: string?, -- a companion boss (Kroko, Schili) instead of Otti; nil = Otti
 	playerCount: number, -- participants at the start (health scaling)
 	participants: () -> { Player }, -- everyone in the match (for "intro seen")
 	fighters: () -> { Player }, -- living arena fighters Otti may target
@@ -164,7 +167,28 @@ end
 
 -- The boss model: the spectator Otti from the imperial box is transformed into the boss (same
 -- model, never two Ottis). If he isn't there (e.g. a test), he is seated first.
-local function takeOverSpectator(): Boss
+-- A companion boss (Kroko or Schili) is built fresh in the arena: Otti stays in his imperial box.
+local function spawnCompanion(companion: string): Boss
+	local rig = CompanionModel.build(companion)
+	local folder = arenaFolder :: Instance
+	rig.model.Parent = folder
+	local centre = Arena.Layout.Center
+	local height = rig.humanoid.HipHeight + rig.root.Size.Y / 2
+	rig.model:PivotTo(CFrame.new(centre.X, Arena.Layout.FloorTop + height, centre.Z - 14))
+	CollectionService:AddTag(rig.model, Config.OttiTag) -- the client animates it with the same rig
+	rig.model:SetAttribute("OttiState", "BOSS")
+	local created = OttiAnimationService.new(rig)
+	created.companion = companion
+	created.stance = "Biped"
+	rig.model:SetAttribute("Stance", "Biped")
+	created.lastYaw = OttiAnimationService.getYaw(created)
+	return created
+end
+
+local function takeOverSpectator(companion: string?): Boss
+	if companion and CompanionModel.has(companion) then
+		return spawnCompanion(companion)
+	end
 	local rig = OttiSpectatorService.handOff()
 	if not rig then
 		OttiSpectatorService.begin()
@@ -198,7 +222,8 @@ local function runIntro(myToken: number): boolean
 	end
 
 	-- Otti rises in the imperial box and jumps into the arena (exactly once per encounter)
-	local current = takeOverSpectator()
+	local companion = if options then options.companion else nil
+	local current = takeOverSpectator(companion)
 	boss = current
 	local current_options = options
 	if current_options then
@@ -206,12 +231,15 @@ local function runIntro(myToken: number): boolean
 			player:SetAttribute(Config.IntroSeenAttribute, true) -- the camera part is skippable next time
 		end
 	end
-	local folder = arenaFolder :: Instance
-	local ok = OttiEntranceService.play(current, folder, function()
-		return token == myToken
-	end)
-	if not ok or token ~= myToken then
-		return false
+	-- Otti jumps into the arena from his box; a companion simply stands in the arena already
+	if not companion then
+		local folder = arenaFolder :: Instance
+		local ok = OttiEntranceService.play(current, folder, function()
+			return token == myToken
+		end)
+		if not ok or token ~= myToken then
+			return false
+		end
 	end
 	current.stance = "Biped"
 	current.humanoid.WalkSpeed = OttiBossConfig.WalkSpeedBiped
@@ -351,7 +379,8 @@ function OttiBossService.startEncounter(newOptions: EncounterOptions)
 		return
 	end
 	local count = math.clamp(newOptions.playerCount, 1, #OttiBossConfig.HealthByPlayers)
-	current.maxHealth = OttiBossConfig.HealthByPlayers[count]
+	local companionDef = if current.companion then CompanionBossDefinitions.get(current.companion) else nil
+	current.maxHealth = if companionDef then companionDef.Health * count else OttiBossConfig.HealthByPlayers[count]
 	current.health = current.maxHealth
 	current.phase = 1
 	current.fighting = true

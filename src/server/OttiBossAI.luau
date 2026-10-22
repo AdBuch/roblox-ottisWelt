@@ -20,6 +20,8 @@ local Arena = require(script.Parent.Arena)
 local BossAttackService = require(script.Parent.BossAttackService)
 local CombatUtil = require(script.Parent.CombatUtil)
 local OttiAnimationService = require(script.Parent.OttiAnimationService)
+local CompanionBossAI = require(script.Parent.CompanionBossAI)
+local CompanionBossDefinitions = require(ReplicatedStorage.Shared.CompanionBossDefinitions)
 
 type Boss = OttiAnimationService.Boss
 type BossContext = OttiAnimationService.BossContext
@@ -200,6 +202,69 @@ local function move(boss: Boss, ctx: BossContext, targetRoot: BasePart, distance
 end
 
 -- One AI step. Yields while an attack runs.
+-- Companion bosses: the personality AI picks a ROLE, the role runs a real, validated move (or a
+-- non-damaging stance / step). Otti's own choice (chooseMove) is not used for companions.
+local COMPANION_MOVES: { [string]: string } = { Strike = "GladiusSlash", Charge = "RiverDash", Sweep = "TailSweep", Roar = "BattleCry" }
+
+function OttiBossAI.companionDecide(boss: Boss, ctx: BossContext, target: Player, targetRoot: BasePart, distance: number, now: number)
+	local personality = CompanionBossDefinitions.get(boss.companion :: string)
+	if not personality then
+		return
+	end
+	local readyAt: { [string]: number } = {}
+	for name in personality.Roles do
+		readyAt[name] = boss.companionReadyAt[name] or 0
+	end
+	local near = 0
+	for _, fighter in ctx.fighters() do
+		local _, _, root = CombatUtil.getLivingCharacter(fighter)
+		if root and CombatUtil.flatDistance(boss.root.Position, root.Position) < 9 then
+			near += 1
+		end
+	end
+	local health = boss.health / math.max(1, boss.maxHealth)
+	local choice = CompanionBossAI.choose(personality, {
+		now = now,
+		distance = distance,
+		bossHealth = health,
+		lastRole = boss.companionLastRole :: any,
+		readyAt = readyAt :: any,
+		targetAttacking = false, -- the target's wind-up is not visible to the AI yet (integration step 2)
+		recentlyBlocked = false,
+		surrounded = near >= 3,
+	}, boss.rng)
+	local role: any = choice.role
+	if not role then
+		boss.nextDecisionAt = now + 0.4
+		return
+	end
+	boss.companionLastRole = role
+	boss.companionReadyAt[role] = CompanionBossAI.cooldownEnds(personality, role, now)
+	local def = personality.Roles[role :: any]
+	local moveId = COMPANION_MOVES[role :: string]
+	if moveId then
+		local move = OttiMoveDefinitions[moveId]
+		if move and not boss.busy then
+			BossAttackService.execute(boss, ctx, move, target)
+		end
+	elseif role == "Guard" then
+		OttiAnimationService.setGuard(boss, true)
+		task.delay(def.Recovery + 0.6, function()
+			if boss.companion and not boss.defeated then
+				OttiAnimationService.setGuard(boss, false)
+			end
+		end)
+	elseif role == "Feint" then
+		boss.lockedUntil = now + def.Telegraph -- a readable feint: a short pause, no damage
+	elseif role == "Retreat" then
+		local away = CombatUtil.flat(boss.root.Position - targetRoot.Position)
+		if away.Magnitude > 0.1 then
+			boss.humanoid:MoveTo(boss.root.Position + away.Unit * 8)
+		end
+	end
+	boss.nextDecisionAt = os.clock() + CompanionBossAI.pause(personality, health, boss.rng) + def.Recovery
+end
+
 function OttiBossAI.step(boss: Boss, ctx: BossContext, dt: number)
 	local now = os.clock()
 	if not motion[boss] then
@@ -216,6 +281,15 @@ function OttiBossAI.step(boss: Boss, ctx: BossContext, dt: number)
 	end
 	local distance = CombatUtil.flatDistance(boss.root.Position, targetRoot.Position)
 	local state = motion[boss]
+
+	-- Companion bosses (Kroko, Schili) decide with their own personality AI; movement stays shared
+	if boss.companion then
+		if now >= boss.nextDecisionAt and now >= state.studyUntil then
+			OttiBossAI.companionDecide(boss, ctx, target, targetRoot, distance, now)
+		end
+		move(boss, ctx, targetRoot, distance, now, dt)
+		return
+	end
 
 	if now >= boss.nextDecisionAt and now >= state.studyUntil then
 		local choice = chooseMove(boss, ctx, target, distance, now)

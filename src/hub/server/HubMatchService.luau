@@ -50,6 +50,7 @@ local limiter = RateLimiter.new({
 	Watch = 2,
 	WatchRandom = 2,
 	PlaySolo = 2,
+	StartBoss = 2,
 	StartCoop = 2,
 	Queue = 1.5,
 	LeaveQueue = 1,
@@ -66,7 +67,7 @@ local function inLobby(player: Player): boolean
 end
 
 -- Creates a zombie match for `players` and sends them. `party` (optional) is locked meanwhile.
-local function startZombies(mode: MatchTypes.MatchMode, players: { Player }, party: PartyService.Party?): (boolean, string)
+local function startZombies(mode: MatchTypes.MatchMode, players: { Player }, party: PartyService.Party?, boss: string?): (boolean, string)
 	local fighters: { MatchTypes.Fighter } = {}
 	local valid = {}
 	for _, player in players do
@@ -90,7 +91,7 @@ local function startZombies(mode: MatchTypes.MatchMode, players: { Player }, par
 	if party then
 		PartyService.setLocked(party, true)
 	end
-	local created = ArenaReservationService.create(mode, fighters, nil)
+	local created = ArenaReservationService.create(mode, fighters, nil, boss)
 	if not created then
 		for _, player in valid do
 			starting[player] = nil
@@ -164,6 +165,25 @@ function HubMatchService.startCoop(player: Player): (boolean, string)
 	return startZombies("COOP_ZOMBIES", members, party)
 end
 
+-- The companion or Otti boss fight (BOSS FIGHT menu): a solo run that goes straight to the boss.
+-- `bossId` is one of BOSS_CHOICES; anything else is refused.
+local BOSS_CHOICES = { "Otti", "Kroko", "Schili" }
+
+function HubMatchService.startBoss(player: Player, bossId: unknown): (boolean, string)
+	if typeof(bossId) ~= "string" or not table.find(BOSS_CHOICES, bossId) then
+		return false, "Choose Otti, Kroko or Schili"
+	end
+	if not inLobby(player) then
+		return false, "Finish what you are doing first"
+	end
+	if PartyService.get(player) then
+		if not PartyService.leave(player, true) then
+			return false, "Leave the queue first"
+		end
+	end
+	return startZombies("BOSS_SOLO", { player }, nil, bossId)
+end
+
 local function serverPlayers(viewer: Player): { { userId: number, name: string, inParty: boolean } }
 	local list = {}
 	for _, other in Players:GetPlayers() do
@@ -210,6 +230,10 @@ local handlers: { [string]: (player: Player, arg: unknown) -> Response } = {
 	end,
 	PlaySolo = function(player)
 		local ok, text = HubMatchService.playSolo(player)
+		return respond(ok, text)
+	end,
+	StartBoss = function(player, arg)
+		local ok, text = HubMatchService.startBoss(player, arg)
 		return respond(ok, text)
 	end,
 	StartCoop = function(player)

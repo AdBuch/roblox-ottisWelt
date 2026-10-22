@@ -45,7 +45,7 @@ end
 
 -- Creates the match for `fighters` (user ids with team and party). Returns nil on failure: the
 -- caller keeps the players in the Hub (queue entries are released for a new attempt).
-function ArenaReservationService.create(mode: MatchTypes.MatchMode, fighters: { Fighter }, policy: string?): Created?
+function ArenaReservationService.create(mode: MatchTypes.MatchMode, fighters: { Fighter }, policy: string?, boss: string?): Created?
 	local definition = MatchDefinitions.get(mode)
 	if not definition or #fighters < 1 or #fighters > definition.MaxFighters then
 		return nil
@@ -69,6 +69,7 @@ function ArenaReservationService.create(mode: MatchTypes.MatchMode, fighters: { 
 		policy = policy or ExperienceConfig.Spectating.DefaultPolicy,
 		createdAt = os.time(),
 		createdBy = game.JobId,
+		boss = boss,
 	}
 	if not MatchRecordService.saveMatch(record) then
 		return nil

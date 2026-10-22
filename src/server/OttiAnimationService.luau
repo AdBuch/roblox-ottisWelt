@@ -61,6 +61,9 @@ export type BossContext = {
 }
 
 export type Boss = {
+	companion: string?, -- companion boss id (Kroko, Schili) or nil for Otti
+	companionReadyAt: { [string]: number }, -- companion roles: when each is ready again
+	companionLastRole: string?,
 	rig: OttiModel.OttiRig,
 	model: Model,
 	humanoid: Humanoid,
@@ -117,6 +120,9 @@ local QUAD_SPEED_RUN = 18
 function OttiAnimationService.new(rig: OttiModel.OttiRig): Boss
 	local now = os.clock()
 	local boss: Boss = {
+		companion = nil,
+		companionReadyAt = {},
+		companionLastRole = nil,
 		rig = rig,
 		model = rig.model,
 		humanoid = rig.humanoid,

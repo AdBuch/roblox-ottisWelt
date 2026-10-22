@@ -241,6 +241,21 @@ function GameModeMenuController.start(gui: ScreenGui, edge: Frame, request: Remo
 				act("Queue", "COOP_ZOMBIES")
 			end)
 			order = partySection(order)
+		elseif currentTab == "BOSS" then
+			order += 1
+			note(body, "<b>BOSS FIGHT</b>  solo: you face one of Otti's companions alone. Choose your opponent.", order)
+			for _, entry in {
+				{ "Otti", "OTTI", "the Champion of the Colosseum" },
+				{ "Kroko", "KROKO", "the fearless protector · bold and reckless when hurt" },
+				{ "Schili", "SCHILI", "the calm strategist · patient, cunning, persistent" },
+			} do
+				order += 1
+				button(body, entry[2], RED, order).Activated:Connect(function()
+					act("StartBoss", entry[1])
+				end)
+				order += 1
+				note(body, entry[3], order)
+			end
 		elseif currentTab == "TEAMS" then
 			order += 1
 			note(body, "<b>TEAM BATTLES</b>  1v1 to 4v4, equal teams, your party stays together", order)
@@ -279,8 +294,8 @@ function GameModeMenuController.start(gui: ScreenGui, edge: Frame, request: Remo
 		end
 		render()
 	end
-	for i, entry in { { "ZOMBIES", "ZOMBIE BATTLES" }, { "TEAMS", "TEAM BATTLES" }, { "LIVE", "WATCH LIVE" } } do
-		local b = make("TextButton", { Size = UDim2.new(1 / 3, -3, 1, 0), BackgroundColor3 = DARK, Font = Enum.Font.GothamBold, TextSize = 11, TextWrapped = true, TextColor3 = Color3.new(1, 1, 1), Text = entry[2], LayoutOrder = i, ZIndex = 32 }, tabs)
+	for i, entry in { { "ZOMBIES", "ZOMBIE BATTLES" }, { "TEAMS", "TEAM BATTLES" }, { "BOSS", "BOSS FIGHT" }, { "LIVE", "WATCH LIVE" } } do
+		local b = make("TextButton", { Size = UDim2.new(1 / 4, -3, 1, 0), BackgroundColor3 = DARK, Font = Enum.Font.GothamBold, TextSize = 10, TextWrapped = true, TextColor3 = Color3.new(1, 1, 1), Text = entry[2], LayoutOrder = i, ZIndex = 32 }, tabs)
 		make("UICorner", { CornerRadius = UDim.new(0, 8) }, b)
 		tabButtons[entry[1]] = b
 		b.Activated:Connect(function()

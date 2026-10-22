@@ -65,6 +65,7 @@ type Match = {
 	ended: boolean,
 	rewarded: boolean, -- match rewards are paid at most once
 	bossRewarded: boolean,
+	boss: string?, -- BOSS_SOLO: the boss fought directly (Otti, Kroko or Schili); nil = zombie run
 }
 
 local MatchService = {}
@@ -315,6 +316,7 @@ local function startBossRound(current: Match)
 	ProjectileService.clear()
 	CombatEffects.clear() -- detached limbs, markers
 	OttiBossService.startEncounter({
+		companion = current.boss,
 		playerCount = math.max(1, #livingParticipants(current)),
 		participants = function()
 			return current.participants
@@ -352,7 +354,7 @@ local function newMatch(mode: ModeId, players: { Player }): Match
 end
 
 -- Starts the zombie run for the admitted fighters ("Solo" or "Coop").
-function MatchService.startZombies(mode: ModeId, players: { Player }): boolean
+function MatchService.startZombies(mode: ModeId, players: { Player }, bossId: string?): boolean
 	if match or finished then
 		return false
 	end
@@ -368,6 +370,7 @@ function MatchService.startZombies(mode: ModeId, players: { Player }): boolean
 	end
 
 	local current = newMatch(mode, valid)
+	current.boss = bossId
 	match = current
 	DamageEffectsService.newMatch() -- battle intensity resets
 	if arenaFolder then
@@ -403,6 +406,10 @@ function MatchService.startZombies(mode: ModeId, players: { Player }): boolean
 			setState(player, GameStates.MatchActive)
 		end
 		setMatchState(GameStates.MatchActive)
+		if current.boss then
+			startBossRound(current) -- a boss fight has no zombie rounds: straight to the boss
+			return
+		end
 		WaveService.startRun({
 			mode = mode,
 			maxActive = if mode == "Coop" then GameModeDefinitions.Coop.MaxActiveZombies else GameModeDefinitions.Solo.MaxActiveZombies,
@@ -808,6 +815,11 @@ function MatchService.init(folder: Instance, newHooks: Hooks)
 
 	setMatchState(GameStates.Lobby)
 	publishPlayers()
+end
+
+-- BOSS FIGHT (solo): the chosen boss ("Otti" | "Kroko" | "Schili") straight away, no zombie rounds.
+function MatchService.startBoss(players: { Player }, bossId: string): boolean
+	return MatchService.startZombies("Solo", players, bossId)
 end
 
 return MatchService

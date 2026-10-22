@@ -7,7 +7,7 @@
 
 local ExperienceConfig = require(script.Parent.ExperienceConfig)
 
-export type MatchMode = "SOLO_ZOMBIES" | "COOP_ZOMBIES" | "TIME_BATTLE" | "FIRST_TO" | "ELIMINATION"
+export type MatchMode = "SOLO_ZOMBIES" | "COOP_ZOMBIES" | "TIME_BATTLE" | "FIRST_TO" | "ELIMINATION" | "BOSS_SOLO"
 export type MatchKind = "Zombies" | "Team"
 export type Role = "FIGHTER" | "SPECTATOR" | "ELIMINATED_SPECTATOR"
 export type SpectatorPolicy = "PUBLIC" | "FRIENDS_ONLY" | "PARTY_ONLY" | "PRIVATE"
@@ -36,6 +36,7 @@ local list: { MatchDefinition } = {
 	def({ Id = "TIME_BATTLE", DisplayName = "TIME BATTLE", Kind = "Team", Legacy = "TeamBattle", MinFighters = 2, MaxFighters = math.min(8, capacity.MaxFighters), MaxSpectators = capacity.MaxSpectators, Queued = true, Filter = "Time Battle" }),
 	def({ Id = "FIRST_TO", DisplayName = "FIRST TO 20", Kind = "Team", Legacy = "TeamBattle", MinFighters = 2, MaxFighters = math.min(8, capacity.MaxFighters), MaxSpectators = capacity.MaxSpectators, Queued = true, Filter = "First to 20" }),
 	def({ Id = "ELIMINATION", DisplayName = "ELIMINATION", Kind = "Team", Legacy = "TeamBattle", MinFighters = 2, MaxFighters = math.min(8, capacity.MaxFighters), MaxSpectators = capacity.MaxSpectators, Queued = true, Filter = "Elimination" }),
+	def({ Id = "BOSS_SOLO", DisplayName = "BOSS FIGHT", Kind = "Zombies", Legacy = "Solo", MinFighters = 1, MaxFighters = 1, MaxSpectators = capacity.MaxSpectators, Queued = false, Filter = "Boss" }),
 }
 
 local byId: { [string]: MatchDefinition } = {}

@@ -55,6 +55,7 @@ export type MatchRecord = {
 	policy: string,
 	createdAt: number,
 	createdBy: string, -- Hub JobId
+	boss: string?, -- BOSS_SOLO: the companion boss chosen in the Hub (Otti | Kroko | Schili)
 }
 
 export type ConnectionRecord = {
