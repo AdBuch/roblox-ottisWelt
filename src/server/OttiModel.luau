@@ -176,12 +176,14 @@ function OttiModel.build(): OttiRig
 		-- Short rounded ears
 		local ear = add(head, "Ear", Vector3.new(0.55, 0.5, 0.32), Vector3.new(side * 0.9, 8.3, -0.05), FUR, smooth, nil, "Sphere")
 		add(ear, "InnerEar", Vector3.new(0.32, 0.28, 0.1), Vector3.new(side * 0.9, 8.3, -0.2), FUR_DARK, smooth, nil, "Sphere")
-		-- Whiskers
-		for k, dy in { 0.12, -0.02, -0.16 } do
-			local origin = Vector3.new(side * 0.55, 7.25 + dy, -1.25)
-			local yaw = side * math.rad(18 + k * 8)
-			local pitch = math.rad(dy * 40)
-			add(head, "Whisker", Vector3.new(0.04, 0.04, 1.35), origin + Vector3.new(side * 0.55, dy * 0.4, 0.2), WHISKER, smooth, CFrame.Angles(pitch, yaw, 0))
+		-- Whiskers: each starts on the muzzle surface and points outward and forward, so it is attached
+		-- to the face (the whisker's centre is half its length away from its root)
+		for _, dy in { 0.12, -0.02, -0.16 } do
+			local length = 1.35
+			local start = Vector3.new(side * 0.6, 7.25 + dy, -1.35)
+			local direction = Vector3.new(side, dy * 0.5, -0.35).Unit
+			local centre = start + direction * (length / 2)
+			add(head, "Whisker", Vector3.new(0.04, 0.04, length), centre, WHISKER, smooth, CFrame.lookAt(Vector3.zero, direction))
 		end
 	end
 
