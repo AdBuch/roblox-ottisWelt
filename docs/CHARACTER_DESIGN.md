@@ -57,7 +57,9 @@ Units: 1 stud ≈ 28 cm. A default Roblox avatar is about 5 studs tall.
 Materials in use: SmoothPlastic for skin, CorrodedMetal for bronze armor, Metal for studs and blades,
 Leather, Fabric, Wood, WoodPlanks (shield faces) and Neon (eyes).
 
-## 3. The base zombie body that all types share
+## 3. Shared zombie design
+
+The redesigned Legion Remnant uses the more athletic proportions, Scutum, segmented armor and equipment-only wear described in section 4.1. The legacy body/face details below describe the other five types.
 
 - **Proportions:** a big round head that is almost as wide as the torso, an egg-shaped torso,
   short thick arms ending in ball fists, and short legs. The style is chibi-like gladiators.
@@ -94,18 +96,14 @@ The approximate height is to the top of the head, not counting crests.
 
 ### 4.1 Legion Remnant: balanced fighter, the most common type
 
-- **Size:** scale 1.0, about 6.3 studs tall. Torso 2.6 × 2.4 × 1.7, head 2.0 × 1.9 × 1.8.
-- **Helmet: "Crested".** A rounded bronze dome with a dark bronze brow ridge, a nose guard, two
-  cheek guards, two hairline cracks and patina spots. A **red horsehair crest** runs front to back
-  on a bronze holder.
-- **Armor: "Harness".** One diagonal leather strap across the chest with a bronze disc (phalera).
-- **Shoulder:** a single bronze plate of two layers on the sword side (right), with a rivet and patina.
-- **Cloth:** a red scarf around the neck with one tail hanging down the front, and a red skirt.
-- **Weapon:** a gladius in the right hand with a leather grip, a bronze pommel and guard, and a
-  short steel blade.
-- **Shield:** a **round red wooden shield** (diameter 2.6) with a bronze rim and boss, two dark
-  plank lines and a patina spot.
-- **Personality:** disciplined. It blocks now and then. It is the "standard legionary".
+- **Proportions:** broad 2.6 x 2.4 x 1.7 torso, smaller 1.85 x 1.75 x 1.7 head, 2.3-stud arms and 2.5-stud legs: athletic and chunky, with a readable face.
+- **Rig:** connected upper/lower limbs with elbows and knees. Weapons, shield, bracers and greaves follow the lower segments.
+- **Helmet:** crested bronze, short nose guard and cheek plates; four harmless appearance variants change the helmet tilt, brow angle, patina tone and faded cloth/patches.
+- **Armor:** four overlapping segmented metal bands, brass fasteners, leather straps and layered shoulder plates on both sides.
+- **Weapon:** the existing gladius. **Shield:** a tall red Scutum made from three shallow curved panels with bronze rim, boss, grip and gold motifs.
+- **Face:** amber eyes, expressive brows and a goofy grin. No stitched scar. Condition wear appears on armor/greaves, not as cracks in skin; the existing hunch/limp and condition behavior remain.
+- **Variants:** generated on the server; an optional appearance seed makes previews reproducible. All have identical combat stats and complete connected bodies.
+- **Combat:** remains the disciplined standard fighter, 60 HP, 10 damage, speed 12, cooldown 1.4 s and 10 reward value. The redesign is shared by Arena enemies and the Hub archive display.
 
 ### 4.2 Rotten Velite: fast skirmisher
 
@@ -301,3 +299,9 @@ mapped one to one. Otherwise animation, damage states, dismemberment or hit dete
 - zombies: 2–4k triangles each with one shared texture atlas, since up to about 20 are on screen
 - Otti: 8–12k triangles
 - Keep it stylized with flat colours and a light hand-painted texture. Avoid realistic gore.
+
+## 7. Schili and Krokero: lobby team identities
+
+**Schili** is a younger adult tortoise: calm and observant, patient without being slow-witted, gently mischievous, and encouraging rather than solemn. He enjoys helping others discover an answer themselves. His upright long neck, smooth face, warm eyes and small smile should feel youthful and alert. Green shell, cream highlights, a terracotta tunic, bronze trim and a scroll place him in Otti's Roman fantasy world. His motto is "Patience, then surprise." Possible future dialogue: "Breathe. Watch. Now your turn." and "A little patience makes room for a good surprise." These are design notes; the implemented lobby currently communicates the character through the mosaic, team banner and motto.
+
+**Krokero** is a warm-hearted, confident crocodile: bold, cheerful and eager to act, with enough humor to laugh at his own mistakes. His long snout, broad grin, jade scales and sturdy terracotta equipment distinguish him from Schili. His motto is "A big grin and bigger courage." Their teams are friendly rivals, not moral opposites; both belong to Otti's world.

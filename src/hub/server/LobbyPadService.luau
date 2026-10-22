@@ -20,6 +20,7 @@ local Server = script.Parent.Parent
 local CombatUtil = require(Server.CombatUtil)
 local LobbyService = require(Server.LobbyService)
 local PartyService = require(script.Parent.PartyService)
+local PadTeamBattleService = require(script.Parent.PadTeamBattleService)
 
 type PadLayout = LobbyService.PadLayout
 
@@ -83,10 +84,10 @@ local function refreshBoard(pad: PadLayout)
 			for i, member in party.members do
 				table.insert(lines, (if i == 1 then "★ " else "") .. member.DisplayName)
 			end
-			table.insert(lines, if party.locked then "SEARCHING / STARTING…" else ("%d / %d · leader presses START"):format(#party.members, LobbyPadDefinitions.MaxGroup))
+			table.insert(lines, if party.locked then "STARTING…" elseif def.Team then (PadTeamBattleService.status(def.Id) or ("%d / %d · captain presses READY"):format(#party.members, LobbyPadDefinitions.MaxGroup)) else ("%d / %d · leader presses START"):format(#party.members, LobbyPadDefinitions.MaxGroup))
 			text = table.concat(lines, "\n")
 		else
-			text = "Step on the carpet to form a group"
+			text = if def.Team then "Stand on the mosaic to join this team" else "Stand on the mosaic to form a group"
 		end
 	else
 		local waiting = {}
@@ -111,6 +112,7 @@ end
 
 local function enter(player: Player, pad: PadLayout, handlers: Handlers)
 	local def = pad.def
+	if def.Team then PadTeamBattleService.invalidate() end
 	if not def.Enabled then
 		handlers.message(player, ("%s · COMING SOON"):format(def.Title), false)
 		return
@@ -128,6 +130,7 @@ end
 
 local function leave(player: Player, pad: PadLayout, handlers: Handlers)
 	local def = pad.def
+	if def.Team then PadTeamBattleService.invalidate() end
 	if def.Kind == "Solo" then
 		if countdowns[player] and countdowns[player].pad == pad then
 			countdowns[player] = nil
@@ -157,7 +160,7 @@ end
 
 local function addButton(pad: PadLayout, action: string, part: BasePart, handlers: Handlers)
 	local prompt = Instance.new("ProximityPrompt")
-	prompt.ActionText = if action == "StartCoop" or action == "StartNow" then "Start" else "Search / Stop"
+	prompt.ActionText = if action == "ConfirmTeam" then "Ready team" elseif action == "StartCoop" or action == "StartNow" then "Start" else "Search / Stop"
 	prompt.ObjectText = pad.def.Title
 	prompt.HoldDuration = 0.3
 	prompt.MaxActivationDistance = 12
@@ -179,6 +182,8 @@ local function addButton(pad: PadLayout, action: string, part: BasePart, handler
 		if action == "StartNow" then
 			startSolo(player, pad, handlers)
 			return
+		elseif action == "ConfirmTeam" then
+			ok, text = PadTeamBattleService.confirm(player, pad.def.Id)
 		elseif action == "StartCoop" then
 			ok, text = handlers.startCoop(player)
 		else
@@ -192,6 +197,7 @@ end
 
 function LobbyPadService.init(layouts: { PadLayout }, handlers: Handlers)
 	pads = layouts
+	PadTeamBattleService.init(layouts)
 	for _, pad in pads do
 		for _, button in pad.buttons do
 			addButton(pad, button.action, button.part, handlers)

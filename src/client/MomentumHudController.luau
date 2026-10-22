@@ -1,7 +1,7 @@
 --!strict
 -- The ARENA MOMENTUM bar: a narrow gold bar under the round line (group "Momentum"). It shows the
 -- server-owned "Momentum" player attribute (0-100). At 100 the next fully charged special (tier III)
--- becomes the weapon's ULTIMATE (and spends it). Display only: the server owns Momentum (MomentumService).
+-- becomes the weapon's ULTIMATE (and spends it). Other tiers cost 25 / 50 / 75. Display only: the server owns Momentum (MomentumService).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -25,7 +25,7 @@ local MomentumHudController = {}
 local GOLD = UiConfig.Gold
 local DIM = Color3.fromRGB(70, 56, 40)
 
-function MomentumHudController.start(group: (string, Vector2, UDim2, UDim2?) -> Frame, visibility: Visibility, onLayout: ((Layout) -> ()) -> (), player: Player): MomentumHud
+function MomentumHudController.start(group: (string, Vector2, UDim2, UDim2?) -> Frame, visibility: Visibility, onLayout: ((Layout) -> ()) -> (), player: Player, isTouch: () -> boolean): MomentumHud
 	local frame = group("Momentum", Vector2.new(0.5, 0), UDim2.new(0.5, 0, 0, 44), UDim2.fromOffset(200, 22))
 	frame.BackgroundTransparency = 1
 
@@ -65,7 +65,7 @@ function MomentumHudController.start(group: (string, Vector2, UDim2, UDim2?) -> 
 	label.Text = "MOMENTUM 0"
 	label.Parent = frame
 
-	visibility.register("Momentum", frame)
+	visibility.register("Momentum", frame, function() return not isTouch() end)
 	onLayout(function(layout: Layout)
 		frame.Size = UDim2.fromOffset(if layout.device == "Phone" then 150 else 200, 22)
 	end)

@@ -7,7 +7,7 @@
 --     "SpecialStart" / "SpecialRelease" (hold-to-charge special, SpecialChargeDefinitions: the held
 --     time is measured HERE), "Slide" (SlideService, no client sends it in Classic V2). The server
 --     rate-limits, checks the combat context (CombatRules), alive, spawn protection, knockdown, busy
---     time, cooldowns and Momentum (Ultimate only) and runs the move (SpecialMoveService).
+--     time, cooldowns and the Momentum cost of every tier and runs the move (SpecialMoveService).
 --   * ShieldBlock(boolean): the toggled block state the client wants; the server owns block/parry
 --     state, raise time and every reduction.
 --   * Combat state is split, not one state machine: DEFENSE (blocking) and SPECIAL CHARGE
@@ -661,11 +661,8 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 
 	-- Slide dodge: only the short window at the start of a slide (never the whole slide)
 	if not incoming.undodgeable then
-		local dodged, first = SlideService.tryDodge(victim)
+		local dodged = SlideService.tryDodge(victim)
 		if dodged then
-			if first and not incoming.training then
-				MomentumService.onDefense(victim, "SlideDodge")
-			end
 			Remotes.CombatFeedback:FireClient(victim, CombatConfig.Feedback.Dodge)
 			return 0, false, 1
 		end
@@ -740,9 +737,6 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 		if perfect then
 			state.counterReadyUntil = now + BlockDefinitions.CounterWindow
 			Remotes.CombatFeedback:FireClient(victim, CombatConfig.Feedback.PerfectBlock)
-			if not incoming.training then
-				MomentumService.onDefense(victim, "PerfectBlock")
-			end
 			-- The attacker recoils (players: a short forced pause; zombies: the returned stagger)
 			local attacker = incoming.attacker
 			local attackerState = attacker and states[attacker]
@@ -751,9 +745,6 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 				Remotes.CombatFeedback:FireClient(attacker, CombatConfig.Feedback.ComboFail, "PARRIED")
 			end
 		else
-			if not incoming.training then
-				MomentumService.onDefense(victim, "Block")
-			end
 			if heavy then
 				-- Heavy blow on the shield: pushed back a step, no slide / attack / re-raise for a moment
 				state.heavyReactUntil = now + BlockDefinitions.HeavyReactionSeconds
@@ -1024,7 +1015,7 @@ type RunKind = "Basic" | "Aerial" | "Slide" | "Counter" | "Special"
 
 type RunOptions = {
 	kind: RunKind,
-	slot: string, -- Momentum variety
+	slot: string, -- contextual attack slot
 	tier: number?, -- Specials: 1-3, 4 = Ultimate
 	damageMultiplier: number?, -- Specials: the charge tier's PvE multiplier
 	pvpScale: number?,
@@ -1076,7 +1067,6 @@ local function runMove(player: Player, state: PlayerState, context: CombatRules.
 	local basic = SpecialMoveDefinitions[weapon.Basic]
 	local myToken = state.actionToken
 	local shield = InventoryService.getActiveShield(player)
-	local momentumKind: "Basic" | "Aerial" | "Slide" | "Counter" | "Special" = options.kind
 	local landed = SpecialMoveService.execute(move, {
 		player = player,
 		context = context,
@@ -1105,15 +1095,7 @@ local function runMove(player: Player, state: PlayerState, context: CombatRules.
 		reject = function(reason: string)
 			reject(player, reason)
 		end,
-		onLanded = function(_target, dealt: number, blocked: boolean, killed: boolean)
-			-- Momentum only from server-validated contact (never from misses or invalid targets)
-			if dealt > 0 and not blocked then
-				MomentumService.onHit(player, options.slot, momentumKind)
-			end
-			if killed then
-				MomentumService.onKill(player)
-			end
-		end,
+
 	})
 	if isSpecial and landed then
 		-- Meaningful moments only: Otti reacts from the imperial box, as a boss he learns patterns,
@@ -1177,6 +1159,10 @@ local function startSpecial(player: Player, state: PlayerState)
 		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.SpecialCharge, "cancel", "NOT READY")
 		return
 	end
+	if MomentumService.get(player) < SpecialChargeDefinitions.Tiers[1].MomentumCost then
+		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.SpecialCharge, "cancel", "SPECIAL RECHARGING")
+		return
+	end
 	state.chargeStart = now
 	state.chargeToken += 1
 	local myToken = state.chargeToken
@@ -1208,25 +1194,23 @@ local function releaseSpecial(player: Player, state: PlayerState, context: Comba
 		character:SetAttribute("SpecialChargeStart", nil)
 	end
 	updateWalkSpeed(player)
-	local tierDef = SpecialChargeDefinitions.tierFor(if held <= SpecialChargeDefinitions.StartLatency then 0 else held)
-	local family = tierDef.Family
-	local tier = tierDef.Tier
-	-- A full charge with a full Momentum bar: the weapon's ULTIMATE
-	local ultimate = tier == #SpecialChargeDefinitions.Tiers and MomentumService.get(player) >= SpecialChargeDefinitions.UltimateMomentum
-	if ultimate then
-		family = "Ultimate"
+	local seconds = if held <= SpecialChargeDefinitions.StartLatency then 0 else held
+	local tierDef, ultimate, cost = SpecialChargeDefinitions.forRelease(seconds, MomentumService.get(player))
+	if not tierDef then
+		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.SpecialCharge, "cancel", "SPECIAL RECHARGING")
+		return
 	end
+	local tier = tierDef.Tier
+	local family = if ultimate then "Ultimate" else tierDef.Family
 	local move = SpecialMoveDefinitions[SpecialChargeDefinitions.specialFor(nil, weapon.Basic, family) or ""]
 	if not move then
 		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.SpecialCharge, "cancel", "NO SPECIAL")
 		return
 	end
-	if ultimate and not MomentumService.trySpend(player, SpecialChargeDefinitions.UltimateMomentum) then
-		ultimate = false -- spent elsewhere in between: fire the normal tier III
-		move = SpecialMoveDefinitions[SpecialChargeDefinitions.specialFor(nil, weapon.Basic, tierDef.Family) or ""]
-		if not move then
-			return
-		end
+	-- Charge only for a valid move; no yield between deduction and execution.
+	if not MomentumService.trySpend(player, cost) then
+		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.SpecialCharge, "cancel", "SPECIAL RECHARGING")
+		return
 	end
 	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.SpecialCharge, "fire", tier)
 	runMove(player, state, context, weapon, move, aim, {

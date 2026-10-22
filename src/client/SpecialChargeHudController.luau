@@ -5,10 +5,12 @@
 -- It also fills the touch SPECIAL button (MobileControlsController.setCharge). It belongs to the
 -- "Momentum" HUD group (shown in every fight and in training).
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
 local SpecialChargeDefinitions = require(Shared:WaitForChild("SpecialChargeDefinitions"))
 local UiConfig = require(Shared:WaitForChild("UiConfig"))
 
@@ -26,7 +28,7 @@ local SpecialChargeHudController = {}
 local COLORS = { Color3.fromRGB(255, 220, 120), Color3.fromRGB(255, 160, 60), Color3.fromRGB(255, 80, 60) }
 local DIM = Color3.fromRGB(60, 50, 40)
 
-function SpecialChargeHudController.start(group: (string, Vector2, UDim2, UDim2?) -> Frame, visibility: Visibility, onCharge: (seconds: number?) -> ()): ChargeHud
+function SpecialChargeHudController.start(group: (string, Vector2, UDim2, UDim2?) -> Frame, visibility: Visibility, onCharge: (seconds: number?) -> (), isTouch: () -> boolean): ChargeHud
 	local frame = group("SpecialCharge", Vector2.new(0.5, 1), UDim2.new(0.5, 0, 1, -64), UDim2.fromOffset(240, 34))
 	frame.Visible = false
 	local tiers = SpecialChargeDefinitions.Tiers
@@ -60,7 +62,7 @@ function SpecialChargeHudController.start(group: (string, Vector2, UDim2, UDim2?
 		label.Font = Enum.Font.GothamBlack
 		label.TextSize = 11
 		label.TextColor3 = UiConfig.Gold
-		label.Text = def.Name
+		label.Text = def.Name .. " · " .. def.MomentumCost
 		label.Parent = segment
 		table.insert(segments, segment)
 		table.insert(fills, fill)
@@ -79,19 +81,20 @@ function SpecialChargeHudController.start(group: (string, Vector2, UDim2, UDim2?
 	maxLabel.Parent = frame
 	local active = false
 	visibility.register("Momentum", frame, function()
-		return active
+		return active and not isTouch()
 	end)
 
 	local started = 0
 	local connection: RBXScriptConnection? = nil
 	local function render(seconds: number)
+		local momentum = tonumber(Players.LocalPlayer:GetAttribute(Config.MomentumAttribute)) or 0
 		for i, def in tiers do
 			local nextFrom = if tiers[i + 1] then tiers[i + 1].From else max
 			local share = math.clamp((seconds - def.From) / (nextFrom - def.From), 0, 1)
-			fills[i].Size = UDim2.fromScale(share, 1)
+			fills[i].Size = UDim2.fromScale(if momentum >= def.MomentumCost then share else 0, 1)
 			segments[i].BackgroundTransparency = if seconds >= def.From then 0.05 else 0.25
 		end
-		maxLabel.Visible = seconds >= max
+		maxLabel.Visible = seconds >= max and momentum >= SpecialChargeDefinitions.UltimateMomentum
 		onCharge(seconds)
 	end
 
@@ -99,7 +102,7 @@ function SpecialChargeHudController.start(group: (string, Vector2, UDim2, UDim2?
 	function api.start()
 		active = true
 		started = os.clock()
-		frame.Visible = true
+		frame.Visible = not isTouch()
 		render(0)
 		if connection then
 			connection:Disconnect()

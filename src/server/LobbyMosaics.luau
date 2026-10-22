@@ -4,7 +4,8 @@
 -- The panel keeps its original 15-cell width; added detail does not enlarge the lobby pads.
 -- Every tile is anchored, non-colliding, never queried or touched and casts no shadow.
 --   Otti    the otter champion's face, cream muzzle and whiskers inside a gold ring
---   Schili  a green turtle with a segmented shell, head, four feet and a small tail
+--   Schili  a young, thoughtful tortoise portrait with a long neck, kind eyes and a scroll
+--   Krokero a broad-snouted crocodile with a confident grin and terracotta armor
 -- Pattern legend: "." = no tile (the base slab shows through), other letters = Palette keys.
 
 local Mosaics = {}
@@ -21,7 +22,8 @@ local PALETTE: { [string]: Color3? } = {
 	S = Color3.fromRGB(240, 220, 170), -- muzzle / eye glints
 	K = Color3.fromRGB(37, 72, 56), -- turtle outline / shell seams
 	L = Color3.fromRGB(166, 190, 102), -- turtle skin / shell highlights
-	H = Color3.fromRGB(105, 151, 74), -- shell plates
+	H = Color3.fromRGB(105, 151, 74), -- shell / crocodile scales
+	R = Color3.fromRGB(150, 64, 44), -- terracotta tunic
 }
 
 local PATTERNS: { [string]: { string } } = {
@@ -59,32 +61,63 @@ local PATTERNS: { [string]: { string } } = {
 	Schili = {
 		".............................",
 		"...........GGGGGGG...........",
-		"........GGG...L...GGG........",
-		".......GG...SLLLS...GG.......",
-		".....GG....KELLLEK....GG.....",
-		"....GG.....KLLLLLK.....GG....",
-		"....G......KKKKKKK......G....",
-		"...G......KKTHHHTKK......G...",
-		"..GG.....KTHHHHHHHTK.....GG..",
-		"..G...K.KTHHHHHHHHHTK.K...G..",
-		"..G.KLLKTHHHLHHHLHHHTKLLK.G..",
-		".G..KLLKTHKHHHHHHHKHTKLLK..G.",
-		".G..KKKTHHHKKKKKKKHHHTKKK..G.",
-		".G....KTHHHKHHHHHKHHHTK....G.",
-		".G....KTHHLKHHHHHLHHHTK....G.",
-		".G....KTHHHKHHHHHKHHHTK....G.",
-		".G....KTHHHKHHHHHKHHHTK....G.",
-		".G....KTTHHKHHHHHKHHTTK....G.",
-		"..G...KTTHHKKKKKKKHHTTK...G..",
-		"..G....KTTKHLHHHLHKTTK....G..",
-		"..GG.KLKTTTHHHHHHHTTTKLK.GG..",
-		"...G.KLLKTTTTHHHTTTTKLLK.G...",
-		"....GKKKKKTTTTTTTTTKKKKKG....",
-		"....GG.K..KKTTTTTKK..K.GG....",
-		".....GG.....KKKKK.....GG.....",
-		".......GG.....T.....GG.......",
-		"........GGG...T...GGG........",
+		"........GGG.......GGG........",
+		".......GG...........GG.......",
+		".....GG...............GG.....",
+		"....GG......KKKKK......GG....",
+		"....G......KLLLLLK......G....",
+		"...G......KKKLLLKKK......G...",
+		"..GG.....KLSLLLLLSLK.....GG..",
+		"..G......KSESLLLSESK......G..",
+		"..G......KLSSSSSSSLK......G..",
+		".G.......KLSSKSKSSLK.......G.",
+		".G.......KSSSSSSSSSK.......G.",
+		".G........KKSSSSSKK........G.",
+		".G.........KKKKKKK.........G.",
+		".G.........RKKKKKR.........G.",
+		".G........RRKLLLKRR........G.",
+		".G........RRKLLLKRR........G.",
+		"..G......KRRKLLLKRRK......G..",
+		"..G....LKRRRKLLLKRRRKL....G..",
+		"..GG..LLLKRRRLLLRRRKLLL..GG..",
+		"...G.LLLLLRGRKLKRGRLLLLL.G...",
+		"....GGLLLHRRGGKGGRRHLLLKG....",
+		"....GGSSSKKRRRGRRRKKKLKGG....",
+		".....GSSSHHKHHRHHKHHTKKG.....",
+		".....G.KKTTHKHHHKHTTKK.......",
+		"........GKKKKKTKKKKKG........",
+		"...........GGGKGGG...........",
+		".............................",
+	},
+	Krokero = {
+		".............................",
 		"...........GGGGGGG...........",
+		"........GGG.......GGG........",
+		".......GG...........GG.......",
+		".....GG.........T...T.GG.....",
+		"....GG.........TTTKTTT.GG....",
+		"....G..........KTHHHTK..G....",
+		"...G..........KHKKKHHHKT.G...",
+		"..GG..........HHGEGHHKKKTGG..",
+		"..G..........KHHGEGHHGEG..G..",
+		"..G..........KHHGEGHHGEG..G..",
+		".G......KKKKHKKKKHHHHGEGK..G.",
+		".G...KHHHHHHHHHHHHHKHHHHK..G.",
+		".G.KHHHHHHHHHHHHHHHHHKHHK..G.",
+		".G.HKHHKHHHHLHHHHHHHHHHHK..G.",
+		".GKHHHLLLLLLLLLLLLLHHHKHK..G.",
+		".G.KLLLLLLLLLLLLLLLLKKHK...G.",
+		".G.KKKLSSSSSSSSSSSKKLKHK...G.",
+		"..G..SKKSKKKSKKKSKSSHHK...G..",
+		"..G....SSSSSSSSSSSHHHKK...G..",
+		"..GG.....KKKRRRKKKHKKK...GG..",
+		"...G....KRRRRRRRRKKKRRK..G...",
+		"....G..KRRRRRRRRRRRRRRRKG....",
+		"....GGKRGGGGGGGGGGGGGGGRK....",
+		".....GGKRRRRRRRRRRRRRRRK.....",
+		".......GKRRRRRRRRRRRRRK......",
+		"........GKKKRRRRRRRKKK.......",
+		"...........GKKKKKKK..........",
 		".............................",
 	},
 }

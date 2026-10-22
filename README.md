@@ -183,9 +183,9 @@ The same combat everywhere: PvE, PvP and boss fights. The PLAY menu and the HUD 
 |---|---|---|---|
 | Move (camera-relative, turns the character) | WASD | left stick | Roblox thumbstick (left) |
 | Camera | mouse | right stick | drag on free screen space |
-| **Attack** (tap again = combo chain) | Left click | R2 | ATTACK (largest button, left of JUMP) |
-| **Block** on / off (toggle) | Right click | L2 | BLOCK (lit ON while active) |
-| **Special** (hold to charge, release to fire) | hold **Q** | hold **X** | hold SPECIAL (above JUMP, fills while charging) |
+| **Attack** (tap again = combo chain) | Left click | R2 | ATTACK (right; same size as SPECIAL and BLOCK) |
+| **Block** on / off (toggle) | Right click | L2 | BLOCK (above; lit ON while active) |
+| **Special** (hold to charge, release to fire) | hold **Q** | hold **X** | hold SPECIAL (left; passive Momentum ring) |
 | Jump (allowed while blocking) | Space | A | Roblox's own jump button (no second one) |
 | Interact (shop, doors, pads) | **F** | D-pad up | tap the prompt |
 | HUD mode (Full / Minimal / Hidden) | **H** or eye button | eye button | eye button |
@@ -211,14 +211,14 @@ Damage, reach, hits, cooldowns, block results, charge time, rewards and progress
   Chains reset after 1.1 s.
 - **Special charge** (`SpecialChargeDefinitions`): the hold time is measured on the server; holding longer than 2.5 s
   adds nothing. While charging, walking slows to 75 %; with the block up as well, the stronger slow (block) applies.
-  Spam is stopped by one shared cooldown and the busy state. A three-phase bar and the SPECIAL button show the charge.
+  Spam is stopped by one shared cooldown and the busy state. On touch, SPECIAL shows passive energy and the selected affordable tier. Desktop/gamepad keep the charge bar.
 
   | Tier | Hold | Move (weapon family) | PvE damage | PvP damage | Cooldown |
   |---|---|---|---|---|---|
   | I | under 0.5 s | quick special (Right family) | × 1.0 | × 1.0 | 2.5 s |
   | II | 0.5–1.5 s | strengthened (Left family) | × 1.3 | × 1.1 | 4 s |
   | III | 1.5 s or more, full at 2.5 s | maximum (Down family) | × 1.7 | × 1.25 | 6 s |
-  | ULTIMATE | tier III with a full Momentum bar | the weapon's Ultimate | own | own | 8 s |
+  | ULTIMATE | full 2.5 s hold with 100 Momentum | the weapon's Ultimate | own | own | 8 s |
 
   `specialFor(characterId, weapon, family)` is the one place that picks the move, so Otti, Schili, Krokero and later
   characters can get their own specials without changing the combat code.
@@ -240,8 +240,7 @@ Damage, reach, hits, cooldowns, block results, charge time, rewards and progress
 - **Hit reactions:** knockback, a short stumble pose, and on heavy unblocked hits a brief loss of balance (55 % walk
   speed for 0.4 s, at most every 1.5 s). Control loss stays short.
 - **Effects:** sparks and dust only. **No blood and no loss of body parts** (Roblox family standards).
-- **Momentum (0-100):** varied attacks, aerial hits, blocks and perfect blocks fill it. A full bar turns the next tier III
-  special into the Ultimate.
+- **Momentum (0-100):** recharges at 5/s while alive in combat or training, with no idle decay. Attacks, kills, blocks and dodges do not affect it. Specials spend 25 / 50 / 75; Ultimate spends 100. Hold time chooses the tier, capped by affordable energy. Unused energy remains.
 - **Removed in V2:** the Wild mode, the gesture pad and Special gestures (`GesturePadController`, `GestureDefinitions`,
   `GestureValidationService`). Slide input is removed too, because mobile has four buttons and PvP must not favour a
   platform; `SlideService` stays on the server, unused.
@@ -288,25 +287,16 @@ centre of the screen stay free; everything is small, anchored to an edge and sca
   Results (summary banner).
 
 
-## The lobby: the gladiator dungeon under the Colosseum
+## The lobby: the gladiator gathering hall
 
-Details, coordinates and how to add a mode: [docs/LOBBY_LAYOUT.md](docs/LOBBY_LAYOUT.md). Seen from the spawn (looking
-north along the clear arena approach, with the **Otti statue** to the left):
-- **Front:** the **ARENA** gate. A corridor lined with zombie and gladiator cages (the **ZOMBIE ARCHIVE**) rises gently
-  to a portcullis; the sunlit arena is visible behind it. Walk into the entrance pad to start **Solo Zombies**, or hold F at the portcullis to start directly.
-- **Back:** the closed **GATE TO ROME** (later the way into the open Roman world).
-- **Left:** **MULTIPLAYER**: four large group rooms with walk-on carpet pads and floor mosaics (Otti / Schili).
-  Stepping on a carpet joins its group, the board lists the members, the leader (★) presses **START** or a queue
-  button. ZOMBIE CO-OP (START, FIND PLAYERS) and TEAM DEATHMATCH (TIME BATTLE, FIRST TO 20, ELIMINATION) are live;
-  BOSS FIGHT CO-OP and ARENA CO-OP are built and signed COMING SOON.
-- **Right:** **SINGLEPLAYER**: four pads right at the entrance. Stand on **ZOMBIE SURVIVAL** for 3 s (or press START
-  NOW) to start a solo run; BOSS FIGHT, ARENA FIGHT and CHAOS GAMES are COMING SOON. The **TRAINING** yard is behind.
-- **Sides:** stone stairs in the front corners up to the **TRIBUNES** doors (WATCH LIVE), the LIVE IN THE COLOSSEUM
-  board on the floor.
-- **Back-left:** a side passage with a forge to the **GLADIATOR ARMORY** (and a closed UPGRADES door for later).
-Colour-coded floor strips lead from the spawn: blue to multiplayer, gold to singleplayer, red to the arena. The PLAY
-menu (right edge) offers every action too. The lobby is a safe zone: no damage, no PvP, no blood. Attacks only hit the
-training dummies.
+Details and tests: [docs/LOBBY_LAYOUT.md](docs/LOBBY_LAYOUT.md).
+
+- **Straight ahead:** SOLO ZOMBIES. The initial spawn faces the clear path, with Otti's monument beside it. Walk into the gate pad to start; the gate prompt starts directly without choosing a mode.
+- **Left:** one shared TEAM BATTLE hall with two facing mosaics: **SCHILI (Blue)** and **KROKERO (Red)**. Stand on one to join that team. Both captains press READY; equal teams of 1-4 fight a timed battle on one reserved Arena server.
+- **Right:** one **OTTI CO-OP** mosaic, with START / FIND PLAYERS and training beyond it.
+- The duplicate solo and unused coming-soon carpets are removed. Existing additional team rule sets remain in the PLAY menu.
+- Mosaic panels use limestone and bronze, with warm torches and matching character banners. Schili is a youthful, thoughtful tortoise; Krokero is a confident crocodile with a big grin.
+- The archive cages, side stairs to WATCH LIVE, forge/armory and closed Gate to Rome remain. Respawns and Arena returns use their separate safe positions.
 
 ### GLADIATOR ARMORY
 
@@ -870,3 +860,12 @@ With Place IDs = 0 or in Studio nothing is teleported (and nothing pretends to b
 ### Lobby arrival and the default battle
 
 Direct Hub arrivals face the central path to Solo Zombies, with Otti's monument beside the route. Walk straight into the main arena entrance to start the existing solo countdown; leaving the pad cancels it. The gate prompt starts Solo Zombies directly without a choice menu. Respawns and Arena returns use a separate safe lobby position, while returning spectators appear near the live board. Other modes are still available through their wing pads and the PLAY menu.
+
+### Passive Momentum and balanced touch controls (22 October 2026)
+
+- Three equal 64-pixel combat buttons: SPECIAL left, ATTACK right, BLOCK centred above. Roblox's own jump button remains separate. Phone/tablet positions are in UiConfig.
+- Momentum regenerates at 5 points/second while alive in combat or training; it does not decay. Hits, kills, blocks and dodges do not affect it.
+- Tier costs are 25 / 50 / 75, Ultimate 100. Holding selects the tier; available Momentum caps it. A short release at 100 still spends only 25. Ultimate requires a full 2.5-second hold and 100 Momentum.
+- Mobile energy, availability and held selection are shown in SPECIAL. Separate Momentum/charge bars are hidden on touch. Desktop/gamepad use the same server rules.
+- Match/Elimination-round starts reset Momentum to zero. Noncombat lobby, spectators and dead players do not regenerate. Cancelled/interrupted charges spend nothing.
+- Regression checks: `scripts/test-passive-momentum.ps1 -LuauPath <path-to-luau.exe>` (standalone Luau runtime; Roblox services/clock mocked). Real phone/tablet layout, feel and published multiplayer remain Studio/device checks.

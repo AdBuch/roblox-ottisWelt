@@ -289,6 +289,9 @@ function PartyService.joinPadParty(player: Player, padId: string): (boolean, str
 		if current.pad == padId then
 			return true, ""
 		end
+		if padId == "TeamSchili" or padId == "TeamKrokero" then
+			return false, "Leave your current party first, then step onto your team's mosaic"
+		end
 		return false, "You are in a party already · its leader can start from this pad"
 	end
 	local queue = player:GetAttribute(Config.QueueStatusAttribute)

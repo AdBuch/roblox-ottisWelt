@@ -189,7 +189,7 @@ local aura = AuraDisplayController.start(hud.group, visibility, notify)
 local controls = MobileControlsController.start(hud.group, visibility, hud.onLayout, function()
 	return hud.layout.touch
 end)
-MomentumHudController.start(hud.group, visibility, hud.onLayout, player)
+MomentumHudController.start(hud.group, visibility, hud.onLayout, player, function() return hud.layout.touch end)
 
 local function controlHint(): string
 	if scheme == "Gamepad" then
@@ -226,7 +226,7 @@ local combatEffects = CombatEffectsController.start({
 })
 
 ------------------------------------------------------------------ input: Classic controls + charge display
-local chargeHud = SpecialChargeHudController.start(hud.group, visibility, controls.setCharge)
+local chargeHud = SpecialChargeHudController.start(hud.group, visibility, controls.setCharge, function() return hud.layout.touch end)
 local input: any = nil
 if combatAction and shieldBlock and shieldBlock:IsA("RemoteEvent") then
 	input = InputController.init({
@@ -595,7 +595,7 @@ task.spawn(function()
 		table.insert(lines, "Keyboard: WASD move · LMB attack (tap again = combo) · RMB block on / off · hold Q special, release to fire · Space jump")
 		table.insert(lines, "Gamepad: left stick · R2 attack · L2 block on / off · hold X special · A jump")
 		table.insert(lines, "Touch: thumbstick left · ATTACK · SPECIAL (hold) · BLOCK (on / off) · JUMP right · drag free screen space = camera")
-		table.insert(lines, "Special tiers: I (tap) · II (hold 0.5 s) · III (hold 1.5 s, full at 2.5 s) · full Momentum + III = ULTIMATE")
+		table.insert(lines, "Special tiers: I (tap) · II (hold 0.5 s) · III (hold 1.5 s, full at 2.5 s) · 25 / 50 / 75 Momentum · full hold + 100 = ULTIMATE")
 		table.insert(lines, "F interact · H HUD mode")
 		table.insert(lines, "")
 		table.insert(lines, ("<b>WEAPON</b>  %s"):format(weapon.DisplayName))
@@ -610,7 +610,7 @@ task.spawn(function()
 		local families = WeaponSpecialDefinitions.forPrefix(WeaponAttackDefinitions.prefixOf(weapon.Basic))
 		if families then
 			table.insert(lines, "")
-			table.insert(lines, "<b>SPECIALS</b>  Momentum 0-100: vary attacks, slide-dodge, perfect-block to build it")
+			table.insert(lines, "<b>SPECIALS</b>  Momentum 0-100: recharges over time; specials spend 25 / 50 / 75 / 100")
 			for _, family in { "Left", "Right", "Up", "Down", "Circle", "Ultimate" } do
 				local moveId = (families :: any)[family]
 				local move = moveId and (SpecialMoveDefinitions :: any)[moveId]

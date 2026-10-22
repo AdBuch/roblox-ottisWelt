@@ -112,7 +112,7 @@ startRound = function(ctx: Context)
 	ctx.timeLeft = roundClock
 	ctx.respawnAll() -- back at the team spawns (barriers closed, countdown state)
 	for player in ctx.teamOf do
-		MomentumService.reset(player, MomentumConfig.Start.EliminationRound) -- every round starts at 20
+		MomentumService.reset(player, MomentumConfig.Start.EliminationRound) -- every round starts with an empty passive energy pool
 	end
 	ctx.setActive(false)
 	ctx.publish()

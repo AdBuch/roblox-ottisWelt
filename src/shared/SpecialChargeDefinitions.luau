@@ -6,7 +6,7 @@
 --   Tier III  from 1.5 s              maximum special (full strength at 2.5 s; holding longer adds nothing)
 -- The charge stays until release unless it is interrupted (death, knockdown, a grab, or a heavy hit
 -- that was not blocked). Blocking is allowed while charging; firing lowers the shield.
--- A full charge with a full Momentum bar fires the weapon's ULTIMATE instead (spends the Momentum).
+-- Tiers cost 25 / 50 / 75 passive Momentum. A full charge with a full Momentum bar fires the weapon's ULTIMATE instead (spends the Momentum).
 --
 -- Personal specials later: specialFor(characterId, weapon, tier) is the one place that picks the
 -- move. Today every character uses the weapon's special families (WeaponSpecialDefinitions);
@@ -24,6 +24,7 @@ export type TierDefinition = {
 	PvPMultiplier: number, -- PvP (flatter)
 	Recovery: number, -- extra seconds of commitment after the move
 	Cooldown: number, -- seconds until the next special
+	MomentumCost: number, -- passive energy spent by this tier
 }
 
 local function tier(def: TierDefinition): TierDefinition
@@ -38,9 +39,9 @@ local SpecialChargeDefinitions = {
 	UltimateMomentum = 100,
 	UltimateCooldown = 8,
 	Tiers = table.freeze({
-		tier({ Tier = 1, From = 0, Name = "I", Family = "Right", DamageMultiplier = 1, PvPMultiplier = 1, Recovery = 0, Cooldown = 2.5 }),
-		tier({ Tier = 2, From = 0.5, Name = "II", Family = "Left", DamageMultiplier = 1.3, PvPMultiplier = 1.1, Recovery = 0.1, Cooldown = 4 }),
-		tier({ Tier = 3, From = 1.5, Name = "III", Family = "Down", DamageMultiplier = 1.7, PvPMultiplier = 1.25, Recovery = 0.2, Cooldown = 6 }),
+		tier({ Tier = 1, From = 0, Name = "I", Family = "Right", DamageMultiplier = 1, PvPMultiplier = 1, Recovery = 0, Cooldown = 2.5, MomentumCost = 25 }),
+		tier({ Tier = 2, From = 0.5, Name = "II", Family = "Left", DamageMultiplier = 1.3, PvPMultiplier = 1.1, Recovery = 0.1, Cooldown = 4, MomentumCost = 50 }),
+		tier({ Tier = 3, From = 1.5, Name = "III", Family = "Down", DamageMultiplier = 1.7, PvPMultiplier = 1.25, Recovery = 0.2, Cooldown = 6, MomentumCost = 75 }),
 	}) :: { TierDefinition },
 	-- Per-character overrides (family -> move id), e.g. Otti = { Down = "Otti_TailSlam" }. Empty for now.
 	Characters = table.freeze({}) :: { [string]: { [string]: string } },
@@ -59,6 +60,30 @@ function SpecialChargeDefinitions.tierFor(seconds: number): TierDefinition
 	return reached
 end
 
+-- Highest tier affordable from the passive energy pool.
+function SpecialChargeDefinitions.availableTier(momentum: number): TierDefinition?
+	local reached: TierDefinition? = nil
+	for _, def in SpecialChargeDefinitions.Tiers do
+		if momentum >= def.MomentumCost then
+			reached = def
+		end
+	end
+	return reached
+end
+
+-- Hold time selects a tier, available energy caps it. Never upgrade a short tap automatically.
+-- Full hold AND full energy are required for Ultimate; lower tiers spend only their own cost.
+function SpecialChargeDefinitions.forRelease(seconds: number, momentum: number): (TierDefinition?, boolean, number)
+	local reached: TierDefinition? = nil
+	for _, def in SpecialChargeDefinitions.Tiers do
+		if seconds >= def.From and momentum >= def.MomentumCost then
+			reached = def
+		end
+	end
+	local ultimate = reached ~= nil and seconds >= SpecialChargeDefinitions.MaxChargeSeconds
+		and momentum >= SpecialChargeDefinitions.UltimateMomentum
+	return reached, ultimate, if ultimate then SpecialChargeDefinitions.UltimateMomentum elseif reached then reached.MomentumCost else 0
+end
 -- The move for a released special. `family` is the tier's family or "Ultimate".
 -- Returns the move id (or nil when the weapon has no special for it).
 function SpecialChargeDefinitions.specialFor(characterId: string?, weaponBasic: string, family: string): string?

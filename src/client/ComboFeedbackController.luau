@@ -82,7 +82,7 @@ function ComboFeedbackController.start(group: (string, Vector2, UDim2, UDim2?) -
 		if layout.touch then
 			local positions = if layout.device == "Phone" then UiConfig.TouchLayoutPhone else UiConfig.TouchLayoutTablet
 			frame.AnchorPoint = Vector2.new(1, 1)
-			frame.Position = UDim2.new(1, -16, 1, -(positions.Attack.Y + 60))
+			frame.Position = UDim2.new(1, -16, 1, -(positions.Block.Y + 48))
 		else
 			frame.AnchorPoint = Vector2.new(0.5, 1)
 			frame.Position = UDim2.new(0.5, 0, 1, -34)
@@ -162,14 +162,14 @@ function ComboFeedbackController.start(group: (string, Vector2, UDim2, UDim2?) -
 			for _, def in SpecialChargeDefinitions.Tiers do
 				local moveId = SpecialChargeDefinitions.specialFor(nil, weapon.Basic, def.Family)
 				local move = moveId and (SpecialMoveDefinitions :: any)[moveId]
-				table.insert(lines, ("%s  from %.1f s  %s"):format(def.Name, def.From, if move then move.Name else "-"))
+				table.insert(lines, ("%s · %d Momentum · from %.1f s · %s"):format(def.Name, def.MomentumCost, def.From, if move then move.Name else "-"))
 			end
 			local ultimateId = SpecialChargeDefinitions.specialFor(nil, weapon.Basic, "Ultimate")
 			local ultimate = ultimateId and (SpecialMoveDefinitions :: any)[ultimateId]
 			if ultimate then
 				table.insert(lines, ("ULTIMATE  full charge with full Momentum: %s"):format(ultimate.Name))
 			end
-			table.insert(lines, ('<font color="#BBBBBB">MOMENTUM 0-%d: varied attacks and good blocks fill it.</font>'):format(MomentumConfig.Max))
+			table.insert(lines, ('<font color="#BBBBBB">MOMENTUM 0-%d: recharges over time; attacks and blocks do not change it.</font>'):format(MomentumConfig.Max))
 			table.insert(lines, '<font color="#BBBBBB">Practise on the dummies: no Aura here.</font>')
 			label.Text = table.concat(lines, "\n")
 		end,

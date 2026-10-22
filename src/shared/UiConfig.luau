@@ -53,17 +53,16 @@ local UiConfig = {
 	-- Touch controls (button centres measured from the bottom-right corner, base pixels). They sit
 	-- around Roblox's own jump button (= JUMP), never on it: on phones Roblox draws it 70 px at about
 	-- (60, 55) from the corner, on tablets 120 px at about (110, 150).
-	TouchButtonSize = 56,
-	TouchAttackSize = 66, -- ATTACK is the largest, most-used button
+	TouchButtonSize = 64,
 	TouchLayoutPhone = table.freeze({
-		Attack = Vector2.new(145, 60), -- left of JUMP
-		Special = Vector2.new(60, 160), -- above JUMP
-		Block = Vector2.new(150, 150), -- diagonal
+		Attack = Vector2.new(46, 145), -- right
+		Special = Vector2.new(174, 145), -- left
+		Block = Vector2.new(110, 235), -- centred above
 	}),
 	TouchLayoutTablet = table.freeze({
-		Attack = Vector2.new(245, 150),
-		Special = Vector2.new(110, 290),
-		Block = Vector2.new(250, 275),
+		Attack = Vector2.new(76, 270),
+		Special = Vector2.new(204, 270),
+		Block = Vector2.new(140, 360),
 	}),
 
 	-- Colors

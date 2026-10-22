@@ -4,8 +4,8 @@
 --   FRONT  the ARENA GATE: a main corridor lined with zombie and gladiator cages (the ZOMBIE ARCHIVE)
 --          rises gently to a portcullis; the sunlit arena is visible behind it (sealed, decor)
 --   BACK   the monumental GATE TO ROME (closed for now; later the way into the open Roman world)
---   LEFT   MULTIPLAYER: four large group rooms with walk-on carpet pads and floor mosaics
---   RIGHT  SINGLEPLAYER: four walk-on pads close to the hall, the TRAINING yard behind them
+--   LEFT   TEAM HALL: opposing Schili / Krokero mosaics; both captains confirm
+--   RIGHT  CO-OP: one Otti mosaic close to the hall, the TRAINING yard beyond
 --   SIDES  stone stairs in the front corners up to the TRIBUNES doors (WATCH LIVE)
 --   BACK-LEFT a side passage with a forge to the GLADIATOR ARMORY (weapons, shields, armor)
 -- Pads come from LobbyPadDefinitions (LobbyPadService runs them). Everything is anchored Parts
@@ -53,7 +53,7 @@ local FLAT_END, RAMP_END, LANDING_END = -88, -104, -112 -- z
 local RAMP_RISE = 6
 
 -- Wings
-local MULTI_X0, MULTI_X1, MULTI_HZ, MULTI_H = -42, -154, 34, 22
+local MULTI_X0, MULTI_X1, MULTI_HZ, MULTI_H = -42, -114, 34, 22
 local SINGLE_X0, SINGLE_X1, SINGLE_HZ, SINGLE_H = 42, 124, 28, 20
 
 -- Gladiator Armory: the original chamber (local x -178..-78, z -38..38, door in its east wall)
@@ -473,18 +473,18 @@ local function buildHall(folder: Folder): (CFrame, SpawnLocation, SpawnLocation)
 	local respawnSpawn = makeSpawn("LobbyRespawn", 18, 12)
 	local spawnCFrame = respawnSpawn.CFrame
 	-- Direction signs right at the spawn and big signs over every way out
-	signpost(hall, 7, 22, NORTH, { "▲ ZOMBIE SOLO · walk in", "◄ MULTIPLAYER", "SINGLEPLAYER ►", "▼ ROMA · closed" })
+	signpost(hall, 7, 22, NORTH, { "▲ ZOMBIE SOLO · walk in", "◄ TEAM BATTLE", "CO-OP & TRAINING ►", "▼ ROMA · closed" })
 	sign(hall, "ArenaSign", Vector3.new(20, 4.4, 0.5), facing(0, GATE_H + 2.6, -hz + 0.3, SOUTH), {
 		{ text = "ZOMBIE SOLO", color = GOLD, scale = 0.55 },
 		{ text = "walk straight ahead to enter the arena", color = WHITE, scale = 0.25 },
 	}, RED)
 	sign(hall, "MultiplayerSign", Vector3.new(20, 4.4, 0.5), facing(-hx + 0.3, WING_OPEN_H + 2.6, 0, EAST), {
-		{ text = "MULTIPLAYER", color = GOLD, scale = 0.55 },
-		{ text = "group rooms · Co-op · Team Deathmatch", color = WHITE, scale = 0.25 },
+		{ text = "TEAM BATTLE", color = GOLD, scale = 0.55 },
+		{ text = "Schili versus Krokero · choose your side", color = WHITE, scale = 0.25 },
 	}, RED)
 	sign(hall, "SingleplayerSign", Vector3.new(20, 4.4, 0.5), facing(hx - 0.3, WING_OPEN_H + 2.6, 0, WEST), {
-		{ text = "SINGLEPLAYER", color = GOLD, scale = 0.55 },
-		{ text = "walk on a pad to start · training behind", color = WHITE, scale = 0.25 },
+		{ text = "CO-OP & TRAINING", color = GOLD, scale = 0.55 },
+		{ text = "fight together · practise beyond", color = WHITE, scale = 0.25 },
 	}, RED)
 	archFrame(hall, 0, -hz, SOUTH, GATE_HX, GATE_H)
 	archFrame(hall, -hx, 0, EAST, WING_OPEN_HZ, WING_OPEN_H)
@@ -748,9 +748,9 @@ local function buildPad(parent: Instance, def: PadDefinition, center: CFrame, si
 	local model = Instance.new("Model")
 	model.Name = "Pad_" .. def.Id
 	local enabled = def.Enabled
-	local carpet = makePart("PadCarpet", Vector3.new(size.X, 0.16, size.Y), center * CFrame.new(0, 0.08, 0), if enabled then def.Color else Color3.fromRGB(80, 72, 66), Enum.Material.Fabric, model, DECOR)
+	local carpet = makePart("PadCarpet", Vector3.new(size.X, 0.16, size.Y), center * CFrame.new(0, 0.08, 0), if enabled then SANDSTONE else STONE_DARK, Enum.Material.Limestone, model, DECOR)
 	carpet.CastShadow = false
-	local ring = makePart("PadRing", Vector3.new(size.X + 1.2, 0.12, size.Y + 1.2), center * CFrame.new(0, 0.06, 0), if enabled then GOLD else SOON, Enum.Material.Neon, model, DECOR)
+	local ring = makePart("PadRing", Vector3.new(size.X + 1.2, 0.12, size.Y + 1.2), center * CFrame.new(0, 0.06, 0), if enabled then BRONZE else SOON, Enum.Material.Metal, model, DECOR)
 	ring.Transparency = if enabled then 0.35 else 0.75
 	if def.Emblem and LobbyMosaics.has(def.Emblem) then
 		LobbyMosaics.build(model, center * CFrame.new(0, 0.16, 0), def.Emblem, 0.9, Color3.fromRGB(196, 176, 140))
@@ -769,7 +769,7 @@ local function buildPad(parent: Instance, def: PadDefinition, center: CFrame, si
 			local offset = (i - (#actions + 1) / 2) * 6
 			local spot = center * CFrame.new(offset, 0, buttonsSide * (size.Y / 2 + 2))
 			local pedestal: BasePart = makePart("StartPedestal", Vector3.new(2.2, 3.4, 2.2), spot * CFrame.new(0, 1.7, 0), SANDSTONE, Enum.Material.Sandstone, model)
-			makePart("StartButton", Vector3.new(1.8, 0.4, 1.8), spot * CFrame.new(0, 3.6, 0), if action.Id == "StartCoop" or action.Id == "StartNow" then Color3.fromRGB(90, 200, 110) else Color3.fromRGB(120, 170, 255), Enum.Material.Neon, model, DECOR)
+			makePart("StartButton", Vector3.new(1.8, 0.4, 1.8), spot * CFrame.new(0, 3.6, 0), if action.Id == "StartCoop" or action.Id == "StartNow" then Color3.fromRGB(90, 200, 110) else Color3.fromRGB(120, 170, 255), Enum.Material.Metal, model, DECOR)
 			local billboard = Instance.new("BillboardGui")
 			billboard.Size = UDim2.fromOffset(130, 26)
 			billboard.StudsOffset = Vector3.new(0, 3.2, 0)
@@ -797,7 +797,7 @@ end
 
 local function buildMultiplayer(folder: Folder, pads: { PadLayout })
 	local wing = Instance.new("Model")
-	wing.Name = "MultiplayerWing"
+	wing.Name = "TeamHall"
 	local x0, x1, hz, h = MULTI_X0, MULTI_X1, MULTI_HZ, MULTI_H
 	box("Floor", wing, x0, x1 - 2, -2, 0, -hz - 2, hz + 2, FLOOR, Enum.Material.Cobblestone)
 	box("Aisle", wing, x0, x1, 0, 0.04, -5, 5, SAND, Enum.Material.Sand, DECOR)
@@ -806,51 +806,27 @@ local function buildMultiplayer(folder: Folder, pads: { PadLayout })
 	wallX(wing, x1 - 2, x0, hz + 1, h, {}, STONE)
 	wallZ(wing, -hz - 2, hz + 2, x1 - 1, h, {}, STONE)
 	zone(x0, x1, -hz, hz, h)
-	-- Room partitions between the near and the far rooms, columns along the aisle
 	local mid = (x0 + x1) / 2
-	for _, side in { -1, 1 } do
-		box("Partition", wing, mid - 1, mid + 1, 0, h, side * 7, side * hz, STONE, Enum.Material.Cobblestone)
-		for _, x in { x0 - 6, mid - 6, mid + 6, x1 + 6 } do
-			box("AisleColumn", wing, x - 1.5, x + 1.5, 0, h, side * 7 - 1.5, side * 7 + 1.5, SANDSTONE, Enum.Material.Sandstone)
-		end
-	end
 	ribs(wing, mid, -hz, hz, h)
-	lightShaft(wing, (x0 + mid) / 2, 0, h)
-	lightShaft(wing, (mid + x1) / 2, 0, h)
-	-- Four rooms: near-north, near-south, far-north, far-south (pads in definition order)
-	local rooms = {
-		{ x = (x0 + mid) / 2, side = -1 },
-		{ x = (x0 + mid) / 2, side = 1 },
-		{ x = (mid + x1) / 2, side = -1 },
-		{ x = (mid + x1) / 2, side = 1 },
-	}
-	local index = 0
+	lightShaft(wing, mid, 0, h)
+	-- One shared room, two opposite mosaics, an open aisle between them.
 	for _, def in LobbyPadDefinitions.Pads do
-		if def.Wing ~= "Multi" then
-			continue
-		end
-		index += 1
-		local room = rooms[index]
-		if not room then
-			break
-		end
-		local zc = room.side * 20.5
-		local face = if room.side < 0 then NORTH else SOUTH -- -Z of the pad toward its board wall
-		local center = facing(room.x, 0, zc, face)
-		local wallZPos = room.side * (hz - 0.2)
-		local board = facing(room.x, 11, wallZPos, -face)
+		if def.Wing ~= "Multi" then continue end
+		local side = if def.Team == "Blue" then -1 else 1
+		local face = if side < 0 then NORTH else SOUTH
+		local center = facing(mid, 0, side * 18, face)
+		local board = facing(mid, 11, side * (hz - 0.2), -face)
 		table.insert(pads, buildPad(wing, def, center, Vector2.new(24, 16), board, 1))
-		-- banners with the room's emblem on the outer wall, torches
-		for _, dx in { -14, 14 } do
-			banner(wing, facing(room.x + dx, 13, room.side * hz, -face), def.Color, (def.Emblem or "OTTI"):upper())
-			torch(wing, facing(room.x + dx * 1.45, 10, room.side * hz, -face))
+		for _, dx in { -16, 16 } do
+			banner(wing, facing(mid + dx, 13, side * hz, -face), def.Color, (def.Emblem or "OTTI"):upper())
+			torch(wing, facing(mid + dx, 9, side * hz, -face), 18)
 		end
 	end
 	wing.Parent = folder
 end
 
 ------------------------------------------------------------------------------------------
--- RIGHT: SINGLEPLAYER wing (four pads right at the entrance) and the TRAINING yard behind
+-- RIGHT: one Otti CO-OP mosaic near the entrance, TRAINING beyond
 ------------------------------------------------------------------------------------------
 
 type Training = { slots: { CFrame }, cframe: CFrame, size: Vector3 }
@@ -869,25 +845,10 @@ local function buildSingleplayer(folder: Folder, pads: { PadLayout }): Training
 		ribs(wing, x, -hz, hz, h)
 	end
 	lightShaft(wing, 72, 0, h)
-	-- Pads: near-north, near-south, far-north, far-south
-	local spots = { { x = 58, side = -1 }, { x = 58, side = 1 }, { x = 84, side = -1 }, { x = 84, side = 1 } }
-	local index = 0
 	for _, def in LobbyPadDefinitions.Pads do
-		if def.Wing ~= "Single" then
-			continue
-		end
-		index += 1
-		local spot = spots[index]
-		if not spot then
-			break
-		end
-		local face = if spot.side < 0 then NORTH else SOUTH
-		local center = facing(spot.x, 0, spot.side * 15, face)
-		local board = facing(spot.x, 9, spot.side * (hz - 0.2), -face)
-		table.insert(pads, buildPad(wing, def, center, Vector2.new(14, 11), board, 1))
-		torch(wing, facing(spot.x + 10, 9, spot.side * hz, -face))
+		if def.Wing ~= "Single" then continue end
+		table.insert(pads, buildPad(wing, def, facing(62, 0, 0, EAST), Vector2.new(24, 16), facing(80, 11, 0, WEST), 1))
 	end
-
 	-- TRAINING yard at the far end (straw dummies, the training board)
 	local yard = Instance.new("Model")
 	yard.Name = "TrainingYard"
@@ -898,7 +859,7 @@ local function buildSingleplayer(folder: Folder, pads: { PadLayout }): Training
 	end
 	sign(yard, "TrainingSign", Vector3.new(12, 3, 0.4), facing(x1 - 0.2, 12, 0, WEST), {
 		{ text = "TRAINING", color = GOLD, scale = 0.6 },
-		{ text = "test attacks, slides, blocks and specials", color = WHITE, scale = 0.3 },
+		{ text = "practise attacks, blocks and specials", color = WHITE, scale = 0.3 },
 	}, RED)
 	-- TRAINING board: the client writes the guide and the weapon's specials onto it
 	local board = makePart("ComboTrainingBoard", Vector3.new(9, 7, 0.4), facing(x1 - 0.2, 5, -10, WEST), Color3.fromRGB(60, 40, 26), Enum.Material.Wood, yard)

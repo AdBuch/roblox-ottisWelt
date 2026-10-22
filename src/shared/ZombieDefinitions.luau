@@ -14,10 +14,10 @@ export type ZombieBody = {
 
 export type ZombieGear = {
 	Helmet: "Crested" | "Damaged" | "Cap" | "OpenFace" | "Ornate" | "Wrap",
-	Shoulders: "Single" | "HeavyBoth" | "None",
+	Shoulders: "Single" | "HeavyBoth" | "Segmented" | "None",
 	Weapon: "Gladius" | "Club" | "Spear" | "LargeSword" | "Bow",
-	Shield: "Round" | "Buckler" | "Ornate" | "None",
-	Armor: "Harness" | "Straps" | "Vest" | "Light" | "Heavy",
+	Shield: "Round" | "Buckler" | "Ornate" | "Scutum" | "None",
+	Armor: "Harness" | "Straps" | "Vest" | "Light" | "Heavy" | "Segmentata",
 	ThickBelt: boolean,
 	Scarf: boolean,
 	Net: boolean, -- folded net in the left hand
@@ -98,17 +98,17 @@ local LegionRemnant: ZombieDefinition = {
 	Body = {
 		Scale = 1,
 		Torso = Vector3.new(2.6, 2.4, 1.7),
-		Head = Vector3.new(2.0, 1.9, 1.8),
-		Arm = Vector3.new(1.05, 2.2, 1.05),
-		Leg = Vector3.new(1.15, 2.3, 1.15),
+		Head = Vector3.new(1.85, 1.75, 1.7),
+		Arm = Vector3.new(1.0, 2.3, 1.0),
+		Leg = Vector3.new(1.1, 2.5, 1.1),
 		HipSpread = 0.62,
 	},
 	Gear = {
 		Helmet = "Crested",
-		Shoulders = "Single",
+		Shoulders = "Segmented",
 		Weapon = "Gladius",
-		Shield = "Round",
-		Armor = "Harness",
+		Shield = "Scutum",
+		Armor = "Segmentata",
 		ThickBelt = false,
 		Scarf = true,
 		Net = false,
