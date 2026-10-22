@@ -87,7 +87,7 @@ Configuration: `src/shared/LobbyPadDefinitions.luau`. Builder: `LobbyService.bui
 - **Look:** massive stone walls, vault ribs, columns, iron bars, wooden doors, cages, chains, torches, braziers,
   light shafts, sandy worn floors, SPQR banners and the bright arena behind the portcullis.
 - **Lighting:** warm and dim (`Lighting.Ambient` and related settings in `LobbyService.applyLighting`).
-- **Mosaics** merge same-colour tiles per row, so a mosaic costs about 50-70 parts.
+- **Mosaics** use fine 29 x 29 patterns with individual slate tesserae, visible grout and subtle stone-colour variation. Otti uses 463 parts and Schili 407 (including the two base slabs); the panel width stays 13.5 studs. All four group-pad mosaics total 1,740 anchored, non-colliding parts.
 - **Decoration** never collides, is never queried or touched, and small pieces cast no shadow.
 - **Lights:** about 70 in the whole lobby. Each torch has 1 PointLight and 1 Fire; braziers, cage lamps, light
   shafts and the arena sun add the rest. No shadow-casting lights, no physics constraints.
@@ -95,8 +95,7 @@ Configuration: `src/shared/LobbyPadDefinitions.luau`. Builder: `LobbyService.bui
 
 ## 5. Open points
 
-- **Schili mosaic:** the pattern in `LobbyMosaics` is a placeholder (a round shield with an "S"). It needs Schili's
-  final design.
+- **Schili mosaic:** a green turtle with a segmented shell, head, four feet and tail, inside a gold ring. Both Schili and Otti use a finer tessera grid.
 - **Missing modes:** BOSS FIGHT, ARENA FIGHT, CHAOS GAMES, BOSS FIGHT CO-OP and ARENA CO-OP have no match mode yet.
   Open PvP arenas and level-based matchmaking are still to be decided.
 - **Gate to Rome:** closed. It can later teleport to the open Roman world.
