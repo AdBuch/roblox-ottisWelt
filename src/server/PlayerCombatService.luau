@@ -22,7 +22,6 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
@@ -64,9 +63,8 @@ local BALANCE_LOSS_SECONDS = 0.4
 local BALANCE_LOSS_COOLDOWN = 1.5
 
 -- Poses relative to the hand's grip attachment (+Y forward when the arm hangs, +Z up the arm).
-local SHIELD_IDLE = CFrame.new(-0.45, 0.1, 0.7) * CFrame.Angles(0, 0, math.rad(90)) -- on the outer forearm
-local SHIELD_BLOCK = CFrame.new(0.9, 1.4, 1.6) -- raised in front of the chest
-local SHIELD_BASH = CFrame.new(0.9, 2.6, 1.6) -- pushed forward
+-- Fixed hand-local grip: the body joints raise and turn the shield, never its weld.
+local SHIELD_GRIP = CFrame.new(0, -0.22, 0)
 local OFFHAND_REST = CFrame.Angles(math.rad(30), 0, 0)
 local TEAM_RED = Color3.fromRGB(170, 30, 34)
 local TEAM_BLUE = Color3.fromRGB(36, 70, 170)
@@ -204,6 +202,14 @@ local function reject(player: Player, reason: string)
 	warn(PREFIX, ("Attack from %s rejected: %s"):format(player.Name, reason))
 end
 
+-- 0 when the guard just came up, 1 once BLOCK has been held for BlockDefinitions.BraceSeconds
+local function braceLevel(state: PlayerState, now: number): number
+	if not state.blocking then
+		return 0
+	end
+	return math.clamp((now - state.blockStart) / BlockDefinitions.BraceSeconds, 0, 1)
+end
+
 local function updateWalkSpeed(player: Player)
 	local _, humanoid = CombatUtil.getLivingCharacter(player)
 	if not humanoid then
@@ -215,6 +221,8 @@ local function updateWalkSpeed(player: Player)
 	if state.blocking and shield then
 		-- about 65 % with the guard up; light shields a little faster, heavy ones a little slower
 		factor = ShieldDefenseConfig.BlockWalkFactor * (0.5 + 0.5 * shield.BlockSpeedMultiplier)
+		-- the longer the brace, the slower the steps
+		factor *= 1 - braceLevel(state, os.clock()) * (1 - BlockDefinitions.BraceWalkFactor)
 	end
 	if state.chargeStart > 0 then
 		-- charging a special: the stronger of the two slow-downs applies (never multiplied)
@@ -313,7 +321,7 @@ function PlayerCombatService.refreshEquipment(player: Player)
 		sound.SoundId = CombatConfig.ShieldSoundId
 		sound.Volume = 0.6
 		sound.Parent = shieldCore
-		state.offhandWeld = attach(shieldModel, shieldCore, leftHand, leftGrip * (if state.blocking then SHIELD_BLOCK else SHIELD_IDLE), character)
+		state.offhandWeld = attach(shieldModel, shieldCore, leftHand, leftGrip * SHIELD_GRIP, character)
 		state.offhandModel = shieldModel
 		state.shieldId = shield.Id
 	else
@@ -347,94 +355,37 @@ function PlayerCombatService.applyTeamColor(player: Player)
 end
 
 ------------------------------------------------------------------------------------------
--- Procedural attack motions (weld C0 tweens replicate to everyone)
+-- Replicated presentation cues. Equipment welds stay fixed at their hand attachments.
 ------------------------------------------------------------------------------------------
 
-local function tweenWeld(weld: Weld?, goal: CFrame, seconds: number)
-	if weld and weld.Parent then
-		TweenService:Create(weld, TweenInfo.new(seconds, Enum.EasingStyle.Quad), { C0 = goal }):Play()
-	end
-end
-
--- Animation abstraction: the server publishes WHAT to play (character attributes AttackAnim,
--- AttackStart, AttackWind, AttackLength; PlayerAnimator on every client adds torso twist,
--- shoulders, steps and recovery on top of the walk animation) and moves the weapon/shield welds
--- (replicated). Authored Roblox animations can later replace both behind this one function.
+-- PlayerAnimator owns the complete body motion on every client. Never translate equipment
+-- away from its grip to fake a strike. Capture this attack's timestamp to retire old trail work.
 local function animate(player: Player, state: PlayerState, anim: Anim, windUp: number, duration: number, tier: number?)
 	local character = player.Character
+	local started = Workspace:GetServerTimeNow()
 	if character then
 		character:SetAttribute("AttackAnim", anim)
-		character:SetAttribute("AttackStart", Workspace:GetServerTimeNow())
+		character:SetAttribute("AttackStart", started)
 		character:SetAttribute("AttackWind", windUp)
 		character:SetAttribute("AttackLength", duration)
 		character:SetAttribute("AttackTier", tier or 0)
 	end
-	local weld = state.weaponWeld
-	if not weld or not weld.Parent or not state.weaponId then
-		return
-	end
-	local grip = state.weaponGrip
-	local rest = grip * EquipmentModels.weaponRestPose(state.weaponId)
-	local windPose, strikePose = rest, rest
-	-- The weapon travels the same path as the validated sweep (SpecialMoveService.sweepStrike)
-	if anim == "SlashRL" or anim == "SlideCut" then
-		windPose, strikePose = grip * CFrame.Angles(math.rad(120), 0, math.rad(-55)), grip * CFrame.Angles(math.rad(-20), 0, math.rad(70)) -- upper right -> lower left
-	elseif anim == "SlashLR" or anim == "Wide" or anim == "AirSpinR" then
-		windPose, strikePose = grip * CFrame.Angles(math.rad(85), 0, math.rad(80)), grip * CFrame.Angles(math.rad(80), 0, math.rad(-85)) -- left -> right at torso height
-	elseif anim == "AirSpinL" then
-		windPose, strikePose = grip * CFrame.Angles(math.rad(85), 0, math.rad(-80)), grip * CFrame.Angles(math.rad(80), 0, math.rad(85))
-	elseif anim == "RetreatCut" then
-		windPose, strikePose = grip * CFrame.Angles(math.rad(100), 0, math.rad(-40)), grip * CFrame.Angles(math.rad(10), 0, math.rad(45))
-	elseif anim == "ParryCounter" or anim == "SlideThrust" then
-		windPose, strikePose = rest * CFrame.new(0, -0.8, 0), rest * CFrame.Angles(math.rad(-10), 0, 0) * CFrame.new(0, 2.6, 0)
-	elseif anim == "Cross" or anim == "SlideCross" then
-		windPose, strikePose = grip * CFrame.Angles(math.rad(110), 0, math.rad(45)), grip * CFrame.Angles(math.rad(-15), 0, math.rad(-50))
-	elseif anim == "SlideRise" then
-		windPose, strikePose = grip * CFrame.Angles(math.rad(-40), 0, math.rad(20)), grip * CFrame.Angles(math.rad(150), 0, 0)
-	elseif anim == "SlideReaper" then
-		windPose, strikePose = grip * CFrame.Angles(math.rad(40), 0, math.rad(95)), grip * CFrame.Angles(math.rad(30), 0, math.rad(-100))
-	elseif anim == "Ultimate" then
-		windPose, strikePose = grip * CFrame.Angles(math.rad(175), 0, 0), grip * CFrame.Angles(math.rad(-60), 0, 0)
-	elseif anim == "Slash" or anim == "Flurry" then
-		windPose, strikePose = grip * CFrame.Angles(math.rad(105), 0, math.rad(25)), grip * CFrame.Angles(math.rad(-25), 0, math.rad(-35))
-	elseif anim == "Backhand" then
-		windPose, strikePose = grip * CFrame.Angles(math.rad(90), 0, math.rad(-80)), grip * CFrame.Angles(math.rad(60), 0, math.rad(90))
-	elseif anim == "Low" then
-		windPose, strikePose = grip * CFrame.Angles(math.rad(20), 0, math.rad(70)), grip * CFrame.Angles(math.rad(-10), 0, math.rad(-80))
-	elseif anim == "Overhead" or anim == "Dive" then
-		windPose, strikePose = grip * CFrame.Angles(math.rad(165), 0, 0), grip * CFrame.Angles(math.rad(-50), 0, 0)
-	elseif anim == "Rise" then
-		windPose, strikePose = grip * CFrame.Angles(math.rad(-30), 0, 0), grip * CFrame.Angles(math.rad(170), 0, 0)
-	elseif anim == "Thrust" then
-		windPose, strikePose = rest * CFrame.new(0, -1.1, 0), rest * CFrame.new(0, 2.4, 0)
-	elseif anim == "Spin" then
-		windPose, strikePose = grip * CFrame.Angles(math.rad(80), 0, math.rad(70)), grip * CFrame.Angles(math.rad(80), 0, math.rad(-150))
-	elseif anim == "Draw" then
-		windPose, strikePose = rest * CFrame.new(0, -0.6, 0), rest * CFrame.new(0, 0.25, 0)
-	elseif anim == "Guard" or anim == "Bash" then
-		tweenWeld(state.offhandWeld, state.offhandGrip * (if anim == "Bash" then SHIELD_BASH else SHIELD_BLOCK), math.max(0.05, windUp))
-		task.delay(math.max(0.2, duration * (if anim == "Guard" then 0.3 else 0.8)), function()
-			tweenWeld(state.offhandWeld, state.offhandGrip * (if state.blocking then SHIELD_BLOCK else SHIELD_IDLE), 0.15)
-		end)
-	end
 	local trail = state.trail
-	tweenWeld(weld, windPose, math.max(0.04, windUp * 0.9))
+	if trail then
+		trail.Enabled = false
+	end
+	local function current(): boolean
+		return player.Character == character and character ~= nil and character.Parent ~= nil
+			and character:GetAttribute("AttackStart") == started and state.trail == trail
+	end
 	task.delay(windUp, function()
-		if trail and anim ~= "Draw" and anim ~= "Guard" then
-			trail.Enabled = true -- weapon trail only while the blade travels
-		end
-		tweenWeld(weld, strikePose, 0.1)
-		if anim == "Flurry" and not state.shieldId then
-			tweenWeld(state.offhandWeld, state.offhandGrip * CFrame.Angles(math.rad(-20), 0, 0), 0.08)
+		if current() and trail and trail.Parent and anim ~= "Draw" and anim ~= "Guard" then
+			trail.Enabled = true
 		end
 	end)
 	task.delay(math.max(windUp + 0.15, duration * 0.85), function()
-		if trail then
+		if current() and trail and trail.Parent then
 			trail.Enabled = false
-		end
-		tweenWeld(weld, rest, 0.18) -- follow-through back to the guard
-		if not state.shieldId then
-			tweenWeld(state.offhandWeld, state.offhandGrip * OFFHAND_REST, 0.15)
 		end
 	end)
 end
@@ -442,6 +393,30 @@ end
 ------------------------------------------------------------------------------------------
 -- Blocking and parrying
 ------------------------------------------------------------------------------------------
+
+-- Moves the shield up, slows the walk and publishes BraceLevel while the guard is held
+local function applyBrace(player: Player, state: PlayerState)
+	local brace = braceLevel(state, os.clock())
+	local character = player.Character
+	if character then
+		character:SetAttribute("BraceLevel", brace)
+	end
+	updateWalkSpeed(player)
+end
+
+-- Keeps the brace growing for as long as this guard is up (ends with the guard or a new block)
+local function startBraceLoop(player: Player, token: number)
+	task.spawn(function()
+		while true do
+			local state = states[player]
+			if not state or not state.blocking or state.blockToken ~= token or not player.Parent then
+				break
+			end
+			applyBrace(player, state)
+			task.wait(BlockDefinitions.BraceTick)
+		end
+	end)
+end
 
 local function setBlocking(player: Player, active: boolean)
 	local state = getState(player)
@@ -452,10 +427,6 @@ local function setBlocking(player: Player, active: boolean)
 	state.blockToken += 1
 	state.blockStart = os.clock()
 	updateWalkSpeed(player)
-	local shield = InventoryService.getActiveShield(player)
-	if shield then
-		tweenWeld(state.offhandWeld, state.offhandGrip * (if active then SHIELD_BLOCK else SHIELD_IDLE), math.max(0.04, shield.RaiseSeconds))
-	end
 	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Block, active)
 	local character = player.Character
 	if character then
@@ -463,7 +434,12 @@ local function setBlocking(player: Player, active: boolean)
 		character:SetAttribute("Blocking", active)
 		if active then
 			character:SetAttribute("BlockPose", "Front")
+		else
+			character:SetAttribute("BraceLevel", 0)
 		end
+	end
+	if active and state.shieldId then
+		startBraceLoop(player, state.blockToken)
 	end
 	-- Toggle block: it stays up until BLOCK is pressed again, ATTACK, a fired special, a slide,
 	-- a guard break, a knockdown, a grab, death or a reset lowers it (no timeout)
@@ -501,10 +477,10 @@ local function onBlockRequest(player: Player, wantsBlock: unknown)
 		if now >= state.parryReadyAt then
 			state.parryUntil = now + CombatConfig.ParryWindowSeconds
 			state.parryReadyAt = now + CombatConfig.ParryCooldownSeconds
-			tweenWeld(state.offhandWeld, state.offhandGrip * CFrame.Angles(math.rad(70), 0, math.rad(40)), 0.05)
-			task.delay(CombatConfig.ParryWindowSeconds, function()
-				tweenWeld(state.offhandWeld, state.offhandGrip * OFFHAND_REST, 0.15)
-			end)
+			local character = player.Character
+			if character then
+				character:SetAttribute("ParryPoseAt", Workspace:GetServerTimeNow())
+			end
 			Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Parry)
 		end
 		refuseBlock(player) -- daggers parry; there is no held guard to show
@@ -686,6 +662,10 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 		local inRange = incoming.isProjectile or CombatUtil.flatDistance(root.Position, incoming.fromPosition) <= CombatConfig.ShieldBlockDistance
 		local active = raised and inRange
 		local base = if active then ShieldDefenseConfig.Active[zone] else ShieldDefenseConfig.Passive[zone]
+		if active and zone == "Front" then
+			-- a longer brace stops more of the blows that hit the shield head-on
+			base = (base or 0) + BlockDefinitions.BraceReductionBonus * braceLevel(state, now)
+		end
 		local quality = math.clamp(shield.Reduction / ShieldDefenseConfig.ReferenceReduction, ShieldDefenseConfig.QualityMin, ShieldDefenseConfig.QualityMax)
 		local projectileRatio = if incoming.isProjectile then shield.ProjectileReduction / math.max(0.01, shield.Reduction) else 1
 		local reduction = math.clamp((base or 0) * quality * projectileRatio, 0, ShieldDefenseConfig.MaxReduction) * (1 - incoming.blockPierce)
