@@ -44,6 +44,11 @@ commit is based on Claude's `5ed2393` brace commit and includes the Phase 1 file
 folder placeholder listed above.
 Unrelated imported local edits remain uncommitted. No merge or place publication is performed.
 
+The user subsequently authorized rebase, push and merge on 25 October 2026. The feature was
+rebased without conflicts onto `main` at `f048dc0`, retaining the brace feature because it was
+not yet present on remote `main`. The clean rebased checkout passed all 204 checks (68 animation,
+85 momentum, 51 team-pad) and both Rojo place builds before push and merge.
+
 ## Preserved behavior
 
 The active block remains a toggle and still slows walking, with the existing brace slowdown.
