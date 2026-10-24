@@ -66,6 +66,7 @@ local BALANCE_LOSS_COOLDOWN = 1.5
 -- Poses relative to the hand's grip attachment (+Y forward when the arm hangs, +Z up the arm).
 local SHIELD_IDLE = CFrame.new(-0.45, 0.1, 0.7) * CFrame.Angles(0, 0, math.rad(90)) -- on the outer forearm
 local SHIELD_BLOCK = CFrame.new(0.9, 1.4, 1.6) -- raised in front of the chest
+local SHIELD_BRACE = CFrame.new(0.3, 2.7, 0.5) * CFrame.Angles(math.rad(90), 0, 0) -- flat over the head (full brace)
 local SHIELD_BASH = CFrame.new(0.9, 2.6, 1.6) -- pushed forward
 local OFFHAND_REST = CFrame.Angles(math.rad(30), 0, 0)
 local TEAM_RED = Color3.fromRGB(170, 30, 34)
@@ -204,6 +205,14 @@ local function reject(player: Player, reason: string)
 	warn(PREFIX, ("Attack from %s rejected: %s"):format(player.Name, reason))
 end
 
+-- 0 when the guard just came up, 1 once BLOCK has been held for BlockDefinitions.BraceSeconds
+local function braceLevel(state: PlayerState, now: number): number
+	if not state.blocking then
+		return 0
+	end
+	return math.clamp((now - state.blockStart) / BlockDefinitions.BraceSeconds, 0, 1)
+end
+
 local function updateWalkSpeed(player: Player)
 	local _, humanoid = CombatUtil.getLivingCharacter(player)
 	if not humanoid then
@@ -215,6 +224,8 @@ local function updateWalkSpeed(player: Player)
 	if state.blocking and shield then
 		-- about 65 % with the guard up; light shields a little faster, heavy ones a little slower
 		factor = ShieldDefenseConfig.BlockWalkFactor * (0.5 + 0.5 * shield.BlockSpeedMultiplier)
+		-- the longer the brace, the slower the steps
+		factor *= 1 - braceLevel(state, os.clock()) * (1 - BlockDefinitions.BraceWalkFactor)
 	end
 	if state.chargeStart > 0 then
 		-- charging a special: the stronger of the two slow-downs applies (never multiplied)
@@ -443,6 +454,33 @@ end
 -- Blocking and parrying
 ------------------------------------------------------------------------------------------
 
+-- Moves the shield up, slows the walk and publishes BraceLevel while the guard is held
+local function applyBrace(player: Player, state: PlayerState)
+	local brace = braceLevel(state, os.clock())
+	local character = player.Character
+	if character then
+		character:SetAttribute("BraceLevel", brace)
+	end
+	updateWalkSpeed(player)
+	if state.shieldId then
+		tweenWeld(state.offhandWeld, state.offhandGrip * SHIELD_BLOCK:Lerp(SHIELD_BRACE, brace), BlockDefinitions.BraceTick)
+	end
+end
+
+-- Keeps the brace growing for as long as this guard is up (ends with the guard or a new block)
+local function startBraceLoop(player: Player, token: number)
+	task.spawn(function()
+		while true do
+			local state = states[player]
+			if not state or not state.blocking or state.blockToken ~= token or not player.Parent then
+				break
+			end
+			applyBrace(player, state)
+			task.wait(BlockDefinitions.BraceTick)
+		end
+	end)
+end
+
 local function setBlocking(player: Player, active: boolean)
 	local state = getState(player)
 	if state.blocking == active then
@@ -463,7 +501,12 @@ local function setBlocking(player: Player, active: boolean)
 		character:SetAttribute("Blocking", active)
 		if active then
 			character:SetAttribute("BlockPose", "Front")
+		else
+			character:SetAttribute("BraceLevel", 0)
 		end
+	end
+	if active and state.shieldId then
+		startBraceLoop(player, state.blockToken)
 	end
 	-- Toggle block: it stays up until BLOCK is pressed again, ATTACK, a fired special, a slide,
 	-- a guard break, a knockdown, a grab, death or a reset lowers it (no timeout)
@@ -686,6 +729,10 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 		local inRange = incoming.isProjectile or CombatUtil.flatDistance(root.Position, incoming.fromPosition) <= CombatConfig.ShieldBlockDistance
 		local active = raised and inRange
 		local base = if active then ShieldDefenseConfig.Active[zone] else ShieldDefenseConfig.Passive[zone]
+		if active and zone == "Front" then
+			-- a longer brace stops more of the blows that hit the shield head-on
+			base = (base or 0) + BlockDefinitions.BraceReductionBonus * braceLevel(state, now)
+		end
 		local quality = math.clamp(shield.Reduction / ShieldDefenseConfig.ReferenceReduction, ShieldDefenseConfig.QualityMin, ShieldDefenseConfig.QualityMax)
 		local projectileRatio = if incoming.isProjectile then shield.ProjectileReduction / math.max(0.01, shield.Reduction) else 1
 		local reduction = math.clamp((base or 0) * quality * projectileRatio, 0, ShieldDefenseConfig.MaxReduction) * (1 - incoming.blockPierce)

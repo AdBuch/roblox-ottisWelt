@@ -1,7 +1,7 @@
 --!strict
 -- Procedural body motion for every R15 player character (display only). The server publishes WHAT
 -- is played (character attributes): attacks (AttackAnim, AttackStart, AttackWind, AttackLength),
--- blocks (Blocking, BlockPose, BlockImpactAt, BlockImpactHeavy, BlockPerfect), slides (SlideStart,
+-- blocks (Blocking, BlockPose, BraceLevel, BlockImpactAt, BlockImpactHeavy, BlockPerfect), slides (SlideStart,
 -- SlideLength) and hit reactions (HitReactAt, HitReactScale, HitReactSide). This layers all of them
 -- ON TOP of the normal walk animation (Motor6D.Transform after the Animator ran). All layers are
 -- summed per frame and written once per joint, so they never overwrite each other.
@@ -62,6 +62,9 @@ local BLOCK: { [string]: Pose } = {
 	High = pose(Vector3.new(-4, 0, 0), nil, Vector3.new(120, 0, 0), nil, Vector3.new(-6, 0, 0), 0),
 	Low = pose(Vector3.new(12, 0, 0), nil, Vector3.new(28, 0, 0), nil, Vector3.new(12, 0, 0), 0.4),
 }
+-- Full brace (BraceLevel 1, server-driven while BLOCK is held): the shield arm lifts the shield flat
+-- over the head and the knees bend into a crouch. It replaces the block pose as it grows.
+local BRACE: Pose = pose(Vector3.new(-10, 0, 0), nil, Vector3.new(165, 0, 6), Vector3.new(30, 0, 0), Vector3.new(30, 0, 0), 0.9)
 local BLOCK_RISE = 8 -- 1 / seconds to fully raise the block
 local IMPACT_SECONDS = 0.3
 local IMPACT: Pose = pose(Vector3.new(-9, 0, 0), Vector3.new(0, 0, -8))
@@ -182,8 +185,13 @@ function PlayerAnimator.start()
 			end
 			local target = if blocking then 1 else 0
 			state.alpha += math.clamp(target - state.alpha, -dt * BLOCK_RISE, dt * BLOCK_RISE)
-			if state.alpha > 0.001 then
-				total = add(total, scaled(BLOCK[state.pose] or BLOCK.Front, ease(state.alpha)))
+			local brace = ease(math.clamp(tonumber(character:GetAttribute("BraceLevel")) or 0, 0, 1))
+			if state.alpha > 0.001 and brace < 1 then
+				total = add(total, scaled(BLOCK[state.pose] or BLOCK.Front, ease(state.alpha) * (1 - brace)))
+				active = true
+			end
+			if brace > 0.001 then
+				total = add(total, scaled(BRACE, brace))
 				active = true
 			end
 			local impactAt = tonumber(character:GetAttribute("BlockImpactAt")) or 0
