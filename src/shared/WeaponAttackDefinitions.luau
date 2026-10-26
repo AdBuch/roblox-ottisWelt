@@ -34,7 +34,9 @@ local function attacks(a: WeaponAttacks): WeaponAttacks
 	return table.freeze(a) :: any
 end
 
-local SWORD = { "SlashRL", "SlashLR", "Thrust", "Overhead" } :: { Slot }
+-- Default sword chain: thrust forward, cut from the upper left, cut from the upper right, then
+-- straight down through the middle (PlayerAnimator draws each with the sword hand).
+local SWORD = { "Thrust", "SlashLR", "SlashRL", "Overhead" } :: { Slot }
 
 local byPrefix: { [string]: WeaponAttacks } = {
 	Gladius = attacks({ Prefix = "Gladius", Chain = SWORD, Left = "SlashRL", Right = "SlashLR", Up = "Thrust", Down = "Overhead", Circle = "Spin", Back = "Retreat", Wide = "Wide" }),

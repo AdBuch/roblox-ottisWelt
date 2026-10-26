@@ -73,6 +73,11 @@ local UiConfig = {
 	HealthLow = Color3.fromRGB(230, 60, 50),
 	Red = Color3.fromRGB(255, 110, 110),
 	Blue = Color3.fromRGB(120, 170, 255),
+	-- Special charge phases I · II · III and the ULTIMATE (touch button, charge bar)
+	SpecialPhaseColors = table.freeze({ Color3.fromRGB(255, 220, 90), Color3.fromRGB(255, 140, 40), Color3.fromRGB(235, 55, 50) }),
+	UltimateColor = Color3.fromRGB(190, 95, 255),
+	-- Block stages I · II · III (touch button ring)
+	BlockStageColors = table.freeze({ Color3.fromRGB(120, 170, 235), Color3.fromRGB(70, 215, 200), Color3.fromRGB(255, 205, 70) }),
 }
 
 return table.freeze(UiConfig)

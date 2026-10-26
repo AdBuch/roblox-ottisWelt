@@ -41,16 +41,27 @@ for part, name in {
 	UpperTorso = "Waist", LowerTorso = "Root", RightUpperArm = "RightShoulder",
 	LeftUpperArm = "LeftShoulder", RightUpperLeg = "RightHip", LeftUpperLeg = "LeftHip",
 	RightLowerArm = "RightElbow", LeftLowerArm = "LeftElbow", RightLowerLeg = "RightKnee", LeftLowerLeg = "LeftKnee",
+	RightHand = "RightWrist", LeftHand = "LeftWrist",
 } do
-	local motor = { Transform = CFrame.identity, IsA = function(_, kind) return kind == "Motor6D" end }
+	local motor = { Name = name, Enabled = true, Transform = CFrame.identity, IsA = function(_, kind) return kind == "Motor6D" end }
 	motors[name] = motor
-	parts[part] = { FindFirstChild = function(_, key) return if key == name then motor else nil end }
+	parts[part] = {
+		FindFirstChild = function(_, key) return if key == name then motor else nil end,
+		GetChildren = function() return { motor } end,
+	}
 end
 local character = {
 	Parent = true,
 	GetAttribute = function(_, key) return attrs[key] end,
 	SetAttribute = function(_, key, value) attrs[key] = value end,
 	FindFirstChild = function(_, key) return parts[key] end,
+	GetDescendants = function()
+		local list = {}
+		for part, holder in parts do
+			for _, child in holder.GetChildren() do table.insert(list, child) end
+		end
+		return list
+	end,
 }
 local player = { Character = character }
 local services = {
@@ -168,6 +179,58 @@ player.Character = character
 attrs.Blocking = true
 frame(1/60)
 check(true, "Missing character and optional joint tolerated")
+parts.LeftLowerArm = { FindFirstChild = function(_, key) return if key == "LeftElbow" then motors.LeftElbow else nil end, GetChildren = function() return { motors.LeftElbow } end }
+reset()
+
+-- Default sword chain: every swing is carried by the hand (wrist + elbow), with a follow-through
+local function peak(name, at)
+	reset()
+	attack(name)
+	advance(at)
+	return { rs = motors.RightShoulder.Transform, re = motors.RightElbow.Transform, rw = motors.RightWrist.Transform, waist = motors.Waist.Transform }
+end
+for _, name in { "Thrust", "SlashLR", "SlashRL", "Overhead" } do
+	local windup = peak(name, 0.09)
+	local strike = peak(name, 0.3)
+	check(math.abs(strike.rw[4]) > math.rad(40), "Wrist lines the blade up: " .. name)
+	check(math.abs(windup.re[4] - strike.re[4]) > math.rad(30), "Elbow travels through the swing: " .. name)
+	check(math.abs(windup.rs[4] - strike.rs[4]) > math.rad(60) or math.abs(windup.rs[6] - strike.rs[6]) > math.rad(40), "Big shoulder travel: " .. name)
+end
+local left, right = peak("SlashLR", 0.09), peak("SlashRL", 0.09)
+check(left.rs[6] < 0 and right.rs[6] > 0, "Cuts start high on opposite sides (upper left / upper right)")
+reset()
+attack("Overhead")
+attrs.AttackWind = 0.3
+advance(0.29)
+check(motors.RightShoulder.Transform[4] > math.rad(140), "Overhead winds up above the head")
+
+-- Upgraded avatar joints (AnimationConstraint) are driven exactly like Motor6D
+reset()
+local classicIsA = motors.RightShoulder.IsA
+motors.RightShoulder.IsA = function(_, kind) return kind == "AnimationConstraint" end
+attack("Thrust")
+advance(0.3)
+check(math.abs(motors.RightShoulder.Transform[4]) > math.rad(40), "AnimationConstraint rig animates")
+advance(1.5)
+check(motors.RightShoulder.Transform == CFrame.identity, "AnimationConstraint rig restored")
+motors.RightShoulder.IsA = classicIsA
+reset()
+
+-- Holding BLOCK: the shield climbs and the body sinks gradually through the stages
+attrs.Blocking = true
+advance(0.6)
+local stage1 = motors.LeftShoulder.Transform[4]
+attrs.BraceLevel = 0.4
+advance(1)
+local stage2, crouch2 = motors.LeftShoulder.Transform[4], motors.Root.Transform[2]
+attrs.BraceLevel = 1
+frame(1/60)
+check(motors.LeftShoulder.Transform[4] - stage2 < math.rad(10), "Brace rises slowly, never snaps")
+advance(1)
+local stage3, crouch3 = motors.LeftShoulder.Transform[4], motors.Root.Transform[2]
+check(stage1 < stage2 and stage2 < stage3, "Shield climbs per stage")
+check(crouch2 < -0.4 and crouch3 < crouch2, "Crouch deepens per stage")
+reset()
 
 local Workspace = services.Workspace
 local pending = {}

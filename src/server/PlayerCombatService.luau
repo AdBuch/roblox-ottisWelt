@@ -8,13 +8,13 @@
 --     time is measured HERE), "Slide" (SlideService, no client sends it in Classic V2). The server
 --     rate-limits, checks the combat context (CombatRules), alive, spawn protection, knockdown, busy
 --     time, cooldowns and the Momentum cost of every tier and runs the move (SpecialMoveService).
---   * ShieldBlock(boolean): the toggled block state the client wants; the server owns block/parry
---     state, raise time and every reduction.
+--   * ShieldBlock(boolean): BLOCK pressed / released (held guard); the server owns block/parry
+--     state, block stages, raise time and every reduction.
 --   * Combat state is split, not one state machine: DEFENSE (blocking) and SPECIAL CHARGE
 --     (chargeStart) may be active together; ATTACK (busyUntil / cooldowns) is separate.
 --       ATTACK          drops the block, then attacks; never while charging
 --       SPECIAL START   allowed while blocking; not during an attack or its cooldown
---       BLOCK toggle    allowed while charging (the defense stays fully effective)
+--       BLOCK hold      allowed while charging (the defense stays fully effective)
 --       SPECIAL RELEASE drops the block, then fires the reached tier
 --       interruptions   death, respawn, knockdown, grab, match reset, a heavy UNBLOCKED hit
 --   * Incoming damage (zombies and PvP) goes through here: spawn protection, immunity, shield
@@ -210,6 +210,14 @@ local function braceLevel(state: PlayerState, now: number): number
 	return math.clamp((now - state.blockStart) / BlockDefinitions.BraceSeconds, 0, 1)
 end
 
+-- The block stage of a raised guard (stronger front protection, slower steps), nil without a guard
+local function blockStage(state: PlayerState, now: number): BlockDefinitions.Stage?
+	if not state.blocking then
+		return nil
+	end
+	return BlockDefinitions.stageFor(now - state.blockStart)
+end
+
 local function updateWalkSpeed(player: Player)
 	local _, humanoid = CombatUtil.getLivingCharacter(player)
 	if not humanoid then
@@ -221,8 +229,9 @@ local function updateWalkSpeed(player: Player)
 	if state.blocking and shield then
 		-- about 65 % with the guard up; light shields a little faster, heavy ones a little slower
 		factor = ShieldDefenseConfig.BlockWalkFactor * (0.5 + 0.5 * shield.BlockSpeedMultiplier)
-		-- the longer the brace, the slower the steps
-		factor *= 1 - braceLevel(state, os.clock()) * (1 - BlockDefinitions.BraceWalkFactor)
+		-- the higher the block stage, the slower the steps
+		local stage = blockStage(state, os.clock())
+		factor *= if stage then stage.WalkFactor else 1
 	end
 	if state.chargeStart > 0 then
 		-- charging a special: the stronger of the two slow-downs applies (never multiplied)
@@ -394,12 +403,14 @@ end
 -- Blocking and parrying
 ------------------------------------------------------------------------------------------
 
--- Moves the shield up, slows the walk and publishes BraceLevel while the guard is held
+-- Slows the walk and publishes BraceLevel (pose) and BlockStage (strength) while the guard is held
 local function applyBrace(player: Player, state: PlayerState)
-	local brace = braceLevel(state, os.clock())
+	local now = os.clock()
 	local character = player.Character
 	if character then
-		character:SetAttribute("BraceLevel", brace)
+		character:SetAttribute("BraceLevel", braceLevel(state, now))
+		local stage = blockStage(state, now)
+		character:SetAttribute("BlockStage", if stage then stage.Stage else 0)
 	end
 	updateWalkSpeed(player)
 end
@@ -437,15 +448,16 @@ local function setBlocking(player: Player, active: boolean)
 		else
 			character:SetAttribute("BraceLevel", 0)
 		end
+		character:SetAttribute("BlockStage", if active and state.shieldId then 1 else 0)
 	end
 	if active and state.shieldId then
 		startBraceLoop(player, state.blockToken)
 	end
-	-- Toggle block: it stays up until BLOCK is pressed again, ATTACK, a fired special, a slide,
-	-- a guard break, a knockdown, a grab, death or a reset lowers it (no timeout)
+	-- Held block: it stays up while BLOCK is held; releasing it, ATTACK, a fired special, a slide,
+	-- a guard break, a knockdown, a grab, death or a reset lowers it
 end
 
--- The guard can't come up right now: tell the client so its toggle shows "off" again.
+-- The guard can't come up right now: tell the client so its BLOCK button shows "off" again.
 local function refuseBlock(player: Player)
 	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Block, false)
 end
@@ -663,8 +675,9 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 		local active = raised and inRange
 		local base = if active then ShieldDefenseConfig.Active[zone] else ShieldDefenseConfig.Passive[zone]
 		if active and zone == "Front" then
-			-- a longer brace stops more of the blows that hit the shield head-on
-			base = (base or 0) + BlockDefinitions.BraceReductionBonus * braceLevel(state, now)
+			-- a higher block stage stops more of the blows that hit the shield head-on
+			local stage = blockStage(state, now)
+			base = (base or 0) + (if stage then stage.ReductionBonus else 0)
 		end
 		local quality = math.clamp(shield.Reduction / ShieldDefenseConfig.ReferenceReduction, ShieldDefenseConfig.QualityMin, ShieldDefenseConfig.QualityMax)
 		local projectileRatio = if incoming.isProjectile then shield.ProjectileReduction / math.max(0.01, shield.Reduction) else 1

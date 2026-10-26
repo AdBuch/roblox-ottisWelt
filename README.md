@@ -123,14 +123,14 @@ src/client/   -> StarterPlayer.StarterPlayerScripts.Client
   ContextHealthController            contextual world-space health bars (pooled BillboardGuis)
   TeamStatusController               team score + time, co-op teammate strip, lobby rosters
   AuraDisplayController              lobby Aura and Denarii counters, +n rewards in combat
-  MobileControlsController           touch ATTACK / SPECIAL (charge fill) / BLOCK (toggle) around Roblox's jump button
+  MobileControlsController           touch ATTACK / SPECIAL (phase colour) / BLOCK (hold, stage ring) around Roblox's jump button
   SpecialChargeHudController         three-phase special charge bar
   CombatSettingsController           CLASSIC / WILD and CAMERA pills (saved preferences)
   SlideController / MomentumHudController   own-character slide / the ARENA MOMENTUM bar
   CombatEffectsController / CombatCameraController   hit presentation by category (sparks, dust, no blood), camera impulses
   InfoPanelController / SpectatorController   optional i panel / Arena spectator bar + camera modes
   TeleportStatusController           travel / queue chip, START WITH CURRENT PARTY, emergency RETURN TO HUB
-  InputController                    Classic input for mouse/keyboard, gamepad and touch (attack, block toggle, special hold, soft targeting); sends intent only
+  InputController                    Classic input for mouse/keyboard, gamepad and touch (attack, block hold, special hold, soft targeting); sends intent only
   ComboFeedbackController            tiny input chips, TRAINING board (both modes, Momentum, specials)
   PlayerAnimator                     procedural whole-body attack motion (additive, replaceable)
   OttiEntranceController             local camera for the entrance, landing shake, skip
@@ -184,7 +184,7 @@ The same combat everywhere: PvE, PvP and boss fights. The PLAY menu and the HUD 
 | Move (camera-relative, turns the character) | WASD | left stick | Roblox thumbstick (left) |
 | Camera | mouse | right stick | drag on free screen space |
 | **Attack** (tap again = combo chain) | Left click | R2 | ATTACK (right; same size as SPECIAL and BLOCK) |
-| **Block** on / off (toggle) | Right click | L2 | BLOCK (above; lit ON while active) |
+| **Block** (hold; stages I-III) | hold Right click | hold L2 | hold BLOCK (above; ring fills, colour per stage) |
 | **Special** (hold to charge, release to fire) | hold **Q** | hold **X** | hold SPECIAL (left; passive Momentum ring) |
 | Jump (allowed while blocking) | Space | A | Roblox's own jump button (no second one) |
 | Interact (shop, doors, pads) | **F** | D-pad up | tap the prompt |
@@ -197,7 +197,7 @@ teammates, spectators or lobby players. With the bow and a mouse the cursor aims
 
 ## Combat (V2)
 
-Server-authoritative: clients send intent only (an attack, the block toggle, special start / release, an aim point).
+Server-authoritative: clients send intent only (an attack, block press / release, special start / release, an aim point).
 Damage, reach, hits, cooldowns, block results, charge time, rewards and progress are decided on the server. Details:
 [docs/COMBAT_V2_PLAN.md](docs/COMBAT_V2_PLAN.md).
 
@@ -208,10 +208,13 @@ Damage, reach, hits, cooldowns, block results, charge time, rewards and progress
   - **Interruptions:** death and respawn, a knockdown, Otti's grab, a match reset, or a heavy hit that was **not**
     blocked cancel the charge. Block and charge are always reset on death and respawn.
 - **Attack chains:** contextual (standing, moving, after the previous attack, in the air, after a perfect block).
+  Default sword chain (Gladius, Legion Sword): THRUST forward → cut from the UPPER LEFT → cut from the UPPER RIGHT →
+  OVERHEAD straight down the middle. Every swing is carried by waist, shoulder, elbow and wrist (`PlayerAnimator`); the
+  weapon never leaves the hand. Both classic Motor6D rigs and upgraded avatar joints (AnimationConstraint) are driven.
   Chains reset after 1.1 s.
 - **Special charge** (`SpecialChargeDefinitions`): the hold time is measured on the server; holding longer than 2.5 s
   adds nothing. While charging, walking slows to 75 %; with the block up as well, the stronger slow (block) applies.
-  Spam is stopped by one shared cooldown and the busy state. On touch, SPECIAL shows passive energy and the selected affordable tier. Desktop/gamepad keep the charge bar.
+  Spam is stopped by one shared cooldown and the busy state. On touch, SPECIAL shows passive energy; while held it takes the colour of the phase a release fires now (I yellow · II orange · III red · ULT violet). Desktop/gamepad keep the charge bar with the same colours and the active phase beside it.
 
   | Tier | Hold | Move (weapon family) | PvE damage | PvP damage | Cooldown |
   |---|---|---|---|---|---|
@@ -232,7 +235,16 @@ Damage, reach, hits, cooldowns, block results, charge time, rewards and progress
   | Weapon side (right) | 0 % | 0 % |
   | Back | 0 % | 0 % |
 
-  - **Toggle:** block stays up until it is pressed again (no timeout). Walk speed is about 65 %.
+  - **Hold:** the block stays up while BLOCK is held; releasing lowers it (an attack or a fired special lowers it too,
+    then it needs a new press). The longer it is held, the stronger and slower it gets (`BlockDefinitions.Stages`,
+    server clock). The player sinks slowly into a crouch while the shield climbs over the head; the touch BLOCK ring
+    fills over 1.5 s and changes colour per stage (I blue · II teal · III gold).
+
+    | Stage | Held | Extra front protection | Walk speed (of the guard walk, about 65 %) | Pose |
+    |---|---|---|---|---|
+    | I | from 0 s | + 0 | 100 % | shield in front of the chest |
+    | II | from 0.6 s | + 10 % | 70 % | half crouch, shield at the forehead |
+    | III | from 1.5 s | + 20 % | 40 % | full crouch, shield flat over the head |
   - **Per shield:** values scale with the shield's quality; arrows use its projectile ratio.
   - **Perfect block:** raising the block at most 0.2 s before a valid hit stops it and opens a 1 s counter.
   - **Heavy hits on the block** push the blocker back briefly.
@@ -787,7 +799,7 @@ With Place IDs = 0 or in Studio nothing is teleported (and nothing pretends to b
 
 **Solo (Arena gameplay: Arena place in Studio with `ArenaMockMode = "SOLO_ZOMBIES"`, or a real Solo start)**
 1. Hub F5. You arrive in the central hall with Otti to the left and the Solo Zombies entrance straight ahead: the Aura and Denarii capsules top-right show 0, Rusty Gladius + Wooden Buckler in your hands, touch: ATTACK, SPECIAL and BLOCK around Roblox's jump button, thumbstick left.
-2. Follow the gold strip right to CO-OP & TRAINING, walk past the Otti mosaic to the TRAINING yard at the far end and hit a dummy (tap ATTACK for combos, toggle BLOCK, hold Q / X / SPECIAL and watch the three charge phases).
+2. Follow the gold strip right to CO-OP & TRAINING, walk past the Otti mosaic to the TRAINING yard at the far end and hit a dummy (tap ATTACK for the sword chain thrust · upper-left cut · upper-right cut · overhead, hold BLOCK and watch the crouch and the stages I-III, hold Q / X / SPECIAL and watch the phase colour change).
 3. Walk north into the arena corridor: the ZOMBIE ARCHIVE cages line both walls (6 zombies with plaques; the Undead Sagittarius draws its bow at you). Walk straight onto the gate pad: Solo Zombies starts after the countdown (step off to cancel). Hold F at the portcullis to start directly, without a menu.
 4. Stand on the gate pad for 3 s, press START NOW, or use PLAY → SOLO: a reserved Arena server (Studio: open the Arena place). GET READY, then ROUND 1 / 7. Kill zombies: a short `+10` with the Aura orb (no permanent counter in combat).
 5. Die or win: you return to the Hub and keep your Aura and Denarii. Buy something in the GLADIATOR ARMORY (e.g. the

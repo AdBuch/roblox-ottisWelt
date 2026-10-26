@@ -25,7 +25,7 @@ export type ChargeHud = {
 
 local SpecialChargeHudController = {}
 
-local COLORS = { Color3.fromRGB(255, 220, 120), Color3.fromRGB(255, 160, 60), Color3.fromRGB(255, 80, 60) }
+local COLORS = UiConfig.SpecialPhaseColors
 local DIM = Color3.fromRGB(60, 50, 40)
 
 function SpecialChargeHudController.start(group: (string, Vector2, UDim2, UDim2?) -> Frame, visibility: Visibility, onCharge: (seconds: number?) -> (), isTouch: () -> boolean): ChargeHud
@@ -74,11 +74,22 @@ function SpecialChargeHudController.start(group: (string, Vector2, UDim2, UDim2?
 	maxLabel.BackgroundTransparency = 1
 	maxLabel.Font = Enum.Font.GothamBlack
 	maxLabel.TextSize = 12
-	maxLabel.TextColor3 = COLORS[3]
+	maxLabel.TextColor3 = UiConfig.UltimateColor
 	maxLabel.TextXAlignment = Enum.TextXAlignment.Left
-	maxLabel.Text = "MAX"
+	maxLabel.Text = "ULT"
 	maxLabel.Visible = false
 	maxLabel.Parent = frame
+	-- The active phase (what a release fires right now), in that phase's colour
+	local phaseLabel = Instance.new("TextLabel")
+	phaseLabel.AnchorPoint = Vector2.new(1, 0)
+	phaseLabel.Position = UDim2.new(0, -6, 0, -4)
+	phaseLabel.Size = UDim2.fromOffset(44, 20)
+	phaseLabel.BackgroundTransparency = 1
+	phaseLabel.Font = Enum.Font.GothamBlack
+	phaseLabel.TextSize = 16
+	phaseLabel.TextStrokeTransparency = 0.4
+	phaseLabel.TextXAlignment = Enum.TextXAlignment.Right
+	phaseLabel.Parent = frame
 	local active = false
 	visibility.register("Momentum", frame, function()
 		return active and not isTouch()
@@ -95,6 +106,9 @@ function SpecialChargeHudController.start(group: (string, Vector2, UDim2, UDim2?
 			segments[i].BackgroundTransparency = if seconds >= def.From then 0.05 else 0.25
 		end
 		maxLabel.Visible = seconds >= max and momentum >= SpecialChargeDefinitions.UltimateMomentum
+		local selected, ultimate = SpecialChargeDefinitions.forRelease(seconds, momentum)
+		phaseLabel.Text = if ultimate then "ULT" elseif selected then selected.Name else "..."
+		phaseLabel.TextColor3 = if ultimate then UiConfig.UltimateColor elseif selected then COLORS[selected.Tier] else DIM
 		onCharge(seconds)
 	end
 

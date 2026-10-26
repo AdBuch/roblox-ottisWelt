@@ -272,7 +272,7 @@ if feedback and feedback:IsA("RemoteEvent") then
 		elseif kind == F.Block then
 			controls.setBlocking(a == true)
 			if input then
-				input.syncBlock(a == true) -- the toggle follows the server's real block state
+				input.syncBlock(a == true) -- the button follows the server's real block state
 			end
 		elseif kind == F.SpecialCharge then
 			if a == "cancel" then
@@ -592,9 +592,9 @@ task.spawn(function()
 		end
 		table.insert(lines, "")
 		table.insert(lines, "<b>CONTROLS</b>")
-		table.insert(lines, "Keyboard: WASD move · LMB attack (tap again = combo) · RMB block on / off · hold Q special, release to fire · Space jump")
-		table.insert(lines, "Gamepad: left stick · R2 attack · L2 block on / off · hold X special · A jump")
-		table.insert(lines, "Touch: thumbstick left · ATTACK · SPECIAL (hold) · BLOCK (on / off) · JUMP right · drag free screen space = camera")
+		table.insert(lines, "Keyboard: WASD move · LMB attack (tap again = combo) · hold RMB block (stages I-III) · hold Q special, release to fire · Space jump")
+		table.insert(lines, "Gamepad: left stick · R2 attack · hold L2 block · hold X special · A jump")
+		table.insert(lines, "Touch: thumbstick left · ATTACK · SPECIAL (hold) · BLOCK (hold, ring fills I-III) · JUMP right · drag free screen space = camera")
 		table.insert(lines, "Special tiers: I (tap) · II (hold 0.5 s) · III (hold 1.5 s, full at 2.5 s) · 25 / 50 / 75 Momentum · full hold + 100 = ULTIMATE")
 		table.insert(lines, "F interact · H HUD mode")
 		table.insert(lines, "")
