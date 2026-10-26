@@ -14,6 +14,11 @@ Der Hub bildet einen durchgehenden Ring unter den Tribünen. In Kreisrichtung:
 | 300° | Waffenshop zwischen Krokero und Otti |
 
 Alle Ausrüstungsgegenstände werden weiterhin aus den vorhandenen Definitionen erzeugt.
+Jeder Shop trägt ein Bodenmosaik mit beiden angrenzenden Helden und zwei Wandmosaike
+mit ihren einzelnen Arenakämpfen: Otti/Schili im Schildshop, Schili/Krokero im
+Rüstungsshop und Krokero/Otti im Waffenshop. Goldene Mäander, sichtbare Steinchenfugen,
+Legionäre und Kolosseumsbögen rahmen Schildwall, Verteidigung und Waffenkampf ein.
+Die neun Bilder entstehen ohne externe Bildassets auf nicht kollidierenden Flächen.
 Kaufen und Ausrüsten prüfen serverseitig die Position im jeweiligen Shop sowie die Nähe zum Gegenstand.
 Die Team-Mosaike behalten ihre bisherigen IDs und den Ablauf mit zwei bereiten Kapitänen.
 

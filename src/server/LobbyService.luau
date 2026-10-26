@@ -8,6 +8,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local LobbyPadDefinitions = require(ReplicatedStorage.Shared.LobbyPadDefinitions)
 local LobbyMosaics = require(script.Parent.LobbyMosaics)
 local LobbyStatue = require(script.Parent.LobbyStatue)
+local ShopBattleMosaics = require(script.Parent.ShopBattleMosaics)
 type PadDefinition = LobbyPadDefinitions.PadDefinition
 local STONE = Color3.fromRGB(118, 104, 90)
 local STONE_DARK = Color3.fromRGB(66, 58, 50)
@@ -333,6 +334,9 @@ function LobbyService.build(): LobbyLayout
     local shields = shop(60, "Shields")
     local armor = shop(180, "Armor")
     local weapons = shop(300, "Weapons")
+    ShopBattleMosaics.build(folder, shields, "Shields", "Otti", "Schili")
+    ShopBattleMosaics.build(folder, armor, "Armor", "Schili", "Krokero")
+    ShopBattleMosaics.build(folder, weapons, "Weapons", "Krokero", "Otti")
     local function line(cf: CFrame, x: number, z: number, length: number): DisplayLine
         return { cframe = cf * CFrame.new(x, 0, z), length = length }
     end

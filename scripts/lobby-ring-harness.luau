@@ -60,12 +60,13 @@ local UDim2={fromScale=function(...) return {...} end,fromOffset=function(...) r
 local Workspace=Instance.new("Workspace")
 local Lighting={}
 local ReplicatedStorage={Shared={Config="Config",LobbyPadDefinitions="LobbyPadDefinitions"}}
-local script={Parent={LobbyMosaics="LobbyMosaics",LobbyStatue="LobbyStatue"}}
+local script={Parent={LobbyMosaics="LobbyMosaics",LobbyStatue="LobbyStatue",ShopBattleMosaics="ShopBattleMosaics"}}
 local game={GetService=function(_,name) return ({Workspace=Workspace,Lighting=Lighting,ReplicatedStorage=ReplicatedStorage})[name] end}
 local modules={Config={LobbyFolderName="GeneratedLobby"},LobbyMosaics={has=function() return false end},LobbyStatue={build=function(_,_,_,id) table.insert(all,{ClassName="Statue",Name=id.."Statue"}) end}}
 local require=function(id) return assert(modules[id],id) end
 
 -- INSERT_DEFINITIONS
+-- INSERT_BATTLE_MOSAICS
 -- INSERT_BUILDER
 
 local layout=modules.LobbyService.build()
