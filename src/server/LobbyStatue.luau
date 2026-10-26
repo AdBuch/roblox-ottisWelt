@@ -6,6 +6,7 @@
 -- The pedestal (built by LobbyService) is the only collision.
 
 local OttiModel = require(script.Parent.OttiModel)
+local CompanionModel = require(script.Parent.CompanionModel)
 
 local MARBLE = Color3.fromRGB(226, 218, 202)
 local MARBLE_SHADE = Color3.fromRGB(196, 186, 168)
@@ -19,10 +20,11 @@ local METALS: { [Enum.Material]: boolean } = {
 }
 
 -- Builds the statue standing on `base` (a CFrame on the pedestal top, -Z = where Otti looks).
-function LobbyStatue.build(parent: Instance, base: CFrame, scale: number): Model
-	local rig = OttiModel.build()
+function LobbyStatue.build(parent: Instance, base: CFrame, scale: number, bossId: string?): Model
+	local id = bossId or "Otti"
+	local rig = if CompanionModel.has(id) then CompanionModel.build(id) else OttiModel.build()
 	local model = rig.model
-	model.Name = "OttiStatue"
+	model.Name = id .. "Statue"
 	model:SetAttribute("BossName", nil)
 	rig.humanoid:Destroy()
 	for _, part in rig.sheathedParts do

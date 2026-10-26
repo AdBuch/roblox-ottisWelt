@@ -246,7 +246,7 @@ function GameModeMenuController.start(gui: ScreenGui, edge: Frame, request: Remo
 			note(body, "<b>BOSS FIGHT</b>  solo: you face one of Otti's companions alone. Choose your opponent.", order)
 			for _, entry in {
 				{ "Otti", "OTTI", "the Champion of the Colosseum" },
-				{ "Kroko", "KROKO", "the fearless protector · bold and reckless when hurt" },
+				{ "Kroko", "KROKERO", "the fearless protector · bold and reckless when hurt" },
 				{ "Schili", "SCHILI", "the calm strategist · patient, cunning, persistent" },
 			} do
 				order += 1

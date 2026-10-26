@@ -126,6 +126,10 @@ local function checkStart()
 	if not record then
 		return
 	end
+	-- Boss testing in Studio waits for a choice instead of starting a zombie wave.
+	if mock and record.mode == "BOSS_SOLO" and not record.boss then
+		return
+	end
 	local expected = #record.fighters
 	if not mock and expected > 0 and ArenaAdmissionService.fighterCount() >= expected then
 		start()
@@ -223,6 +227,34 @@ function ArenaMatchService.init(folder: Instance)
 			return not MatchService.isFinished()
 		end,
 	})
+	if mock then
+		for i, choice in { { "Otti", "OTTI" }, { "Schili", "SCHILI" }, { "Kroko", "KROKERO" } } do
+			local host = Instance.new("Part")
+			host.Name = "StudioBossChoice_" .. choice[1]
+			host.Anchored = true
+			host.Size = Vector3.new(4, 3, 4)
+			host.Position = Vector3.new((i - 2) * 9, Arena.Layout.FloorTop + 1.5, Arena.Layout.SemiAxisZ - 17)
+			host.Color = Color3.fromRGB(176, 125, 60)
+			host.Parent = folder
+			local prompt = Instance.new("ProximityPrompt")
+			prompt.ActionText = "Test boss fight"
+			prompt.ObjectText = choice[2]
+			prompt.MaxActivationDistance = 9
+			prompt.RequiresLineOfSight = false
+			prompt.KeyboardKeyCode = Enum.KeyCode.F
+			prompt.Parent = host
+			prompt.Triggered:Connect(function(player)
+				local record = mockRecord
+				if not record or record.mode ~= "BOSS_SOLO" or started or arrivalTimer then return end
+				if player:GetAttribute("ArenaRole") ~= "FIGHTER" then return end
+				local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+				if not root or not root:IsA("BasePart") or (root.Position - host.Position).Magnitude > 12 then return end
+				record.boss = choice[1]
+				message(player, "Boss test: " .. choice[2], true)
+				checkStart()
+			end)
+		end
+	end
 
 	-- RETURN TO HUB (spectator bar / emergency button / the tribune door)
 	Remotes.MatchRequest.OnServerInvoke = function(player: Player, action: unknown)

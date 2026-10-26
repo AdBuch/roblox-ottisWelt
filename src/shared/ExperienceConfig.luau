@@ -96,7 +96,7 @@ local ExperienceConfig = {
 		MockFriendIds = table.freeze({} :: { number }), -- e.g. { 12345 } to see FRIENDS IN BATTLE
 		MockFriendSelf = true, -- also treat the local test player as a "friend" in one mock battle
 		-- Arena place opened directly in Studio: run this match with the local players
-		ArenaMockMode = "COOP_ZOMBIES", -- SOLO_ZOMBIES | COOP_ZOMBIES | TIME_BATTLE | FIRST_TO | ELIMINATION
+		ArenaMockMode = "BOSS_SOLO", -- Studio: choose Otti / Schili / Krokero at the arena test pedestals
 		ArenaMockStartSeconds = 4,
 	}),
 }

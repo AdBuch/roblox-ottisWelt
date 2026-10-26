@@ -1,7 +1,7 @@
 --!strict
--- OTTI HUB (start place) server entry. Builds the gladiator dungeon under the Colosseum (central
--- hall with the Otti statue, arena corridor with the Zombie Archive, singleplayer and multiplayer
--- pads, Gladiator Armory, training yard, tribune stairs, Gate to Rome) and starts the Hub
+-- OTTI HUB (start place) server entry. Builds the circular concourse under the Colosseum:
+-- Otti / Schili / Krokero statue halls, three equipment shops, tribune stairs,
+-- lower training cages, party meeting point and Gate to Rome. Starts the Hub
 -- services: persistent data, equipment, training combat, parties, matchmaking, live battles and
 -- the teleports to reserved Arena servers. No arena match ever runs in the Hub.
 
@@ -52,7 +52,7 @@ end
 
 -- World: the basement only (the Colosseum itself lives in the Arena place)
 local lobby = LobbyService.build()
-print(PREFIX, ("Lobby ready: %d pads, GLADIATOR ARMORY, ZOMBIE ARCHIVE, training, tribunes"):format(#lobby.pads))
+print(PREFIX, ("Lobby ready: %d pads, three statue halls and shops, training cages, group meeting point, tribunes"):format(#lobby.pads))
 local _ = Remotes
 
 -- Lobby combat rules: only the training dummies can be hit, nobody can be hurt

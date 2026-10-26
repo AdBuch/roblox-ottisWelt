@@ -1,5 +1,5 @@
 --!strict
--- Safe training area in the lobby: straw dummies that take hits from basic attacks, specials and
+-- Safe training cages in the lobby: zombie rigs that take hits from basic attacks, specials and
 -- combos. They show damage numbers (via the normal Hit feedback), never die permanently, never
 -- give Aura, statistics or eliminations. They refill after a short pause. The last dummy is a
 -- SPARRING dummy that swings (Mid / High / Low, telegraphed) for Block / Perfect Block practice.
@@ -8,6 +8,8 @@ local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local ZombieDefinitions = require(ReplicatedStorage.Shared.ZombieDefinitions)
+local ZombieFactory = require(script.Parent.ZombieFactory)
 
 local DUMMY_HEALTH = 300
 local RESET_DELAY = 3
@@ -47,16 +49,20 @@ local function makePart(name: string, size: Vector3, cframe: CFrame, color: Colo
 end
 
 local function buildDummy(parent: Instance, base: CFrame, index: number): Dummy
-	local model = Instance.new("Model")
-	model.Name = "TrainingDummy" .. index
-	makePart("Post", Vector3.new(0.6, 6, 0.6), base * CFrame.new(0, 3, 0), Color3.fromRGB(90, 60, 36), Enum.Material.Wood, model)
-	local root = makePart("HumanoidRootPart", Vector3.new(2.4, 2.6, 1.4), base * CFrame.new(0, 3.8, 0), Color3.fromRGB(214, 184, 110), Enum.Material.Fabric, model)
-	makePart("Head", Vector3.one * 1.6, base * CFrame.new(0, 5.9, 0), Color3.fromRGB(214, 184, 110), Enum.Material.Fabric, model, Enum.PartType.Ball)
-	makePart("Arms", Vector3.new(4.4, 0.5, 0.5), base * CFrame.new(0, 4.6, 0), Color3.fromRGB(90, 60, 36), Enum.Material.Wood, model)
-	makePart("Target", Vector3.new(0.1, 1.2, 1.2), base * CFrame.new(0, 3.9, -0.72) * CFrame.Angles(0, math.rad(90), 0), Color3.fromRGB(170, 40, 40), Enum.Material.Fabric, model, Enum.PartType.Cylinder)
-	makePart("Base", Vector3.new(3, 0.6, 3), base * CFrame.new(0, 0.3, 0), Color3.fromRGB(110, 98, 86), Enum.Material.Cobblestone, model)
-	model.PrimaryPart = root
-	model:SetAttribute("ZombieType", "Training Dummy")
+	local def = ZombieDefinitions.Ordered[(index - 1) % #ZombieDefinitions.Ordered + 1]
+	local rig = ZombieFactory.build(def)
+	local model, root = rig.model, rig.root
+	model.Name = "TrainingZombie" .. index
+	root.Anchored = true
+	rig.humanoid.WalkSpeed = 0
+	rig.humanoid:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+	model:PivotTo(base + Vector3.new(0, rig.humanoid.HipHeight + root.Size.Y / 2, 0))
+	for _, item in model:GetDescendants() do
+		if item:IsA("BasePart") then item.CanCollide = false end
+	end
+	-- A visible practice staff retains the existing safe block / parry telegraph.
+	makePart("Arms", Vector3.new(4.4, 0.4, 0.4), base * CFrame.new(0, 4.6, -1.2), Color3.fromRGB(90, 60, 36), Enum.Material.Wood, model).CanCollide = false
+	model:SetAttribute("ZombieType", "Training · " .. def.DisplayName)
 	model:SetAttribute("MaxHealth", DUMMY_HEALTH)
 
 	model.Parent = parent
@@ -73,7 +79,7 @@ function TrainingService.build(parent: Instance, slots: { CFrame }, areaCFrame: 
 	for index, slot in slots do
 		local dummy = buildDummy(parent, slot, index)
 		if index == #slots then
-			dummy.model:SetAttribute("ZombieType", "Sparring Dummy")
+			dummy.model:SetAttribute("ZombieType", "Sparring Zombie")
 			dummy.model:SetAttribute("Sparring", true)
 			startSparring(dummy)
 		end

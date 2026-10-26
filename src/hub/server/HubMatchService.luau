@@ -395,6 +395,16 @@ function HubMatchService.init(lobby: LobbyService.LobbyLayout)
 	})
 	-- Walking to the gate starts Solo Zombies via the entrance pad; no choice menu here.
 	addPrompt(lobby.arenaGate, "Start Solo Zombies", "THE ARENA", HubMatchService.playSolo)
+	addPrompt(lobby.bossBoard, "Choose boss", "BOSS FIGHT · TEST", function(player)
+		Remotes.MatchEvent:FireClient(player, "OpenMenu", "BOSS")
+		return true, ""
+	end)
+	for _, host in lobby.modeBoards do
+		addPrompt(host, "Choose game / form party", "ALL GAME MODES", function(player)
+			Remotes.MatchEvent:FireClient(player, "OpenMenu", "ZOMBIES")
+			return true, ""
+		end)
+	end
 	for _, door in lobby.tribuneDoors do
 		addPrompt(door, "Watch live", "TRIBUNES", function(player)
 			Remotes.MatchEvent:FireClient(player, "OpenLive")
