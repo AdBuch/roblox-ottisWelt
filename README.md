@@ -328,11 +328,13 @@ All Team Battles: winners +80 Aura, losers +25, draw +40; shells off by default 
 
 **Co-op:** SOLO / START WITH CURRENT PARTY start at once on a new reserved Arena server (no waiting for 4
 players). Parties: CREATE PARTY, invite players of the same Hub server (or friends via Roblox invite, then invite
-them here), ACCEPT, READY. The lobby's group pads form public groups: stepping on the carpet joins, stepping off leaves,
+them here), ACCEPT, READY. The lobby's OTTI CO-OP mosaic forms a public group: stepping on it joins, stepping off leaves,
 the leader (★) presses START (only READY members fight; nobody ready = everybody). **FIND PLAYERS** queues the group for
 co-op matchmaking.
 
-**Team Battles:** choose a submode (post or menu); the party queues together. Teams are formed by the matchmaker
+**Team Battles:** in the lobby's TEAM BATTLE hall, stand on the SCHILI (Blue) or KROKERO (Red) mosaic; once both
+teams are equal (1v1-4v4), both captains press READY within 30 s and one TIME BATTLE starts (`PadTeamBattleService`).
+Other submodes: choose one in the PLAY menu; the party queues together. Teams are formed by the matchmaker
 (equal sizes only, see below), never by clients. In the Arena: one match id, protected team spawns behind closed
 barriers, 5 s countdown, FIGHT. Results, rewards (exactly once) and the return to the Hub follow automatically.
 
@@ -785,9 +787,9 @@ With Place IDs = 0 or in Studio nothing is teleported (and nothing pretends to b
 
 **Solo (Arena gameplay: Arena place in Studio with `ArenaMockMode = "SOLO_ZOMBIES"`, or a real Solo start)**
 1. Hub F5. You arrive in the central hall with Otti to the left and the Solo Zombies entrance straight ahead: the Aura and Denarii capsules top-right show 0, Rusty Gladius + Wooden Buckler in your hands, touch: ATTACK, SPECIAL and BLOCK around Roblox's jump button, thumbstick left.
-2. Follow the gold strip right to SINGLEPLAYER, walk to the TRAINING yard at the far end and hit a dummy (tap ATTACK for combos, toggle BLOCK, hold Q / X / SPECIAL and watch the three charge phases).
+2. Follow the gold strip right to CO-OP & TRAINING, walk past the Otti mosaic to the TRAINING yard at the far end and hit a dummy (tap ATTACK for combos, toggle BLOCK, hold Q / X / SPECIAL and watch the three charge phases).
 3. Walk north into the arena corridor: the ZOMBIE ARCHIVE cages line both walls (6 zombies with plaques; the Undead Sagittarius draws its bow at you). Walk straight onto the gate pad: Solo Zombies starts after the countdown (step off to cancel). Hold F at the portcullis to start directly, without a menu.
-4. Stand on the ZOMBIE SURVIVAL pad (SINGLEPLAYER, right) for 3 s, press START NOW, or use PLAY → SOLO: a reserved Arena server (Studio: open the Arena place). GET READY, then ROUND 1 / 7. Kill zombies: a short `+10` with the Aura orb (no permanent counter in combat).
+4. Stand on the gate pad for 3 s, press START NOW, or use PLAY → SOLO: a reserved Arena server (Studio: open the Arena place). GET READY, then ROUND 1 / 7. Kill zombies: a short `+10` with the Aura orb (no permanent counter in combat).
 5. Die or win: you return to the Hub and keep your Aura and Denarii. Buy something in the GLADIATOR ARMORY (e.g. the
    Legion Sword: unlocked at level 2, costs 80 Denarii).
 
@@ -859,7 +861,7 @@ With Place IDs = 0 or in Studio nothing is teleported (and nothing pretends to b
 
 ### Lobby arrival and the default battle
 
-Direct Hub arrivals face the central path to Solo Zombies, with Otti's monument beside the route. Walk straight into the main arena entrance to start the existing solo countdown; leaving the pad cancels it. The gate prompt starts Solo Zombies directly without a choice menu. Respawns and Arena returns use a separate safe lobby position, while returning spectators appear near the live board. Other modes are still available through their wing pads and the PLAY menu.
+Direct Hub arrivals face the central path to Solo Zombies, with Otti's monument beside the route. Walk straight into the main arena entrance to start the existing solo countdown; leaving the pad cancels it. The gate prompt starts Solo Zombies directly without a choice menu. Respawns and Arena returns use a separate safe lobby position, while returning spectators appear near the live board. Co-op and the Schili / Krokero team battle start from their mosaics; every mode is also in the PLAY menu.
 
 ### Passive Momentum and balanced touch controls (22 October 2026)
 

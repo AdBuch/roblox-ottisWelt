@@ -1075,7 +1075,6 @@ local function runMove(player: Player, state: PlayerState, context: CombatRules.
 		reject = function(reason: string)
 			reject(player, reason)
 		end,
-
 	})
 	if isSpecial and landed then
 		-- Meaningful moments only: Otti reacts from the imperial box, as a boss he learns patterns,
