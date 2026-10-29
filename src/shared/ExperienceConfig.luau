@@ -92,6 +92,9 @@ local ExperienceConfig = {
 
 	Studio = table.freeze({
 		UseMockMemoryStore = true, -- Studio: in-memory registry / queues / tickets
+		-- TEST SWITCH: with mock player data, own every weapon, shield and armor and start at the
+		-- top gladiator level (Up / Circle specials unlocked). Never saved; false = normal progress.
+		UnlockAllGear = true,
 		MockMatches = 4, -- fake live battles in the Hub overlay (0 = none)
 		MockFriendIds = table.freeze({} :: { number }), -- e.g. { 12345 } to see FRIENDS IN BATTLE
 		MockFriendSelf = true, -- also treat the local test player as a "friend" in one mock battle

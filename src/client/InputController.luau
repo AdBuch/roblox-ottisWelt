@@ -3,8 +3,9 @@
 -- the server validates everything (state, ownership, cooldowns, charge time, targets, damage).
 --   ATTACK   LMB / R2 / ATTACK button: one attack per press (tap again for the combo chain).
 --            An active block is lowered first (the server does the same).
---   BLOCK    RMB / L2 / BLOCK button: toggles the guard on and off. The server confirms the state
---            (Feedback.Block -> syncBlock), so the toggle never drifts from the real block.
+--   BLOCK    hold RMB / L2 / BLOCK button: the guard stays up while held and grows through the
+--            block stages (server: BlockDefinitions); releasing lowers it. The server confirms the
+--            state (Feedback.Block -> syncBlock); a guard it lowered needs a new press.
 --   SPECIAL  hold Q / X / SPECIAL to charge, release to fire ("SpecialStart" / "SpecialRelease";
 --            the server measures the hold time). Block may stay on while charging.
 --   JUMP     Space / A / Roblox's own jump button (no second jump button).
@@ -60,6 +61,7 @@ function InputController.init(options: Options): Input
 	local player = Players.LocalPlayer
 	local remotes = options.remotes
 	local blockOn = false
+	local blockInput: InputObject? = nil -- the press that holds the guard up
 	local charging = false
 	local engaged: Instance? = nil -- the enemy we last hit (Soft Targeting prefers it)
 	local turning: RBXScriptConnection? = nil
@@ -213,11 +215,20 @@ function InputController.init(options: Options): Input
 		end
 	end
 
-	local function toggleBlock()
-		if not options.canAct() and not blockOn then
+	local function pressBlock(input: InputObject)
+		if not options.canAct() then
 			return
 		end
-		setBlock(not blockOn)
+		blockInput = input
+		setBlock(true)
+	end
+
+	local function releaseBlock(input: InputObject)
+		if blockInput ~= input then
+			return
+		end
+		blockInput = nil
+		setBlock(false)
 	end
 
 	local function attack()
@@ -267,7 +278,7 @@ function InputController.init(options: Options): Input
 		if inputType == Enum.UserInputType.MouseButton1 or key == ControlModeDefinitions.GamepadAttack then
 			attack()
 		elseif inputType == Enum.UserInputType.MouseButton2 or key == ControlModeDefinitions.GamepadBlock then
-			toggleBlock()
+			pressBlock(input)
 		elseif key == ControlModeDefinitions.SpecialKey or key == ControlModeDefinitions.GamepadSpecial then
 			startCharge()
 		end
@@ -277,11 +288,14 @@ function InputController.init(options: Options): Input
 		if key == ControlModeDefinitions.SpecialKey or key == ControlModeDefinitions.GamepadSpecial then
 			releaseCharge()
 		end
+		-- every release of the holding press (also a finger that slid off the BLOCK button)
+		releaseBlock(input)
 	end)
 
 	player.CharacterAdded:Connect(function()
 		-- death / respawn: the server resets block and charge, so does the client
 		blockOn = false
+		blockInput = nil
 		if charging then
 			charging = false
 			options.onChargeEnd()
@@ -290,7 +304,12 @@ function InputController.init(options: Options): Input
 
 	-- Touch buttons (drawn by MobileControlsController)
 	options.attackButton.Activated:Connect(attack)
-	options.blockButton.Activated:Connect(toggleBlock)
+	options.blockButton.InputBegan:Connect(function(input: InputObject)
+		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			pressBlock(input)
+		end
+	end)
+	options.blockButton.InputEnded:Connect(releaseBlock)
 	options.specialButton.InputBegan:Connect(function(input: InputObject)
 		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
 			startCharge()
@@ -335,6 +354,9 @@ function InputController.init(options: Options): Input
 		end,
 		syncBlock = function(active: boolean)
 			blockOn = active
+			if not active then
+				blockInput = nil -- lowered by the server (attack, special, guard break): press again
+			end
 		end,
 		chargeEnded = function()
 			if charging then

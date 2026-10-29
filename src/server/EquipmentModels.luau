@@ -236,6 +236,42 @@ function EquipmentModels.weaponRestPose(id: string): CFrame
 	return CFrame.Angles(math.rad(30), 0, 0)
 end
 
+-- Where gear is carried outside combat. "Back" mounts are relative to the UpperTorso (+Z = the
+-- back), "Belt" mounts to the LowerTorso. Short blades hang at the right hip (the Roman side, and
+-- the right hand reaches it without turning the body); long, heavy and ranged weapons sit
+-- diagonally across the back, head over the right shoulder.
+export type Mount = "Back" | "Belt"
+
+local function mount(position: Vector3, along: Vector3, side: Vector3): CFrame
+	return CFrame.fromMatrix(position, side.Unit, along.Unit)
+end
+
+local DIAGONAL = Vector3.new(0.4, 0.92, 0)
+local DIAGONAL_SIDE = Vector3.new(0.92, -0.4, 0)
+local BACK_DEPTH = 0.85 -- weapon on the back, without a shield
+local OVER_SHIELD = 0.32 -- extra depth when a shield sits beneath it
+-- Half the length of each back-carried weapon from its grip: the weapon is centred on the back
+local BACK_MID: { [string]: number } = { Trident = 1.8, HopliteSpear = 2.2, BattleAxe = 1.5, MorningStar = 0.9, HunterBow = 0 }
+
+function EquipmentModels.stowMount(id: string, overShield: boolean): (Mount, CFrame)
+	local mid = BACK_MID[id]
+	if mid == nil then
+		-- hilt at the right hip, blade down and back
+		return "Belt" :: Mount, mount(Vector3.new(1.12, 0.05, 0), Vector3.new(0, -0.82, 0.57), Vector3.new(0, 0.57, 0.82))
+	end
+	local depth = BACK_DEPTH + (if overShield then OVER_SHIELD else 0)
+	if id == "HunterBow" then
+		-- limbs (grip Z) diagonal across the back, the bow lying flat on it
+		return "Back" :: Mount, CFrame.fromMatrix(Vector3.new(0, 0, depth), Vector3.new(0, 0, 1), Vector3.new(0.707, -0.707, 0))
+	end
+	return "Back" :: Mount, mount(Vector3.new(0, -0.2, depth) - DIAGONAL.Unit * mid, DIAGONAL, DIAGONAL_SIDE)
+end
+
+-- The second dagger at the left hip.
+EquipmentModels.OffhandDaggerMount = mount(Vector3.new(-1.12, 0.05, 0), Vector3.new(0, -0.94, 0.34), Vector3.new(0, 0.34, 0.94))
+-- The shield flat on the back, face outward, long side vertical.
+EquipmentModels.ShieldBackMount = CFrame.fromMatrix(Vector3.new(0, -0.1, 0.75), Vector3.new(1, 0, 0), Vector3.new(0, 0, 1))
+
 -- A thrown net (flat square of cords) for NET AND STRIKE.
 function EquipmentModels.buildNet(): BasePart
 	local net = newPart("ThrownNet", Vector3.new(3, 0.15, 3), CFrame.identity, Color3.fromRGB(196, 182, 150), Enum.Material.Fabric, nil :: any)

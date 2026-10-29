@@ -1,10 +1,15 @@
 --!strict
 -- Procedural body motion for every R15 player character (display only). The server publishes WHAT
 -- is played (character attributes): attacks (AttackAnim, AttackStart, AttackWind, AttackLength),
--- blocks (Blocking, BlockPose, BraceLevel, BlockImpactAt, BlockImpactHeavy, BlockPerfect), slides (SlideStart,
--- SlideLength) and hit reactions (HitReactAt, HitReactScale, HitReactSide). This layers all of them
--- ON TOP of the normal walk animation (Motor6D.Transform in PreSimulation, after the Animator ran). All layers are
--- summed per frame and written once per joint, so they never overwrite each other.
+-- blocks (Blocking, BlockPose, BraceLevel, BlockStage, BlockImpactAt, BlockImpactHeavy, BlockPerfect),
+-- slides (SlideStart, SlideLength) and hit reactions (HitReactAt, HitReactScale, HitReactSide). This
+-- layers all of them ON TOP of the normal walk animation (joint Transform in PreSimulation, after the
+-- Animator ran). All layers are summed per frame and written once per joint, so they never overwrite
+-- each other.
+-- Joints: classic Motor6D rigs and the upgraded avatar joints (StarterPlayer.AvatarJointUpgrade,
+-- AnimationConstraint) both expose Transform; either is driven.
+-- The weapon stays welded to the hand: every swing is carried by waist, shoulder, elbow and WRIST,
+-- so the blade always moves with the hand that holds it.
 -- Authored animations can replace this module later without any server change (same attributes).
 
 local Players = game:GetService("Players")
@@ -13,79 +18,188 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local SpecialChargeDefinitions = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SpecialChargeDefinitions"))
+local SpecialAnimations = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SpecialAnimationDefinitions"))
 
 local PlayerAnimator = {}
 
 local rad = math.rad
 
-type Pose = { waist: Vector3, rightShoulder: Vector3, leftShoulder: Vector3, rightHip: Vector3, leftHip: Vector3, crouch: number }
+type Pose = {
+	waist: Vector3,
+	rightShoulder: Vector3,
+	leftShoulder: Vector3,
+	rightHip: Vector3,
+	leftHip: Vector3,
+	crouch: number,
+	rightElbow: number, -- degrees of bend (forearm forward)
+	leftElbow: number,
+	rightWrist: Vector3,
+	leftWrist: Vector3,
+}
 
-local ZERO: Pose = { waist = Vector3.zero, rightShoulder = Vector3.zero, leftShoulder = Vector3.zero, rightHip = Vector3.zero, leftHip = Vector3.zero, crouch = 0 }
+-- Explicit elbow bends and wrist angles. A pose without an elbow bend gets a natural one derived
+-- from its shoulder angle, so older poses keep bending through the limb chain.
+type Arms = { re: number?, le: number?, rw: Vector3?, lw: Vector3? }
 
-local function pose(waist: Vector3, rs: Vector3?, ls: Vector3?, rh: Vector3?, lh: Vector3?, crouch: number?): Pose
-	return { waist = waist, rightShoulder = rs or Vector3.zero, leftShoulder = ls or Vector3.zero, rightHip = rh or Vector3.zero, leftHip = lh or Vector3.zero, crouch = crouch or 0 }
+local ZERO: Pose = {
+	waist = Vector3.zero, rightShoulder = Vector3.zero, leftShoulder = Vector3.zero, rightHip = Vector3.zero,
+	leftHip = Vector3.zero, crouch = 0, rightElbow = 0, leftElbow = 0, rightWrist = Vector3.zero, leftWrist = Vector3.zero,
+}
+
+local function derivedElbow(shoulder: Vector3, cap: number, share: number): number
+	return math.min(cap, shoulder.Magnitude * share, math.max(0, 180 - shoulder.X) * 0.8)
 end
 
--- Degrees (x = pitch, y = twist, z = roll): { windup pose, strike pose }
+local function pose(waist: Vector3, rs: Vector3?, ls: Vector3?, rh: Vector3?, lh: Vector3?, crouch: number?, arms: Arms?): Pose
+	local right = rs or Vector3.zero
+	local left = ls or Vector3.zero
+	return {
+		waist = waist, rightShoulder = right, leftShoulder = left, rightHip = rh or Vector3.zero, leftHip = lh or Vector3.zero,
+		crouch = crouch or 0,
+		rightElbow = if arms and arms.re then arms.re else derivedElbow(right, 65, 0.35),
+		leftElbow = if arms and arms.le then arms.le else derivedElbow(left, 85, 0.5),
+		rightWrist = if arms and arms.rw then arms.rw else Vector3.zero,
+		leftWrist = if arms and arms.lw then arms.lw else Vector3.zero,
+	}
+end
+
+local function v(x: number, y: number, z: number): Vector3
+	return Vector3.new(x, y, z)
+end
+
+-- Degrees (x = pitch, y = twist, z = roll): { windup, strike[, follow-through] }.
+-- Blade direction of a one-handed weapon: it leaves the fist at a right angle to the forearm, so
+-- shoulder pitch + elbow + wrist pitch decide where it points (wrist -70..-95 lines it up for cuts
+-- and the thrust; elbow bent far over the shoulder lays it down the back for the big wind-ups).
 local POSES: { [string]: { Pose } } = {
-	Slash = { pose(Vector3.new(8, 46, -8), Vector3.new(78, -18, 48), Vector3.new(24, 0, -18), Vector3.new(-16, 12, -5), Vector3.new(24, -10, 5), 0.12), pose(Vector3.new(-16, -52, 10), Vector3.new(-42, 22, -58), Vector3.new(34, 0, -24), Vector3.new(26, -16, 4), Vector3.new(-32, 14, -4), 0.18) },
-	Backhand = { pose(Vector3.new(5, -48, 9), Vector3.new(48, 18, -64), Vector3.new(28, 0, -18), Vector3.new(22, -14, 4), Vector3.new(-20, 12, -4), 0.12), pose(Vector3.new(-12, 50, -10), Vector3.new(28, -24, 72), Vector3.new(18, 0, -28), Vector3.new(-26, 16, -4), Vector3.new(28, -14, 4), 0.18) },
-	Low = { pose(Vector3.new(-18, 38, -8), Vector3.new(32, 0, 68), Vector3.new(32, 0, -20), Vector3.new(28, 12, 0), Vector3.new(24, -12, 0), 0.45), pose(Vector3.new(-24, -48, 8), Vector3.new(12, 0, -74), Vector3.new(42, 0, -24), Vector3.new(34, -14, 0), Vector3.new(-22, 14, 0), 0.5) },
-	Overhead = { pose(Vector3.new(22, 16, -5), Vector3.new(142, -8, 14), Vector3.new(46, 0, -20), Vector3.new(-18, 0, 0), Vector3.new(28, 0, 0), 0.12), pose(Vector3.new(-36, -14, 5), Vector3.new(-48, 0, -10), Vector3.new(24, 0, -22), Vector3.new(34, 0, 0), Vector3.new(-34, 0, 0), 0.35) },
-	Dive = { pose(Vector3.new(22, 15, -8), Vector3.new(138, 0, 20), Vector3.new(48, 0, -28), Vector3.new(42, 0, 12), Vector3.new(38, 0, -12)), pose(Vector3.new(-38, -20, 8), Vector3.new(-46, 0, -18), Vector3.new(32, 0, -24), Vector3.new(32, 0, 8), Vector3.new(-24, 0, -8), 0.2) },
-	Rise = { pose(Vector3.new(-26, 24, -6), Vector3.new(-32, 0, 28), Vector3.new(24, 0, -18), Vector3.new(36, 0, 0), Vector3.new(32, 0, 0), 0.5), pose(Vector3.new(20, -28, 8), Vector3.new(142, 0, -24), Vector3.new(48, 0, -28), Vector3.new(-26, 0, 0), Vector3.new(34, 0, 0)) },
-	Thrust = { pose(Vector3.new(8, 34, -5), Vector3.new(12, -28, 24), Vector3.new(34, 0, -18), Vector3.new(-24, 8, 0), Vector3.new(24, -8, 0), 0.14), pose(Vector3.new(-22, -24, 4), Vector3.new(92, 0, -8), Vector3.new(22, 0, -24), Vector3.new(30, -8, 0), Vector3.new(-38, 8, 0), 0.22) },
-	Spin = { pose(Vector3.new(0, 58, -8), Vector3.new(54, 0, 70), Vector3.new(30, 0, -48), Vector3.new(-24, 20, 0), Vector3.new(26, -20, 0), 0.18), pose(Vector3.new(-12, -125, 10), Vector3.new(48, 0, -80), Vector3.new(36, 0, -52), Vector3.new(28, -26, 0), Vector3.new(-28, 24, 0), 0.22) },
-	Flurry = { pose(Vector3.new(4, 32, -6), Vector3.new(68, 0, 34), Vector3.new(24, 0, -36), Vector3.new(-16, 0, 0), Vector3.new(22, 0, 0), 0.12), pose(Vector3.new(-12, -38, 8), Vector3.new(-22, 0, -42), Vector3.new(82, 0, 36), Vector3.new(24, 0, 0), Vector3.new(-24, 0, 0), 0.16) },
-	Draw = { pose(Vector3.new(0, 40, 0), Vector3.new(60, 0, 0), Vector3.new(85, 0, 0)), pose(Vector3.new(0, 38, 0), Vector3.new(70, 0, 0), Vector3.new(85, 0, 0)) },
-	Guard = { pose(Vector3.new(-8, 10, 0), nil, Vector3.new(88, -15, -18), nil, Vector3.new(-10, 0, 0), 0.3), pose(Vector3.new(-8, 10, 0), nil, Vector3.new(88, -15, -18), nil, Vector3.new(-10, 0, 0), 0.3) },
-	Bash = { pose(Vector3.new(4, -20, 0), nil, Vector3.new(40, 0, 0)), pose(Vector3.new(-14, 24, 0), nil, Vector3.new(80, 0, 0), nil, Vector3.new(-25, 0, 0), 0.2) },
-	RetreatCut = { pose(Vector3.new(-8, 30, -8), Vector3.new(62, 0, 42), Vector3.new(25, 0, -20), Vector3.new(24, 0, 0), Vector3.new(-12, 0, 0), 0.2), pose(Vector3.new(12, -42, 8), Vector3.new(-24, 0, -56), Vector3.new(42, 0, -18), Vector3.new(-32, 0, 0), Vector3.new(28, 0, 0), 0.28) },
-	Wide = { pose(Vector3.new(4, -58, 8), Vector3.new(76, 0, -76), Vector3.new(28, 0, -28), Vector3.new(16, -20, 0), Vector3.new(-18, 18, 0), 0.2), pose(Vector3.new(-12, 62, -10), Vector3.new(68, 0, 84), Vector3.new(35, 0, -32), Vector3.new(-22, 22, 0), Vector3.new(28, -20, 0), 0.24) },
-	Cross = { pose(Vector3.new(8, 32, -8), Vector3.new(72, 0, 42), Vector3.new(24, 0, -42), Vector3.new(-20, 0, 0), Vector3.new(24, 0, 0), 0.15), pose(Vector3.new(-18, -34, 8), Vector3.new(-28, 0, -58), Vector3.new(76, 0, 48), Vector3.new(26, 0, 0), Vector3.new(-26, 0, 0), 0.2) },
-	Ultimate = { pose(Vector3.new(24, 30, -8), Vector3.new(152, 0, 24), Vector3.new(68, 0, -32), Vector3.new(30, 0, 0), Vector3.new(30, 0, 0), 0.45), pose(Vector3.new(-40, -38, 10), Vector3.new(-55, 0, -24), Vector3.new(32, 0, -42), Vector3.new(38, 0, 0), Vector3.new(-32, 0, 0), 0.5) },
-	AirSpinL = { pose(Vector3.new(12, 48, -18), Vector3.new(94, 0, 62), Vector3.new(38, 0, -45), Vector3.new(42, 0, 18), Vector3.new(-30, 0, -16)), pose(Vector3.new(-18, -72, 22), Vector3.new(44, 0, -76), Vector3.new(58, 0, -52), Vector3.new(-28, 0, -12), Vector3.new(46, 0, 16)) },
-	AirSpinR = { pose(Vector3.new(12, -48, 18), Vector3.new(94, 0, -62), Vector3.new(38, 0, -45), Vector3.new(-30, 0, 16), Vector3.new(42, 0, -18)), pose(Vector3.new(-18, 72, -22), Vector3.new(44, 0, 76), Vector3.new(58, 0, -52), Vector3.new(46, 0, -16), Vector3.new(-28, 0, 12)) },
+	-- DEFAULT SWORD CHAIN ------------------------------------------------------------------------
+	-- Thrust: the sword hand draws back to the hip (blade level), then the whole body drives it
+	-- straight forward, the front foot lunges, the shield arm pulls back for balance.
+	Thrust = {
+		pose(v(6, -28, 0), v(-25, 0, 12), v(45, 0, -15), v(-10, 0, 0), v(20, 0, 0), 0.2, { re = 100, le = 55, rw = v(-80, 0, 0) }),
+		pose(v(-14, 22, 0), v(78, 0, 4), v(30, 0, -25), v(-28, 0, 0), v(38, 0, 0), 0.35, { re = 0, le = 50, rw = v(-90, 0, 0) }),
+		pose(v(-16, 24, 0), v(82, 0, 2), v(28, 0, -25), v(-30, 0, 0), v(40, 0, 0), 0.38, { re = 0, le = 50, rw = v(-92, 0, 0) }),
+	},
+	-- From the upper LEFT: the sword hand rises past the left ear (torso turned left), then cuts
+	-- diagonally down to the lower right while the hips turn through.
+	SlashLR = {
+		pose(v(6, 34, 6), v(150, 0, -40), v(30, 0, -30), v(16, 0, 0), v(-10, 0, 0), 0.1, { re = 85, le = 70, rw = v(-10, 0, 0) }),
+		pose(v(-12, -34, -8), v(50, 0, 50), v(35, 0, -15), v(-14, 0, 0), v(24, 0, 0), 0.28, { re = 10, le = 45, rw = v(-65, 0, 0) }),
+		pose(v(-14, -42, -10), v(30, 0, 65), v(35, 0, -15), v(-16, 0, 0), v(26, 0, 0), 0.3, { re = 15, le = 45, rw = v(-70, 0, 0) }),
+	},
+	-- From the upper RIGHT: the sword hand rises above the right shoulder (torso turned right), then
+	-- cuts diagonally down to the lower left.
+	SlashRL = {
+		pose(v(6, -32, -6), v(165, 0, 35), v(35, 0, -20), v(-12, 0, 0), v(18, 0, 0), 0.1, { re = 70, le = 50, rw = v(-10, 0, 0) }),
+		pose(v(-14, 34, 8), v(55, 0, -45), v(25, 0, -10), v(20, 0, 0), v(-15, 0, 0), 0.28, { re = 10, le = 40, rw = v(-70, 0, 0) }),
+		pose(v(-16, 42, 10), v(35, 0, -60), v(25, 0, -10), v(24, 0, 0), v(-16, 0, 0), 0.3, { re = 15, le = 40, rw = v(-75, 0, 0) }),
+	},
+	-- Middle, top to bottom: both feet set, the sword goes up over the head (blade down the back),
+	-- then comes down through the centre line while the body folds forward.
+	Overhead = {
+		pose(v(10, 0, 0), v(165, 0, 8), v(40, 0, -15), v(-14, 0, 0), v(20, 0, 0), 0.1, { re = 75, le = 60, rw = v(-10, 0, 0) }),
+		pose(v(-26, 0, 0), v(45, 0, -4), v(25, 0, -20), v(-24, 0, 0), v(34, 0, 0), 0.4, { re = 5, le = 40, rw = v(-70, 0, 0) }),
+		pose(v(-30, 0, 0), v(30, 0, -4), v(25, 0, -20), v(-26, 0, 0), v(36, 0, 0), 0.45, { re = 8, le = 40, rw = v(-72, 0, 0) }),
+	},
+	-- OTHER MOVES ---------------------------------------------------------------------------------
+	Slash = { pose(v(8, 46, -8), v(78, -18, 48), v(24, 0, -18), v(-16, 12, -5), v(24, -10, 5), 0.12), pose(v(-16, -52, 10), v(-42, 22, -58), v(34, 0, -24), v(26, -16, 4), v(-32, 14, -4), 0.18) },
+	Backhand = { pose(v(5, -48, 9), v(48, 18, -64), v(28, 0, -18), v(22, -14, 4), v(-20, 12, -4), 0.12), pose(v(-12, 50, -10), v(28, -24, 72), v(18, 0, -28), v(-26, 16, -4), v(28, -14, 4), 0.18) },
+	Low = { pose(v(-18, 38, -8), v(32, 0, 68), v(32, 0, -20), v(28, 12, 0), v(24, -12, 0), 0.45), pose(v(-24, -48, 8), v(12, 0, -74), v(42, 0, -24), v(34, -14, 0), v(-22, 14, 0), 0.5) },
+	Dive = { pose(v(22, 15, -8), v(138, 0, 20), v(48, 0, -28), v(42, 0, 12), v(38, 0, -12)), pose(v(-38, -20, 8), v(-46, 0, -18), v(32, 0, -24), v(32, 0, 8), v(-24, 0, -8), 0.2) },
+	Rise = { pose(v(-26, 24, -6), v(-32, 0, 28), v(24, 0, -18), v(36, 0, 0), v(32, 0, 0), 0.5), pose(v(20, -28, 8), v(142, 0, -24), v(48, 0, -28), v(-26, 0, 0), v(34, 0, 0)) },
+	Spin = { pose(v(0, 58, -8), v(54, 0, 70), v(30, 0, -48), v(-24, 20, 0), v(26, -20, 0), 0.18), pose(v(-12, -125, 10), v(48, 0, -80), v(36, 0, -52), v(28, -26, 0), v(-28, 24, 0), 0.22) },
+	Flurry = { pose(v(4, 32, -6), v(68, 0, 34), v(24, 0, -36), v(-16, 0, 0), v(22, 0, 0), 0.12), pose(v(-12, -38, 8), v(-22, 0, -42), v(82, 0, 36), v(24, 0, 0), v(-24, 0, 0), 0.16) },
+	Draw = { pose(v(0, 40, 0), v(60, 0, 0), v(85, 0, 0)), pose(v(0, 38, 0), v(70, 0, 0), v(85, 0, 0)) },
+	Guard = { pose(v(-8, 10, 0), nil, v(88, -15, -18), nil, v(-10, 0, 0), 0.3), pose(v(-8, 10, 0), nil, v(88, -15, -18), nil, v(-10, 0, 0), 0.3) },
+	Bash = { pose(v(4, -20, 0), nil, v(40, 0, 0)), pose(v(-14, 24, 0), nil, v(80, 0, 0), nil, v(-25, 0, 0), 0.2) },
+	RetreatCut = { pose(v(-8, 30, -8), v(62, 0, 42), v(25, 0, -20), v(24, 0, 0), v(-12, 0, 0), 0.2), pose(v(12, -42, 8), v(-24, 0, -56), v(42, 0, -18), v(-32, 0, 0), v(28, 0, 0), 0.28) },
+	Wide = { pose(v(4, -58, 8), v(76, 0, -76), v(28, 0, -28), v(16, -20, 0), v(-18, 18, 0), 0.2), pose(v(-12, 62, -10), v(68, 0, 84), v(35, 0, -32), v(-22, 22, 0), v(28, -20, 0), 0.24) },
+	Cross = { pose(v(8, 32, -8), v(72, 0, 42), v(24, 0, -42), v(-20, 0, 0), v(24, 0, 0), 0.15), pose(v(-18, -34, 8), v(-28, 0, -58), v(76, 0, 48), v(26, 0, 0), v(-26, 0, 0), 0.2) },
+	Ultimate = { pose(v(24, 30, -8), v(152, 0, 24), v(68, 0, -32), v(30, 0, 0), v(30, 0, 0), 0.45), pose(v(-40, -38, 10), v(-55, 0, -24), v(32, 0, -42), v(38, 0, 0), v(-32, 0, 0), 0.5) },
+	AirSpinL = { pose(v(12, 48, -18), v(94, 0, 62), v(38, 0, -45), v(42, 0, 18), v(-30, 0, -16)), pose(v(-18, -72, 22), v(44, 0, -76), v(58, 0, -52), v(-28, 0, -12), v(46, 0, 16)) },
+	AirSpinR = { pose(v(12, -48, 18), v(94, 0, -62), v(38, 0, -45), v(-30, 0, 16), v(42, 0, -18)), pose(v(-18, 72, -22), v(44, 0, 76), v(58, 0, -52), v(46, 0, -16), v(-28, 0, 12)) },
 }
 
 local ALIAS: { [string]: string } = {
-	SlashRL = "Slash", SlashLR = "Backhand", ParryCounter = "Thrust",
+	ParryCounter = "Thrust",
 	SlideCut = "Low", SlideThrust = "Thrust", SlideCross = "Cross",
 	SlideRise = "Rise", SlideReaper = "Low",
 }
 
--- Block poses: the shield arm (left) comes up in front, across, over the head or down low
+-- The shield rides on the outer left forearm (its face points out of the back of the hand), so
+-- these arm angles turn the face: they were solved against the R15 arm chain for the shield
+-- centre and facing given in each comment (torso space, -Z forward).
+-- Carried, drawn and not blocking: forearm across the body, shield upright beside the chest.
+local CARRY: Pose = pose(Vector3.zero, nil, v(20, -60, 30), nil, nil, 0, { le = 105, lw = v(0, 0, 30) })
+local CARRY_RISE = 5 -- 1 / seconds
+-- Block poses: the shield comes up in front of the chest, to either side, up high or down low
 local BLOCK: { [string]: Pose } = {
-	Front = pose(Vector3.new(-8, 10, 0), nil, Vector3.new(88, -15, -18), nil, Vector3.new(-10, 0, 0), 0.3),
-	Left = pose(Vector3.new(-6, -22, 0), nil, Vector3.new(70, 0, 28), nil, Vector3.new(-6, 0, 0), 0.2),
-	Right = pose(Vector3.new(-6, 22, 0), nil, Vector3.new(68, -14, -12), nil, Vector3.new(-6, 0, 0), 0.25),
-	High = pose(Vector3.new(-4, 0, 0), nil, Vector3.new(120, 0, 0), nil, Vector3.new(-6, 0, 0), 0),
-	Low = pose(Vector3.new(12, 0, 0), nil, Vector3.new(28, 0, 0), nil, Vector3.new(12, 0, 0), 0.4),
+	Front = pose(v(-8, 10, 0), nil, v(90, 0, 60), nil, v(-10, 0, 0), 0.3, { le = 30, lw = v(-30, 0, 30) }), -- chest high, facing forward
+	Left = pose(v(-6, -22, 0), nil, v(90, 0, 45), nil, v(-6, 0, 0), 0.2, { le = 120, lw = v(-30, 0, 0) }), -- facing front-left
+	Right = pose(v(-6, 22, 0), nil, v(90, -45, 60), nil, v(-6, 0, 0), 0.25, { le = 60, lw = v(-30, 0, 60) }), -- across, facing front-right
+	High = pose(v(-4, 0, 0), nil, v(130, 30, 60), nil, v(-6, 0, 0), 0, { le = 0, lw = v(0, 0, 30) }), -- before the forehead, tilted up
+	Low = pose(v(12, 0, 0), nil, v(70, -45, 60), nil, v(12, 0, 0), 0.4, { le = 0, lw = v(0, 0, 30) }), -- before the knees, tilted down
 }
--- Full brace (BraceLevel 1, server-driven while BLOCK is held): the shield arm lifts the shield flat
--- over the head and the knees bend into a crouch. It replaces the block pose as it grows.
-local BRACE: Pose = pose(Vector3.new(-10, 0, 0), nil, Vector3.new(165, 0, 6), Vector3.new(30, 0, 0), Vector3.new(30, 0, 0), 0.9)
+-- Holding BLOCK (BraceLevel 0 -> 1, server-driven): the player sinks slowly into a deep crouch while
+-- the shield climbs from the chest (stage I) to the forehead (II) until it lies flat over the head
+-- (III), about where the standing player's shoulders were. The sword arm stays back, ready.
+local BRACE_MID_AT = 0.4 -- BraceLevel of the middle pose (= stage II, BlockDefinitions)
+local BRACE_MID: Pose = pose(v(-10, 4, 0), v(10, 0, 10), v(130, 30, 60), v(10, 0, 0), v(10, 0, 0), 0.7, { re = 30, le = 0, lw = v(0, 0, 30) })
+local BRACE: Pose = pose(v(-12, 0, 0), v(15, 0, 14), v(140, 45, 60), v(10, 0, 0), v(10, 0, 0), 1.25, { re = 35, le = 0, lw = v(30, 0, 60) }) -- flat, face up
+-- Twin daggers have no shield: BLOCK crosses both blades before and above the face like a grille.
+local DAGGER_GUARD: Pose = pose(v(-6, 0, 0), v(100, -15, -30), v(100, 15, 30), nil, nil, 0.25, { re = 0, le = 0, rw = v(-60, 0, 60), lw = v(-60, 0, -60) })
+-- Drawing and putting away (SheatheAt, SheatheReach, SheatheOffReach): each hand reaches its
+-- mount (over the shoulder to the back, or down to the hip), the gear changes place on the
+-- server at the peak, then the arm returns.
+local SHEATHE_REACH = 0.3 -- = PlayerCombatService
+local SHEATHE_RETURN = 0.4
+local REACH_RIGHT: { [string]: Pose } = {
+	Back = pose(v(0, -8, 0), v(160, 45, 15), nil, nil, nil, 0, { re = 120 }),
+	Belt = pose(v(0, -10, 0), v(-30, 0, 0), nil, nil, nil, 0.05, { re = 50 }),
+}
+local REACH_LEFT: { [string]: Pose } = {
+	Back = pose(v(0, 8, 0), nil, v(160, -45, -15), nil, nil, 0, { le = 120 }),
+	Belt = pose(v(0, 10, 0), nil, v(-30, 0, 0), nil, nil, 0.05, { le = 50 }),
+}
+-- Deep crouch: beyond CROUCH_FREE the legs fold (thigh forward, shin back) so the feet stay on
+-- the ground instead of sinking while the root drops (two leg segments of about LEG studs).
+local CROUCH_FREE = 0.45
+local LEG = 1.05
+local BRACE_FOLLOW = 6 -- 1 / seconds: the shown brace eases toward the server's BraceLevel
 local BLOCK_RISE = 8 -- 1 / seconds to fully raise the block
 local IMPACT_SECONDS = 0.3
-local IMPACT: Pose = pose(Vector3.new(-9, 0, 0), Vector3.new(0, 0, -8))
+local IMPACT: Pose = pose(v(-9, 0, 0), v(0, 0, -8))
 local SLIDE_BLEND = 0.1
-local SLIDE_POSE: Pose = pose(Vector3.new(-22, 0, 8), Vector3.new(10, 0, -18), Vector3.new(10, 0, 18), Vector3.new(-30, 0, 0), Vector3.new(55, 0, 0), 0.75)
+local SLIDE_POSE: Pose = pose(v(-22, 0, 8), v(10, 0, -18), v(10, 0, 18), v(-30, 0, 0), v(55, 0, 0), 0.75)
 local HIT_SECONDS = 0.35
-local HIT_POSE: Pose = pose(Vector3.new(18, 0, 0), Vector3.new(18, 0, -14), Vector3.new(22, 0, 14), Vector3.new(-18, 0, 0), Vector3.new(22, 0, 0), 0.16)
+local HIT_POSE: Pose = pose(v(18, 0, 0), v(18, 0, -14), v(22, 0, 14), v(-18, 0, 0), v(22, 0, 0), 0.16)
 -- Special charge: the weapon arm (right) draws back and up, the body coils. It never touches the
 -- shield arm, so it combines cleanly with the block layer (block + charge together).
-local CHARGE_POSE: Pose = pose(Vector3.new(4, 26, 0), Vector3.new(55, 0, 35), nil, Vector3.new(-8, 0, 0), Vector3.new(14, 0, 0), 0.25)
+local CHARGE_POSE: Pose = pose(v(4, 26, 0), v(55, 0, 35), nil, v(-8, 0, 0), v(14, 0, 0), 0.25, { rw = v(-30, 0, 0) })
 
-local function angles(v: Vector3): CFrame
-	return CFrame.Angles(rad(v.X), rad(v.Y), rad(v.Z))
+local CROSSFADE = 26 -- 1 / seconds: how fast the shown pose follows the summed layers
+local STRIKE_SECONDS = 0.12 -- wind-up end -> strike pose
+local FOLLOW_SECONDS = 0.1 -- strike pose -> follow-through pose (three-key moves)
+
+local function angles(a: Vector3): CFrame
+	return CFrame.Angles(rad(a.X), rad(a.Y), rad(a.Z))
 end
 
 local function scaled(p: Pose, k: number): Pose
-	return { waist = p.waist * k, rightShoulder = p.rightShoulder * k, leftShoulder = p.leftShoulder * k, rightHip = p.rightHip * k, leftHip = p.leftHip * k, crouch = p.crouch * k }
+	return {
+		waist = p.waist * k, rightShoulder = p.rightShoulder * k, leftShoulder = p.leftShoulder * k,
+		rightHip = p.rightHip * k, leftHip = p.leftHip * k, crouch = p.crouch * k,
+		rightElbow = p.rightElbow * k, leftElbow = p.leftElbow * k, rightWrist = p.rightWrist * k, leftWrist = p.leftWrist * k,
+	}
 end
 
 local function add(a: Pose, b: Pose): Pose
-	return { waist = a.waist + b.waist, rightShoulder = a.rightShoulder + b.rightShoulder, leftShoulder = a.leftShoulder + b.leftShoulder, rightHip = a.rightHip + b.rightHip, leftHip = a.leftHip + b.leftHip, crouch = a.crouch + b.crouch }
+	return {
+		waist = a.waist + b.waist, rightShoulder = a.rightShoulder + b.rightShoulder, leftShoulder = a.leftShoulder + b.leftShoulder,
+		rightHip = a.rightHip + b.rightHip, leftHip = a.leftHip + b.leftHip, crouch = a.crouch + b.crouch,
+		rightElbow = a.rightElbow + b.rightElbow, leftElbow = a.leftElbow + b.leftElbow,
+		rightWrist = a.rightWrist + b.rightWrist, leftWrist = a.leftWrist + b.leftWrist,
+	}
 end
 
 local function blend(a: Pose, b: Pose, t: number): Pose
@@ -97,37 +211,171 @@ local function ease(t: number): number
 	return t * t * (3 - 2 * t)
 end
 
--- The pose at time `elapsed` of an attack: anticipation -> fast strike -> recovery.
-local function sample(anim: string, elapsed: number, wind: number, length: number): Pose?
+-- The pose at time `elapsed` of an attack: anticipation -> fast strike [-> follow-through] -> recovery.
+-- The anticipation starts from `from`: the pose an interrupted previous attack had reached, so a
+-- quick combo flows from one swing into the next instead of snapping back to rest first.
+local function sample(anim: string, elapsed: number, wind: number, length: number, from: Pose): Pose?
 	local set = POSES[ALIAS[anim] or anim]
 	if not set or elapsed < 0 or elapsed > length + 0.25 then
 		return nil
 	end
-	local strikeTime = 0.12
 	if elapsed < wind then
-		return blend(ZERO, set[1], ease(elapsed / math.max(0.001, wind)))
-	elseif elapsed < wind + strikeTime then
-		return blend(set[1], set[2], ease((elapsed - wind) / strikeTime))
+		return blend(from, set[1], ease(elapsed / math.max(0.001, wind)))
+	elseif elapsed < wind + STRIKE_SECONDS then
+		return blend(set[1], set[2], ease((elapsed - wind) / STRIKE_SECONDS))
 	end
-	local recover = math.max(0.2, length + 0.25 - wind - strikeTime)
-	return blend(set[2], ZERO, ease((elapsed - wind - strikeTime) / recover))
+	local last = set[2]
+	local settled = wind + STRIKE_SECONDS
+	local follow = set[3]
+	if follow then
+		if elapsed < settled + FOLLOW_SECONDS then
+			return blend(set[2], follow, ease((elapsed - settled) / FOLLOW_SECONDS))
+		end
+		last = follow
+		settled += FOLLOW_SECONDS
+	end
+	local recover = math.max(0.2, length + 0.25 - settled)
+	return blend(last, ZERO, ease((elapsed - settled) / recover))
 end
 
-type Motors = { waist: Motor6D?, root: Motor6D?, rightShoulder: Motor6D?, leftShoulder: Motor6D?, rightHip: Motor6D?, leftHip: Motor6D?, rightElbow: Motor6D?, leftElbow: Motor6D?, rightKnee: Motor6D?, leftKnee: Motor6D? }
-type BlockState = { alpha: number, pose: string }
+-- SPECIAL MOVES: keyframe tracks from SpecialAnimationDefinitions ("<Prefix>:<MoveId>" in the
+-- SpecialAnimation attribute). Poses are eased between keys; the whole-body spin is sampled straight
+-- from the track (never crossfaded) and wraps at 360°, so a turn never unwinds backwards.
+local SPECIAL_RECOVER = 0.3 -- seconds from the last key back to the walk
+local SPECIAL_MAX_AIR = 3 -- an aerial without a reported landing lets go after this long
 
-local function find(character: Model, partName: string, motorName: string): Motor6D?
+local converted: { [SpecialAnimations.KeyPose]: Pose } = setmetatable({}, { __mode = "k" }) :: any
+local function keyPose(p: SpecialAnimations.KeyPose): Pose
+	local cached = converted[p]
+	if not cached then
+		cached = pose(p.w or Vector3.zero, p.rs, p.ls, p.rh, p.lh, p.c, { re = p.re, le = p.le, rw = p.rw, lw = p.lw })
+		converted[p] = cached
+	end
+	return cached
+end
+
+-- The pose and spin of a key list at `t` (nil once the keys and their recovery are over). `hold`
+-- keeps the last key instead of recovering (an aerial waiting for its landing).
+local function sampleKeys(keys: { SpecialAnimations.Key }, t: number, hold: boolean): (Pose?, number)
+	if #keys == 0 or t < 0 then
+		return nil, 0
+	end
+	local spin = 0
+	local previous: SpecialAnimations.Key? = nil
+	for _, key in keys do
+		if t < key.t then
+			local fromPose = if previous then keyPose(previous.p) else ZERO
+			local fromTime = if previous then previous.t else 0
+			local share = ease((t - fromTime) / math.max(0.001, key.t - fromTime))
+			local toSpin = key.s or spin
+			return blend(fromPose, keyPose(key.p), share), spin + (toSpin - spin) * share
+		end
+		spin = key.s or spin
+		previous = key
+	end
+	local last = keys[#keys]
+	if hold then
+		return keyPose(last.p), spin
+	end
+	local after = t - last.t
+	if after > SPECIAL_RECOVER then
+		return nil, 0
+	end
+	return blend(keyPose(last.p), ZERO, ease(after / SPECIAL_RECOVER)), spin
+end
+
+local function specialPose(character: Model, now: number): (Pose?, number)
+	local name = character:GetAttribute("SpecialAnimation")
+	local track = if typeof(name) == "string" then SpecialAnimations[name] else nil
+	if not track then
+		return nil, 0
+	end
+	local start = tonumber(character:GetAttribute("SpecialAnimationStart")) or 0
+	local landing = tonumber(character:GetAttribute("SpecialLandingStart"))
+	local p: Pose?, spin: number
+	if track.Aerial and track.Land and landing and landing >= start then
+		p, spin = sampleKeys(track.Land, now - landing, false)
+	else
+		local elapsed = now - start
+		p, spin = sampleKeys(track.Keys, elapsed, track.Aerial and elapsed < SPECIAL_MAX_AIR)
+	end
+	return p, spin % 360
+end
+
+-- The shield pose for a raised guard of `brace` (0 = just raised, 1 = full brace over the head)
+local function guardPose(direction: Pose, brace: number): Pose
+	if brace <= BRACE_MID_AT then
+		return blend(direction, BRACE_MID, ease(brace / BRACE_MID_AT))
+	end
+	return blend(BRACE_MID, BRACE, ease((brace - BRACE_MID_AT) / (1 - BRACE_MID_AT)))
+end
+
+-- A joint we can drive: classic Motor6D or an upgraded avatar joint (AnimationConstraint)
+type Joint = Motor6D | AnimationConstraint
+type Motors = {
+	waist: Joint?, root: Joint?, rightShoulder: Joint?, leftShoulder: Joint?, rightHip: Joint?, leftHip: Joint?,
+	rightElbow: Joint?, leftElbow: Joint?, rightKnee: Joint?, leftKnee: Joint?, rightWrist: Joint?, leftWrist: Joint?,
+}
+type BlockState = { alpha: number, pose: string, brace: number, carry: number }
+type AttackState = { start: number, from: Pose, last: Pose }
+
+-- How well a joint of the wanted name can drive the limb: an enabled upgraded joint beats an
+-- enabled Motor6D (a rig may keep its old Motor6D disabled next to the AnimationConstraint).
+local function rank(instance: Instance): number
+	if instance:IsA("AnimationConstraint") then
+		return if instance.Enabled then 4 else 1
+	elseif instance:IsA("Motor6D") then
+		return if instance.Enabled then 3 else 2
+	end
+	return 0
+end
+
+local function find(character: Model, partName: string, motorName: string): Joint?
+	local best: Instance? = nil
+	local bestRank = 0
+	local function consider(instance: Instance)
+		if instance.Name == motorName then
+			local r = rank(instance)
+			if r > bestRank then
+				best, bestRank = instance, r
+			end
+		end
+	end
 	local part = character:FindFirstChild(partName)
-	local motor = part and part:FindFirstChild(motorName)
-	return if motor and motor:IsA("Motor6D") then motor else nil
+	if part then
+		for _, child in part:GetChildren() do
+			consider(child)
+		end
+	end
+	if bestRank < 4 then
+		-- upgraded joints may live elsewhere in the rig
+		for _, descendant in character:GetDescendants() do
+			consider(descendant)
+		end
+	end
+	local found = best
+	if found and found:IsA("Motor6D") then
+		return found
+	elseif found and found:IsA("AnimationConstraint") then
+		return found
+	end
+	return nil
 end
 
 -- Additive write that never accumulates: if the Animator didn't touch the joint since our last
 -- write, we build on the same base again instead of on our own previous result.
 type Written = { written: CFrame, base: CFrame }
-local written: { [Motor6D]: Written } = setmetatable({}, { __mode = "k" }) :: any
+local written: { [Joint]: Written } = setmetatable({}, { __mode = "k" }) :: any
 
-local function applyAdditive(motor: Motor6D?, offset: CFrame?)
+local function setTransform(joint: Joint, value: CFrame)
+	if joint:IsA("Motor6D") then
+		joint.Transform = value
+	elseif joint:IsA("AnimationConstraint") then
+		joint.Transform = value
+	end
+end
+
+local function applyAdditive(motor: Joint?, offset: CFrame?)
 	if not motor then
 		return
 	end
@@ -136,19 +384,26 @@ local function applyAdditive(motor: Motor6D?, offset: CFrame?)
 	local base = if entry and current == entry.written then entry.base else current
 	if offset then
 		local result = base * offset
-		motor.Transform = result
+		setTransform(motor, result)
 		written[motor] = { written = result, base = base }
 	elseif entry then
 		if current == entry.written then
-			motor.Transform = entry.base -- layers ended: back to the untouched pose
+			setTransform(motor, entry.base) -- layers ended: back to the untouched pose
 		end
 		written[motor] = nil
 	end
 end
 
+local function residualOf(p: Pose): number
+	return p.waist.Magnitude + p.rightShoulder.Magnitude + p.leftShoulder.Magnitude + p.rightHip.Magnitude
+		+ p.leftHip.Magnitude + math.abs(p.crouch) + math.abs(p.rightElbow) + math.abs(p.leftElbow)
+		+ p.rightWrist.Magnitude + p.leftWrist.Magnitude
+end
+
 function PlayerAnimator.start()
 	local cache: { [Model]: Motors } = setmetatable({}, { __mode = "k" }) :: any
 	local blocks: { [Model]: BlockState } = setmetatable({}, { __mode = "k" }) :: any
+	local attacks: { [Model]: AttackState } = setmetatable({}, { __mode = "k" }) :: any
 	-- Remove our previous offsets BEFORE Animator evaluation, including joints it skips.
 	RunService.PreAnimation:Connect(function()
 		for motor in written do
@@ -166,24 +421,48 @@ function PlayerAnimator.start()
 
 			local total: Pose = ZERO
 			local active = false
+			local spin = 0
 
-			-- Attack
+			-- Attack: a special move's own choreography, otherwise the basic attack pose
 			local anim = character:GetAttribute("AttackAnim")
-			if typeof(anim) == "string" then
-				local p = sample(anim, now - (tonumber(character:GetAttribute("AttackStart")) or 0), tonumber(character:GetAttribute("AttackWind")) or 0.1, tonumber(character:GetAttribute("AttackLength")) or 0.5)
+			local attackState = attacks[character]
+			local special, specialSpin = specialPose(character, now)
+			if special then
+				total = add(total, special)
+				spin = specialSpin
+				active = true
+				if attackState then
+					attackState.last = special -- the next attack winds up from here
+				end
+			elseif typeof(anim) == "string" then
+				local start = tonumber(character:GetAttribute("AttackStart")) or 0
+				if not attackState then
+					attackState = { start = start, from = ZERO, last = ZERO }
+					attacks[character] = attackState
+				elseif attackState.start ~= start then
+					-- a new attack: wind up from wherever the previous one is right now
+					attackState.start = start
+					attackState.from = attackState.last
+				end
+				local p = sample(anim, now - start, tonumber(character:GetAttribute("AttackWind")) or 0.1, tonumber(character:GetAttribute("AttackLength")) or 0.5, attackState.from)
+				attackState.last = p or ZERO
 				if p then
 					total = add(total, p)
 					active = true
 				end
+			elseif attackState then
+				attackState.last = ZERO
 			end
 
-			-- Block layer (eased in and out) plus the impact recoil on every blocked hit
+			-- Block layer (eased in and out), the slow brace while BLOCK is held, and the impact
+			-- recoil on every blocked hit
 			local state = blocks[character]
 			if not state then
-				state = { alpha = 0, pose = "Front" }
+				state = { alpha = 0, pose = "Front", brace = 0, carry = 0 }
 				blocks[character] = state
 			end
-			local blocking = character:GetAttribute("Blocking") == true
+			local daggers = character:GetAttribute("GuardStyle") == "Daggers"
+			local blocking = character:GetAttribute("Blocking") == true or (daggers and character:GetAttribute("SpecialBlockHeld") == true)
 			if blocking then
 				local chosen = character:GetAttribute("BlockPose")
 				if typeof(chosen) == "string" and BLOCK[chosen] then
@@ -192,13 +471,36 @@ function PlayerAnimator.start()
 			end
 			local target = if blocking then 1 else 0
 			state.alpha += math.clamp(target - state.alpha, -dt * BLOCK_RISE, dt * BLOCK_RISE)
-			local brace = ease(math.clamp(tonumber(character:GetAttribute("BraceLevel")) or 0, 0, 1)) * ease(state.alpha)
-			if state.alpha > 0.001 and brace < 1 then
-				total = add(total, scaled(BLOCK[state.pose] or BLOCK.Front, ease(state.alpha) * (1 - brace)))
+			-- The server publishes BraceLevel ten times a second; easing toward it keeps the crouch smooth
+			local braceTarget = if blocking then math.clamp(tonumber(character:GetAttribute("BraceLevel")) or 0, 0, 1) else 0
+			state.brace += (braceTarget - state.brace) * (1 - math.exp(-BRACE_FOLLOW * math.min(dt, 0.1)))
+			if state.alpha > 0.001 then
+				local guard = if daggers then DAGGER_GUARD else guardPose(BLOCK[state.pose] or BLOCK.Front, state.brace)
+				total = add(total, scaled(guard, ease(state.alpha)))
 				active = true
 			end
-			if brace > 0.001 then
-				total = add(total, scaled(BRACE, brace))
+			-- Shield carried beside the chest while drawn; it gives way to strikes and the block
+			local carryTarget = if not active and character:GetAttribute("ShieldInHand") == true and character:GetAttribute("GuardStyle") == "Shield" then 1 else 0
+			state.carry += math.clamp(carryTarget - state.carry, -dt * CARRY_RISE * 2, dt * CARRY_RISE)
+			local carryWeight = ease(state.carry) * (1 - ease(state.alpha))
+			if carryWeight > 0.001 then
+				total = add(total, scaled(CARRY, carryWeight))
+				active = true
+			end
+
+			-- Drawing / putting away: reach to the mount, then back
+			local sheatheAt = tonumber(character:GetAttribute("SheatheAt"))
+			local sinceSheathe = if sheatheAt then now - sheatheAt else -1
+			if sinceSheathe >= 0 and sinceSheathe < SHEATHE_REACH + SHEATHE_RETURN then
+				local w = if sinceSheathe < SHEATHE_REACH then ease(sinceSheathe / SHEATHE_REACH) else 1 - ease((sinceSheathe - SHEATHE_REACH) / SHEATHE_RETURN)
+				local right = REACH_RIGHT[tostring(character:GetAttribute("SheatheReach"))]
+				local left = REACH_LEFT[tostring(character:GetAttribute("SheatheOffReach"))]
+				if right then
+					total = add(total, scaled(right, w))
+				end
+				if left then
+					total = add(total, scaled(left, w))
+				end
 				active = true
 			end
 			local impactAt = tonumber(character:GetAttribute("BlockImpactAt")) or 0
@@ -210,7 +512,7 @@ function PlayerAnimator.start()
 			end
 
 			local sinceParry = now - (tonumber(character:GetAttribute("ParryPoseAt")) or 0)
-			if sinceParry >= 0 and sinceParry < 0.3 then
+			if sinceParry >= 0 and sinceParry < 0.3 and not daggers then -- the crossed guard is the daggers' parry
 				total = add(total, scaled(POSES.Cross[2], math.sin(math.pi * sinceParry / 0.3)))
 				active = true
 			end
@@ -246,29 +548,29 @@ function PlayerAnimator.start()
 				active = true
 			end
 
+			local fallAt = tonumber(character:GetAttribute("SpecialFallStart")) or -100
+			local fallLength = tonumber(character:GetAttribute("SpecialFallLength")) or 1.1
+			if now >= fallAt and now < fallAt + fallLength then
+				local phase = (now - fallAt) / fallLength
+				local weight = if phase < 0.2 then ease(phase / 0.2) elseif phase > 0.7 then 1 - ease((phase - 0.7) / 0.3) else 1
+				total = scaled(pose(v(15, 0, 8), v(65, 0, 40), v(65, 0, -40), v(25, 0, 8), v(12, 0, -8), 0.1, { re = 35, le = 35 }), weight)
+				active = true
+			end
+
 			-- A short frame-rate-independent crossfade also covers interrupted combo stages,
 			-- block direction changes, charge release, and the final return to locomotion.
 			local previous = displayed[character] or ZERO
-			total = blend(previous, total, 1 - math.exp(-18 * math.min(dt, 0.1)))
+			total = blend(previous, total, 1 - math.exp(-CROSSFADE * math.min(dt, 0.1)))
 			displayed[character] = total
-			local residual = total.waist.Magnitude + total.rightShoulder.Magnitude + total.leftShoulder.Magnitude
-				+ total.rightHip.Magnitude + total.leftHip.Magnitude + math.abs(total.crouch)
 			local motors = cache[character]
-			if not active and residual < 0.02 then
+			if not active and residualOf(total) < 0.02 then
 				displayed[character] = nil
 				-- Nothing to add: release the joints this character had written
 				if motors then
 					local m = motors :: Motors
-					applyAdditive(m.waist, nil)
-					applyAdditive(m.root, nil)
-					applyAdditive(m.rightShoulder, nil)
-					applyAdditive(m.leftShoulder, nil)
-					applyAdditive(m.rightHip, nil)
-					applyAdditive(m.leftHip, nil)
-					applyAdditive(m.rightElbow, nil)
-					applyAdditive(m.leftElbow, nil)
-					applyAdditive(m.rightKnee, nil)
-					applyAdditive(m.leftKnee, nil)
+					for _, joint in { m.waist, m.root, m.rightShoulder, m.leftShoulder, m.rightHip, m.leftHip, m.rightElbow, m.leftElbow, m.rightKnee, m.leftKnee, m.rightWrist, m.leftWrist } do
+						applyAdditive(joint, nil)
+					end
 					cache[character] = nil
 				end
 				continue
@@ -285,21 +587,35 @@ function PlayerAnimator.start()
 					leftElbow = find(character, "LeftLowerArm", "LeftElbow"),
 					rightKnee = find(character, "RightLowerLeg", "RightKnee"),
 					leftKnee = find(character, "LeftLowerLeg", "LeftKnee"),
+					rightWrist = find(character, "RightHand", "RightWrist"),
+					leftWrist = find(character, "LeftHand", "LeftWrist"),
 				}
 				cache[character] = motors
 			end
 			local m = motors :: Motors
 			applyAdditive(m.waist, angles(total.waist))
-			applyAdditive(m.root, if total.crouch > 0 then CFrame.new(0, -total.crouch, 0) else nil)
+			-- Root: the crouch, and the whole-body spin of a special (one turn = 360°)
+			local rootOffset: CFrame? = if total.crouch > 0 then CFrame.new(0, -total.crouch, 0) else nil
+			if spin ~= 0 then
+				rootOffset = (rootOffset or CFrame.identity) * CFrame.Angles(0, rad(spin), 0)
+			end
+			applyAdditive(m.root, rootOffset)
 			applyAdditive(m.rightShoulder, angles(total.rightShoulder))
 			applyAdditive(m.leftShoulder, angles(total.leftShoulder))
-			applyAdditive(m.rightHip, angles(total.rightHip))
-			applyAdditive(m.leftHip, angles(total.leftHip))
+			-- Deep crouch: fold both legs by `fold` (thigh) and twice that (knee) so the feet stay down
+			local fold = 0
+			if total.crouch > CROUCH_FREE then
+				fold = math.deg(math.acos(math.clamp(1 - (total.crouch - CROUCH_FREE) / (2 * LEG), -1, 1)))
+			end
+			applyAdditive(m.rightHip, angles(total.rightHip + Vector3.new(fold, 0, 0)))
+			applyAdditive(m.leftHip, angles(total.leftHip + Vector3.new(fold, 0, 0)))
 			-- Bend through the limb chain; grips inherit hand movement without any weld animation.
-			applyAdditive(m.rightElbow, angles(Vector3.new(math.min(65, total.rightShoulder.Magnitude * 0.35, math.max(0, 180 - total.rightShoulder.X) * 0.8), 0, 0)))
-			applyAdditive(m.leftElbow, angles(Vector3.new(math.min(85, total.leftShoulder.Magnitude * 0.5, math.max(0, 180 - total.leftShoulder.X) * 0.8), 0, 0)))
-			applyAdditive(m.rightKnee, angles(Vector3.new(-math.min(55, math.abs(total.rightHip.X) * 0.5 + total.crouch * 25), 0, 0)))
-			applyAdditive(m.leftKnee, angles(Vector3.new(-math.min(55, math.abs(total.leftHip.X) * 0.5 + total.crouch * 25), 0, 0)))
+			applyAdditive(m.rightElbow, angles(Vector3.new(math.clamp(total.rightElbow, 0, 120), 0, 0)))
+			applyAdditive(m.leftElbow, angles(Vector3.new(math.clamp(total.leftElbow, 0, 120), 0, 0)))
+			applyAdditive(m.rightWrist, angles(total.rightWrist))
+			applyAdditive(m.leftWrist, angles(total.leftWrist))
+			applyAdditive(m.rightKnee, angles(Vector3.new(-math.min(140, math.min(55, math.abs(total.rightHip.X) * 0.5 + total.crouch * 25) + 2 * fold), 0, 0)))
+			applyAdditive(m.leftKnee, angles(Vector3.new(-math.min(140, math.min(55, math.abs(total.leftHip.X) * 0.5 + total.crouch * 25) + 2 * fold), 0, 0)))
 		end
 	end)
 end
