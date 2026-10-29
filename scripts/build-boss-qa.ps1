@@ -6,7 +6,7 @@ $project = Get-Content (Join-Path $repo 'places/arena.project.json') -Raw | Conv
 # Paths are resolved from build/, at the same depth as places/.
 $project.tree.ServerScriptService.HeroQA = @{ '$path' = '../scripts/boss-studio-qa.server.luau' }
 $project.tree.StarterPlayer.StarterPlayerScripts.HeroQA = @{ '$path' = '../scripts/boss-studio-qa.client.luau' }
-$project.tree.Workspace = @{ '$className' = 'Workspace'; '$attributes' = @{ StudioBossChoice = 'Kroko' } }
+$project.tree.Workspace = @{ '$className' = 'Workspace'; '$attributes' = @{ StudioBossChoice = 'Otti' } }
 New-Item -ItemType Directory -Force (Join-Path $repo 'build') | Out-Null
 $path = Join-Path $repo 'build/boss-qa.project.json'
 $project | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $path -Encoding utf8

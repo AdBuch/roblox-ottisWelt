@@ -11,6 +11,8 @@ Kroko closes distance aggressively, rushes in a straight line, uses a long croco
 
 The interrupted flag now clears when stagger recovery finishes. Previously it stayed true and the executor rejected every subsequent attack. Guards have a real expiry; retreat movement is no longer overwritten in the same AI tick. Attack results record actual damaging contacts so hit-dependent follow-ups can run.
 
+Explicitly selecting `Otti` now also runs his entrance. Previously the non-empty selection string skipped the entrance and left his spectator root anchored on the tribune. Entrance selection now uses the constructed boss's species instead of the request string.
+
 Visual reference: the canonical descriptions supplied in chat and `CHARACTER_DESIGN.md`. Original reference pictures were not available in this checkout. The Studio review covers front/back silhouettes, face readability, necklace visibility, shell placement and articulated limbs; it does not establish an exact match to missing pictures.
 
 ## Tests

@@ -234,7 +234,7 @@ local function runIntro(myToken: number): boolean
 		end
 	end
 	-- Otti jumps into the arena from his box; a companion simply stands in the arena already
-	if not companion then
+	if not current.companion then -- the explicit selection "Otti" also needs his entrance/unanchor
 		local folder = arenaFolder :: Instance
 		local ok = OttiEntranceService.play(current, folder, function()
 			return token == myToken

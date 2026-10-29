@@ -29,6 +29,10 @@ local arena = workspace:WaitForChild(Config.ArenaFolderName)
 local deadline = os.clock() + 90
 repeat task.wait(0.2) until (tonumber(arena:GetAttribute(Config.BossHealthAttribute)) or 0) > 0 or os.clock() > deadline
 check(Rules.canZombiesTarget(player), "real match admits fighter")
+local liveModel, liveRoot = BossService.getHittable()
+check(liveModel ~= nil and liveRoot ~= nil, "explicit Otti selection starts encounter")
+check(liveRoot ~= nil and not liveRoot.Anchored, "Otti leaves the anchored spectator seat")
+check(liveRoot ~= nil and Arena.isInside(liveRoot.Position), "Otti lands inside the arena")
 BossService.stop() -- keep the real match and its damage rules; execute controlled attacks below
 task.wait(3)
 local character = player.Character :: Model
