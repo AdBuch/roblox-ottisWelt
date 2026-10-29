@@ -1,61 +1,96 @@
-# Lobbyring und Boss-Test
+# Drei Heldenlobbys und Hypogeum
 
 Branch: `feature/lobby-und-rom`.
 
-Der Hub bildet einen durchgehenden Ring unter den Tribünen. In Kreisrichtung:
+Die drei Hallen greifen den ursprünglichen 80 × 72 Studs großen Lobbyraum wieder auf:
+Gewölberippen, Säulen, Monument mit Inschrift, Mosaik, Banner, Bänke und ein freier
+Arenazugang. Otti, Schilibitzli/Schili und Krokero/Kroko erhalten jeweils eine vollständige
+Halle. Die beiden ehemaligen Tribünentreppen pro Halle führen ins Hypogeum.
 
-| Winkel | Bereich |
-| --- | --- |
-| 0° | Otti-Statue und bestehendes Co-op-Mosaik |
-| 60° | Schildshop zwischen Otti und Schili |
-| 120° | Schili-Statue und blaues Team-Mosaik |
-| 180° | Rüstungsshop zwischen Schili und Krokero |
-| 240° | Krokero-Statue und rotes Team-Mosaik |
-| 300° | Waffenshop zwischen Krokero und Otti |
+## Wege und Ausrüstung
 
-Alle Ausrüstungsgegenstände werden weiterhin aus den vorhandenen Definitionen erzeugt.
-Jeder Shop trägt ein Bodenmosaik mit beiden angrenzenden Helden und zwei Wandmosaike
-mit ihren einzelnen Arenakämpfen: Otti/Schili im Schildshop, Schili/Krokero im
-Rüstungsshop und Krokero/Otti im Waffenshop. Goldene Mäander, sichtbare Steinchenfugen,
-Legionäre und Kolosseumsbögen rahmen Schildwall, Verteidigung und Waffenkampf ein.
-Die neun Bilder entstehen ohne externe Bildassets auf nicht kollidierenden Flächen.
-Kaufen und Ausrüsten prüfen serverseitig die Position im jeweiligen Shop sowie die Nähe zum Gegenstand.
-Die Team-Mosaike behalten ihre bisherigen IDs und den Ablauf mit zwei bereiten Kapitänen.
+Der geschlossene Rundgang verbindet die seitlichen Hallentüren. Reihenfolge:
+Otti – Schildshop – Schili – Rüstungsshop – Kroko – Waffenshop – Otti.
+Die Shops haben eigene Wände, Türen, Decken und die bestehenden neun Kampfmosaike.
+Es gibt keinen durchgehenden Boden über den Treppenschächten. Massive Brüstungen
+begrenzen die Öffnungen; Verbindungsgänge haben Böden, Seitenwände und Decken.
 
-Jede Statuenlobby hat eine Treppe auf die begehbare Tribüne und eine ins Hypogeum.
-Unten liegen sechs Trainingskäfige mit den echten Zombie-Modellen und ein gemeinsamer
-Treffpunkt mit Zugang zur Partyverwaltung. Trainingszombies nehmen Übungstreffer an,
-regenerieren nach drei Sekunden, vergeben keine Belohnungen und verursachen keinen Schaden.
-Der letzte Zombie ermöglicht weiterhin Block- und Parierübungen.
+## Spielzugänge und Gruppen
 
-Von jeder Lobby und dem Treffpunkt öffnet **F** das Spielmenü mit Solo, Co-op,
-allen drei Team-Modi, Bosskämpfen und Live-Zuschauen. Otti hat zusätzlich ein direktes
-Boss-Auswahlschild. Das Tor nach Rom bleibt als beschrifteter, geschlossener Ausgang vorbereitet;
-eine begehbare Stadt ist nicht Teil dieses Umbaus.
+Jede Halle hat einen Arenagang mit zwei seitlichen Kammern anstelle der alten Käfigbuchten.
+Links entsteht eine eigene Zombie-Co-op-Gruppe, rechts liegen bei Schili und Kroko die
+beiden Team-Sammelbereiche. Ottis rechte Kammer bietet direkte Zugänge zu TIME BATTLE,
+FIRST TO und ELIMINATION. Betreten eines seitlichen Gruppenmosaiks bildet dessen öffentliche
+Party; Verlassen löst die Mitgliedschaft, sofern die Gruppe nicht in einer Warteschlange ist.
+READY, LEAVE, START GROUP und FIND PLAYERS verwenden die bestehenden Party- und Matchfunktionen.
 
-## Testen
+START SOLO FIGHT erfordert F an einem eigenen Schild. Vorbeilaufen im Hauptgang startet
+keinen Kampf. Menü und Raumzugänge greifen auf dieselben Dienste zu. Die Tafeln zeigen
+Mitglieder, Bereitschaft und Warteschlange; das Menü erhält die gleichen Party-Snapshots.
+Bestehende private Partys können weiterhin über ihren Leiter starten. Alle drei Bosskämpfe
+und Live-Zuschauen bleiben über Menü und ausgeschilderte Zugänge erreichbar.
 
-Mit `scripts/build-places.ps1` beide Places erzeugen:
+## Hypogeum
 
-- `build/OttiHub.rbxlx`: Lobby besichtigen; beim Boss-Schild mit **F** die Auswahl öffnen.
-  In veröffentlichten Places startet die Auswahl einen reservierten Arena-Server.
-  Studio unterstützt keine Teleports zwischen Places; der Hub simuliert dort die Reservierung.
-- `build/OttiArena.rbxlx`: In Studio **Play** drücken und eines der drei
-  Boss-Podeste beim Startplatz mit **F** benutzen: **OTTI**, **SCHILI**, **KROKERO**.
-  `ExperienceConfig.Studio.ArenaMockMode` steht für diesen Branch auf `BOSS_SOLO`.
-  Erst die Auswahl startet den Countdown; die Zombie-Wellen werden übersprungen.
-  Nach Kampfende und dem bestehenden Reset kann ein anderer Boss gewählt werden.
-  Für andere lokale Spieltests `ArenaMockMode` auf einen vorhandenen Modus setzen.
+Ein deterministisches Netz aus 13 × 13 Zellen mit Hauptachsen und Querverbindungen liegt
+unter dem Kolosseum. Dazu gehören ein zentraler Treffpunkt, gewölbte Gangportale,
+Stützpfeiler, Wegweiser, eine westliche Gefangenengalerie mit sechs getrennten Zellen
+und ein östlicher Trainingsbereich mit sechs offenen Übungsbuchten. Die dekorativen
+Gefangenen und die angreifbaren, regenerierenden Trainingszombies verwenden getrennte Tags.
+Training verursacht keinen Spielerschaden und vergibt keine regulären Kampfbelohnungen.
 
-Automatische Prüfungen:
+## Gemeinsame Arena und Tore
+
+`src/shared/ColosseumLayout.luau` enthält Maße, Höhen, Heldenzugänge und den Torstil.
+Hub und Kampf-Place verwenden tatsächlich beide `src/server/Arena.luau` als Builder.
+Der Sandboden folgt nun der Arenaellipse; echte Öffnungen in Podium, Sitzreihen und
+Außenwand lassen die Zugangstunnel durch. Die übrige Arena und ihre Kampfsysteme bleiben erhalten.
+
+`GateStyle = "Grille"` zeigt Gitter mit einer transparenten Kollisionsfläche.
+`GateStyle = "Solid"` zeigt blickdichte Holzflügel. Beide Varianten versperren den Weg.
+`ColosseumGate.build` erlaubt auch eine explizite Stilwahl pro Aufruf. Der Blick durch
+Gitter zeigt die lokale Arena; Kämpfe auf reservierten Servern werden über WATCH LIVE besucht.
+
+## Bauen und prüfen
 
 ```powershell
+./scripts/build-places.ps1
 ./scripts/test-lobby-ring.ps1 -LuauPath <luau.exe>
 ./scripts/test-pad-teams.ps1 -LuauPath <luau.exe>
 ./scripts/test-combat-animation.ps1 -LuauPath <luau.exe> -CompilePath <luau-compile.exe>
 ./scripts/test-passive-momentum.ps1 -LuauPath <luau.exe>
 ```
 
-Der Ring-Test führt den echten Lobby-Builder mit einer Geometrieadapter-Umgebung aus.
-Er prüft die Bereiche, Shopfreigaben und 180 Treppenpositionen auf Kopffreiheit.
-Diese Prüfungen ersetzen keinen visuellen Durchlauf und keinen Physik-/Kampftest in Studio.
+Der Geometrietest führt die echten Arena- und Lobby-Builder mit einem Roblox-Adapter aus.
+Er prüft Gangmitten, 276 Treppenpositionen auf Kopffreiheit, Sicherheitsbereiche,
+Shopfreigaben, Heldenräume, Gruppenkammern und die Erreichbarkeit aller Labyrinthzellen.
+Der Adapter ersetzt keine Prüfung der Roblox-Physik.
+
+`build/OttiHub.rbxlx` ist die lokale Hub-Testdatei. Der Studio-Client-Audit
+`scripts/studio-lobby-audit.luau` lässt die Figur die sechs Abgänge hinunter und hinauf
+laufen und stellt danach Position, Kamera und Eingabesteuerung wieder her. Der Audit
+gehört ausschließlich in die Client-Kommandoleiste eines laufenden Studio-Tests.
+
+`build/OttiArena.rbxlx` unterstützt weiterhin die Studio-Bossauswahl an den drei Podesten.
+`ExperienceConfig.Studio.ArenaMockMode` steht auf `BOSS_SOLO`. In Studio werden im Hub
+Reservierungen simuliert; Teleports zwischen den beiden Places benötigen veröffentlichte Places.
+
+## Verifizierter Stand am 29. Oktober 2026
+
+- Beide Place-Dateien erfolgreich gebaut; geänderte Luau-Module kompiliert.
+- Geometrieprüfung mit echten Buildern: Gangmitten, 276 Treppenpositionen, alle 169
+  Labyrinthzellen und die zwölf bestehenden Zuschauer-Spawnpunkte. Beide Torvarianten erzeugt.
+- Bestehende Prüfungen: 51 Team-Pad-Checks, 68 Animationschecks sowie 85 Momentum-Checks bestanden.
+- Hub in Roblox Studio gestartet. Alle drei Heldenräume, zentraler Treffpunkt und Sicht
+  durch das Gitter auf die gemeinsame Arena visuell kontrolliert. Spawn-Blick und Beleuchtung korrigiert.
+- Spielfigur alle sechs Abgänge abwärts und aufwärts bewegt. Ein zunächst fehlgeschlagener
+  Lauf wurde am betroffenen Kroko-Abgang erfolgreich wiederholt. Der Audit wartet
+  deshalb vor dem Loslaufen auf die Serverreplikation und wählt den niedrigsten Schritt eindeutig.
+- Physischer Beitritt zur öffentlichen Co-op-Party erscheint im Menü; READY-Umschaltung
+  und Verlassen bestätigt. TIME BATTLE, FIRST TO und ELIMINATION erfolgreich eingereiht
+  und anschließend abgebrochen. Testparty und Warteschlangen aufgeräumt, Kamera freigegeben.
+
+Ein vollständiger Kampfstart mit mehreren Studio-Clients sowie veröffentlichte Cross-Place-
+Teleports wurden in diesem Durchlauf nicht geprüft. Die letzten Dekorationsanpassungen
+(zusätzliche Hypogeum-Portale, beidseitige Wegweiser und versetzte Shop-Wandbilder)
+werden bei einem neuen Play-Durchlauf aus den aktualisierten Quellen erzeugt.

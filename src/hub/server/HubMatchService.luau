@@ -298,6 +298,8 @@ local function addPrompt(host: BasePart, actionText: string, objectText: string,
 	prompt.GamepadKeyCode = Enum.KeyCode.DPadUp
 	prompt.Parent = host
 	prompt.Triggered:Connect(function(player)
+		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+		if not root or not root:IsA("BasePart") or (root.Position-host.Position).Magnitude > 13 or not inLobby(player) then return end
 		if not limiter.allow(player, "Prompt") then
 			return
 		end
@@ -394,14 +396,18 @@ function HubMatchService.init(lobby: LobbyService.LobbyLayout)
 		message = HubTeleportService.message,
 	})
 	-- Walking to the gate starts Solo Zombies via the entrance pad; no choice menu here.
-	addPrompt(lobby.arenaGate, "Start Solo Zombies", "THE ARENA", HubMatchService.playSolo)
-	addPrompt(lobby.bossBoard, "Choose boss", "BOSS FIGHT · TEST", function(player)
-		Remotes.MatchEvent:FireClient(player, "OpenMenu", "BOSS")
-		return true, ""
-	end)
+	for _,host in lobby.soloHosts do
+		addPrompt(host, "Start solo fight", "ZOMBIE SOLO", HubMatchService.playSolo)
+	end
+	for _,host in lobby.bossBoards do
+		addPrompt(host, "Choose boss", "BOSS FIGHT · TEST", function(player)
+			Remotes.MatchEvent:FireClient(player, "OpenMenu", "BOSS")
+			return true, ""
+		end)
+	end
 	for _, host in lobby.modeBoards do
 		addPrompt(host, "Choose game / form party", "ALL GAME MODES", function(player)
-			Remotes.MatchEvent:FireClient(player, "OpenMenu", "ZOMBIES")
+			Remotes.MatchEvent:FireClient(player, "OpenMenu", host:GetAttribute("MenuTab") or "ZOMBIES")
 			return true, ""
 		end)
 	end
@@ -409,6 +415,11 @@ function HubMatchService.init(lobby: LobbyService.LobbyLayout)
 		addPrompt(door, "Watch live", "TRIBUNES", function(player)
 			Remotes.MatchEvent:FireClient(player, "OpenLive")
 			return true, ""
+		end)
+	end
+	for _,entry in lobby.matchActions do
+		addPrompt(entry.part, "Join / leave queue", entry.mode, function(player)
+			return toggleQueue(player, entry.mode)
 		end)
 	end
 	addPrompt(lobby.romeGate, "Open", "GATE TO ROME", function()

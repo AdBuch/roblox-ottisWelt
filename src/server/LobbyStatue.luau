@@ -1,6 +1,5 @@
 --!strict
--- The large Otti gladiator statue in the centre of the lobby hall (landmark and orientation point).
--- It reuses OttiModel (the same build the boss uses) so the statue always matches Otti's look,
+-- Hero monuments reuse OttiModel / CompanionModel so the statues match their boss silhouettes,
 -- then turns it into stone: no Humanoid, no lights, everything anchored, non-colliding and never
 -- queried, fur and cloth in marble, armour and weapons in bronze, scaled up with Model:ScaleTo.
 -- The pedestal (built by LobbyService) is the only collision.

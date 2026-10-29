@@ -15,6 +15,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local GameStates = require(ReplicatedStorage.Shared.GameStates)
+local Config = require(ReplicatedStorage.Shared.Config)
 local LobbyPadDefinitions = require(ReplicatedStorage.Shared.LobbyPadDefinitions)
 local Server = script.Parent.Parent
 local CombatUtil = require(Server.CombatUtil)
@@ -79,12 +80,19 @@ local function refreshBoard(pad: PadLayout)
 	local text: string
 	if def.Kind == "Group" then
 		local party = PartyService.padParty(def.Id)
+		if not party and not def.Team then
+			for player,current in onPad do
+				if current==pad then party=PartyService.get(player); if party then break end end
+			end
+		end
 		if party and #party.members > 0 then
 			local lines = {}
 			for i, member in party.members do
-				table.insert(lines, (if i == 1 then "★ " else "") .. member.DisplayName)
+				table.insert(lines, (if i == 1 then "★ " else "") .. member.DisplayName .. (if party.ready[member] then " · READY" else " · waiting"))
 			end
 			table.insert(lines, if party.locked then "STARTING…" elseif def.Team then (PadTeamBattleService.status(def.Id) or ("%d / %d · captain presses READY"):format(#party.members, LobbyPadDefinitions.MaxGroup)) else ("%d / %d · leader presses START"):format(#party.members, LobbyPadDefinitions.MaxGroup))
+			local queue=party.members[1]:GetAttribute(Config.QueueStatusAttribute)
+			if typeof(queue)=="string" and queue~="" then table.insert(lines,"QUEUE · "..queue) end
 			text = table.concat(lines, "\n")
 		else
 			text = if def.Team then "Stand on the mosaic to join this team" else "Stand on the mosaic to form a group"
@@ -160,7 +168,7 @@ end
 
 local function addButton(pad: PadLayout, action: string, part: BasePart, handlers: Handlers)
 	local prompt = Instance.new("ProximityPrompt")
-	prompt.ActionText = if action == "ConfirmTeam" then "Ready team" elseif action == "StartCoop" or action == "StartNow" then "Start" else "Search / Stop"
+	prompt.ActionText = if action == "Ready" then "Ready / not ready" elseif action == "LeaveGroup" then "Leave group" elseif action == "ConfirmTeam" then "Ready team" elseif action == "StartCoop" or action == "StartNow" then "Start" else "Search / Stop"
 	prompt.ObjectText = pad.def.Title
 	prompt.HoldDuration = 0.3
 	prompt.MaxActivationDistance = 12
@@ -174,6 +182,8 @@ local function addButton(pad: PadLayout, action: string, part: BasePart, handler
 			return
 		end
 		lastPress[player] = now
+		local _,_,root=CombatUtil.getLivingCharacter(player)
+		if not root or (root.Position-part.Position).Magnitude>15 then return end
 		if standingPad(player) ~= pad then
 			handlers.message(player, "Step on the " .. pad.def.Title .. " pad first", false)
 			return
@@ -182,6 +192,11 @@ local function addButton(pad: PadLayout, action: string, part: BasePart, handler
 		if action == "StartNow" then
 			startSolo(player, pad, handlers)
 			return
+		elseif action == "Ready" then
+			ok, text = PartyService.setReady(player, nil)
+		elseif action == "LeaveGroup" then
+			ok = PartyService.leavePadParty(player, pad.def.Id)
+			text = if ok then "You left the group" else "Leave the queue first, or use your party menu"
 		elseif action == "ConfirmTeam" then
 			ok, text = PadTeamBattleService.confirm(player, pad.def.Id)
 		elseif action == "StartCoop" then

@@ -50,7 +50,7 @@ local function setupLeaderstats(player: Player)
 	leaderstats.Parent = player
 end
 
--- World: the basement only (the Colosseum itself lives in the Arena place)
+-- World: complete hero halls and hypogeum, plus the shared playable Colosseum architecture.
 local lobby = LobbyService.build()
 print(PREFIX, ("Lobby ready: %d pads, three statue halls and shops, training cages, group meeting point, tribunes"):format(#lobby.pads))
 local _ = Remotes

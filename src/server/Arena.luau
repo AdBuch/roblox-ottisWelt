@@ -10,6 +10,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local Architecture = require(ReplicatedStorage.Shared.ColosseumLayout)
+local ColosseumGate = require(script.Parent.ColosseumGate)
 
 local PREFIX = "[OttiArena][Server]"
 
@@ -24,21 +26,20 @@ local BANNER_RED = Color3.fromRGB(128, 22, 28)
 local GOLD = Color3.fromRGB(240, 196, 80)
 
 -- Dimensions
-local A, B = 70, 55 -- semi-axes of the playable oval (140 x 110 studs)
-local FLOOR_TOP = 1
-local PODIUM_HEIGHT = 10
-local PODIUM_THICKNESS = 4
+local A, B = Architecture.SemiAxisX, Architecture.SemiAxisZ
+local FLOOR_TOP = Architecture.FloorTop
+local PODIUM_HEIGHT = Architecture.PodiumHeight
+local PODIUM_THICKNESS = Architecture.PodiumThickness
 local BARRIER_TOP = FLOOR_TOP + 70
-local SEAT_TIERS = 4
-local SEAT_DEPTH = 6
-local SEAT_RISE = 4.5
+local SEAT_TIERS = Architecture.SeatTiers
+local SEAT_DEPTH = Architecture.SeatDepth
+local SEAT_RISE = Architecture.SeatRise
 local OUTER_OFFSET = PODIUM_THICKNESS + SEAT_TIERS * SEAT_DEPTH
 local OUTER_THICKNESS = 5
 local OUTER_TOP = FLOOR_TOP + 58
 local ARCADE_ROWS = { { bottom = 31, height = 6 }, { bottom = 40, height = 6 }, { bottom = 49, height = 5 } }
 
 local ZOMBIE_GATE_ANGLES = { 0, 45, 135, 180, 225, 270, 315 }
-local PLAYER_GATE_ANGLE = 90
 
 local Arena = {}
 
@@ -152,15 +153,24 @@ local function ring(parent: Instance, name: string, segments: number, innerOffse
 	model.Name = name
 	for i = 0, segments - 1 do
 		local frame, chord = segmentFrame(i, segments, innerOffset + thickness / 2, (bottomY + topY) / 2)
-		makePart("Segment", Vector3.new(chord + thickness * 0.2 + 0.6, topY - bottomY, thickness), frame, color, material, model, options)
+		local opening = false
+		if name == "PodiumWall" or name == "InvisibleBarrier" or name == "OuterWall" or name:match("^Tier") then
+			for _, angle in Architecture.HeroAngles do
+				local p = Architecture.frame(math.rad(angle), 0, FLOOR_TOP):PointToObjectSpace(frame.Position)
+				if math.abs(p.X) < Architecture.GateWidth/2 + chord/2 + 0.7 and p.Z > -3 and p.Z < OUTER_OFFSET + 8 then opening = true end
+			end
+		end
+		local bottom = if opening then math.max(bottomY, FLOOR_TOP + Architecture.GateHeight + 2) else bottomY
+		if topY > bottom then
+			makePart("Segment", Vector3.new(chord + thickness * 0.2 + 0.6, topY - bottom, thickness), frame + Vector3.new(0, (bottom-bottomY)/2, 0), color, material, model, options)
+		end
 	end
 	model.Parent = parent
 end
 
 local function buildFloor(folder: Folder)
-	local width = (A + OUTER_OFFSET + OUTER_THICKNESS + 4) * 2
-	local depth = (B + OUTER_OFFSET + OUTER_THICKNESS + 4) * 2
-	makePart("Floor", Vector3.new(width, 1, depth), CFrame.new(0, FLOOR_TOP - 0.5, 0), SAND, Enum.Material.Sand, folder)
+	-- The old rectangular slab sealed every tunnel from above. The sand now follows the oval.
+	makePart("Floor", Vector3.new(1, A*2, B*2), CFrame.new(0, FLOOR_TOP - 0.5, 0) * CFrame.Angles(0, 0, math.pi/2), SAND, Enum.Material.Sand, folder, { shape = Enum.PartType.Cylinder })
 end
 
 local function buildWalls(folder: Folder)
@@ -262,7 +272,9 @@ local function buildGates(folder: Folder)
 		-- Zombies appear on the sand just in front of each gate, facing the center
 		table.insert(Arena.Layout.ZombieSpawns, frameAt(theta, -5, FLOOR_TOP))
 	end
-	buildGate(gates, math.rad(PLAYER_GATE_ANGLE), "PlayerGate")
+	for _, angle in Architecture.HeroAngles do
+		ColosseumGate.build(gates, Architecture.frame(math.rad(angle), 1, FLOOR_TOP))
+	end
 	gates.Parent = folder
 end
 

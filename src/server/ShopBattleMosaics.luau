@@ -223,9 +223,9 @@ function ShopBattleMosaics.build(parent: Instance, shop: CFrame, theme: string, 
     -- The floor panel sits above the existing rug, clear of every display plinth.
     local floor = shop * CFrame.new(0, 0.11, -3) * CFrame.Angles(math.pi/2, 0, 0) * CFrame.Angles(0, 0, math.pi)
     panel(parent, floor, Vector2.new(36, 18), first, second, theme, title .. " · " .. (stories :: { [string]: string })[theme])
-    -- Both partition faces look INTO the shop; wall pictures sit above the racks.
-    panel(parent, shop * CFrame.new(-24.42, 10, 3) * CFrame.Angles(0, -math.pi/2, 0), Vector2.new(29, 13), first, nil, theme, (names :: { [string]: string })[first] .. " · ARENA LEGEND")
-    panel(parent, shop * CFrame.new(24.42, 10, 3) * CFrame.Angles(0, math.pi/2, 0), Vector2.new(29, 13), second, nil, theme, (names :: { [string]: string })[second] .. " · ARENA LEGEND")
+    -- The side walls now have connecting doors. Paint the solid front / rear walls instead.
+    panel(parent, shop * CFrame.new(0, 10, 21.92), Vector2.new(38, 11), first, nil, theme, (names :: { [string]: string })[first] .. " · ARENA LEGEND")
+    panel(parent, shop * CFrame.new(0, 10, -21.92) * CFrame.Angles(0, math.pi, 0), Vector2.new(38, 11), second, nil, theme, (names :: { [string]: string })[second] .. " · ARENA LEGEND")
 end
 
 return ShopBattleMosaics

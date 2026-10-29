@@ -168,6 +168,16 @@ function CompanionModel.build(id: string): OttiRig
 		end
 		-- soft bronze forehead band
 		add(head, "Band", Vector3.new(1.9, 0.22, 1.9), Vector3.new(0, headY + 0.6, -0.2), BRONZE, metal, nil, "Head")
+		for _,side in {-1,1} do
+			add(head,"GentleEye",Vector3.new(0.33,0.42,0.2),Vector3.new(side*0.48,headY+0.16,-1.18),Color3.fromRGB(64,41,25),smooth,nil,"Ball")
+			add(head,"EyeCatchlight",Vector3.new(0.10,0.12,0.08),Vector3.new(side*0.48+0.06,headY+0.26,-1.29),CREAM,smooth,nil,"Ball")
+			add(head,"SoftBrow",Vector3.new(0.48,0.12,0.19),Vector3.new(side*0.48,headY+0.53,-1.15),palette.ridge,smooth)
+		end
+		add(head,"CreamMuzzle",Vector3.new(1.2,0.45,0.35),Vector3.new(0,headY-0.35,-1.12),palette.belly,smooth,nil,"Ball")
+		add(head,"GentleSmile",Vector3.new(0.52,0.07,0.08),Vector3.new(0,headY-0.43,-1.32),LEATHER_DARK,smooth)
+		add(pelvis,"ScrollCase",Vector3.new(0.55,1.4,0.55),Vector3.new(-1.3,pelvisY,-0.5),LEATHER,leather,nil,"Cylinder")
+		add(pelvis,"ScrollTip",Vector3.new(0.45,0.25,0.45),Vector3.new(-1.3,pelvisY+0.8,-0.5),CREAM,smooth,nil,"Cylinder")
+		add(pelvis,"TealSash",Vector3.new(2.5,0.35,0.16),Vector3.new(0,pelvisY+0.3,-1.08),Color3.fromRGB(45,94,91),Enum.Material.Fabric)
 	else
 		-- Crocodile: long snout, cream jaw, back ridges, amber eyes, bronze shoulder guard, harness
 		add(head, "Snout", Vector3.new(1.4, 0.9, 1.6), Vector3.new(0, headY - 0.1, -1.4), palette.body, smooth, nil, "Ball")
@@ -186,6 +196,9 @@ function CompanionModel.build(id: string): OttiRig
 		add(chest, "ShoulderGuard", Vector3.new(1.9, 0.6, 1.8), Vector3.new(1.4, chestY + 1.2, 0), BRONZE, metal, CFrame.Angles(0, 0, math.rad(-18)), "Sphere")
 		add(chest, "Patina", Vector3.new(0.6, 0.2, 0.5), Vector3.new(1.5, chestY + 1.5, -0.2), PATINA, metal, nil, "Sphere")
 		add(chest, "Harness", Vector3.new(0.35, 2.4, 0.12), Vector3.new(0.2, chestY, -1.1), LEATHER, leather, CFrame.Angles(0, 0, math.rad(34)))
+		add(pelvis,"LeatherBelt",Vector3.new(2.6,0.38,0.18),Vector3.new(0,pelvisY+0.3,-1.12),LEATHER_DARK,leather)
+		add(pelvis,"BronzeBeltEmblem",Vector3.new(0.7,0.7,0.2),Vector3.new(0,pelvisY+0.3,-1.25),BRONZE,metal,nil,"Ball")
+		add(head,"CrookedGrin",Vector3.new(0.75,0.07,0.1),Vector3.new(0.12,headY-0.45,-2.12),LEATHER_DARK,smooth,CFrame.Angles(0,0,math.rad(7)))
 		for _, arm in { rightArm, leftArm } do
 			add(arm, "WristGuard", Vector3.new(0.95, 0.6, 0.95), Vector3.new(arm.Position.X / S, chestY - 0.7, 0), LEATHER_DARK, leather, nil, "Head")
 		end
@@ -199,7 +212,7 @@ function CompanionModel.build(id: string): OttiRig
 	end
 
 	-- Tail: the same six-segment tail as Otti (scaled to the species)
-	local tail = OttiTailService.build(pelvis, Vector3.new(0, pelvisY - 0.3, 1.2), S, palette.body, makePart)
+	local tail = OttiTailService.build(pelvis, Vector3.new(0, pelvisY - 0.3, 1.2), S * (if isTortoise then 0.3 else 1.15), palette.body, makePart)
 
 	-- Weapon in the right hand (swordParts: shown while the boss is armed)
 	local swordParts: { BasePart } = {}
