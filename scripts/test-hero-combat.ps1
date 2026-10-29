@@ -19,7 +19,32 @@ $body = $preamble
 foreach ($entry in @(@('Moves','src/shared/OttiMoveDefinitions.luau'), @('Personalities','src/shared/CompanionBossDefinitions.luau'), @('Profiles','src/shared/HeroCombatDefinitions.luau'), @('AI','src/server/CompanionBossAI.luau'), @('Animation','src/server/OttiAnimationService.luau'))) {
     $body += "`nmodules.$($entry[0]) = (function()`n$(Source $entry[1])`nend)()`n"
 }
+$intro = [regex]::Match((Source 'src/server/OttiBossService.luau'), '(?ms)^local function runIntro\(.*?^end').Value
+if (-not $intro) { throw 'Missing boss intro function' }
 $body += @'
+
+local Config = {}
+local OttiBossConfig = { SilenceTextAt = 1, PreIntroSeconds = 2, WalkSpeedBiped = 10 }
+local CrowdReactionService = { react = function() end, setBaseLight = function() end }
+local Arena = { setGates = function() end }
+local token, arenaFolder, boss = 1, {}, nil
+local options = { companion = "Otti", participants = function() return {} end }
+local rig = { companion = nil, model = { SetAttribute = function() end }, humanoid = {} }
+local function takeOverSpectator() return rig end
+local function introWait() return true end
+local function setAttr() end
+task.delay = function(_, callback) callback() end
+local entrances = 0
+local OttiEntranceService = { play = function() entrances += 1; return true end }
+'@
+$body += "`n$intro`n"
+$body += @'
+check(runIntro(1) and entrances == 1, "explicit Otti selection enters arena and releases spectator anchor")
+options.companion, rig.companion = "Schili", "Schili"
+check(runIntro(1) and entrances == 1, "companion keeps its own grounded entrance")
+'@
+$body += @'
+
 local profiles = modules.Profiles
 for _, hero in { "Kroko", "Schili" } do
     for _, role in { "Strike", "Charge", "Sweep", "Feint", "Roar" } do
