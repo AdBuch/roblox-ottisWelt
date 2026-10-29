@@ -237,7 +237,7 @@ function Architecture.build(buildPad: any): any
         zone(atGate*CFrame.new(0,5,0),Vector3.new(23,14,5))
         local solo=sign(approach,"StartSoloFight",entryFrame*CFrame.new(0,6,36)*CFrame.Angles(0,math.pi,0),"START SOLO FIGHT","F · start your own zombie run",hero.color)
         table.insert(soloHosts,solo)
-        local coopDef=table.clone(PadDefinitions.get("ZombieCoop"))
+        local coopDef=table.clone(assert(PadDefinitions.get("ZombieCoop"),"ZombieCoop pad missing"))
         coopDef.Id=if hero.id=="Otti" then "ZombieCoop" else hero.id.."ZombieCoop"
         coopDef.Title="JOIN GROUP · ZOMBIES"
         coopDef.Emblem=if hero.id=="Kroko" then "Krokero" else hero.id
@@ -248,12 +248,12 @@ function Architecture.build(buildPad: any): any
             local host=sign(approach,"TeamsMenu",entryFrame*CFrame.new(30,6,51)*CFrame.Angles(0,math.pi/2,0),"TEAM BATTLES","Time · First to · Elimination",hero.color)
             host:SetAttribute("MenuTab","TEAMS"); table.insert(menus,host)
             for i,mode in {{"TIME_BATTLE","TIME BATTLE"},{"FIRST_TO","FIRST TO"},{"ELIMINATION","ELIMINATION"}} do
-                local host=sign(approach,"TeamQueueEntrance",entryFrame*CFrame.new(22,5,39+i*6)*CFrame.Angles(0,-math.pi/2,0),mode[2],"F · join / leave queue with your party",hero.color)
-                host.Size=Vector3.new(5.4,4,0.35)
-                table.insert(matchActions,{part=host,mode=mode[1]})
+                local queueHost=sign(approach,"TeamQueueEntrance",entryFrame*CFrame.new(22,5,39+i*6)*CFrame.Angles(0,-math.pi/2,0),mode[2],"F · join / leave queue with your party",hero.color)
+                queueHost.Size=Vector3.new(5.4,4,0.35)
+                table.insert(matchActions,{part=queueHost,mode=mode[1]})
             end
         else
-            local def=table.clone(PadDefinitions.get(if hero.id=="Schili" then "TeamSchili" else "TeamKrokero"))
+            local def=table.clone(assert(PadDefinitions.get(if hero.id=="Schili" then "TeamSchili" else "TeamKrokero"),"team pad missing"))
             def.Actions={{Id="ConfirmTeam",Label="READY TEAM"},{Id="Ready",Label="READY"},{Id="LeaveGroup",Label="LEAVE"}}
             table.insert(pads,buildPad(approach,def,entryFrame*CFrame.new(23,0,50)*CFrame.Angles(0,-math.pi/2,0),Vector2.new(22,18),entryFrame*CFrame.new(34,10,50)*CFrame.Angles(0,math.pi/2,0),0))
         end
