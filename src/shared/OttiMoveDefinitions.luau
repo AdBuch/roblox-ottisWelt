@@ -30,6 +30,8 @@ export type FollowUp = { Move: string, Chance: number, MinPhase: number, OnlyIfH
 export type OttiMove = {
 	Id: string,
 	Name: string,
+	Pose: string?,
+	StraightDash: boolean?,
 	Kind: MoveKind,
 	Stance: Stance,
 	WindUp: number,

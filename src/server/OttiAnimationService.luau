@@ -289,6 +289,7 @@ function OttiAnimationService.react(boss: Boss, loco: Loco, seconds: number)
 	OttiAnimationService.setLoco(boss, "RECOVERY")
 	task.wait(0.5)
 	if not boss.defeated then
+		boss.interrupted = false -- recovery completes the cancellation; later attacks are valid again
 		OttiAnimationService.setLoco(boss, if boss.stance == "Biped" then "BIPED_IDLE" else "QUADRUPED_IDLE")
 	end
 end

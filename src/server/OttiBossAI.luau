@@ -20,6 +20,8 @@ local Arena = require(script.Parent.Arena)
 local BossAttackService = require(script.Parent.BossAttackService)
 local CombatUtil = require(script.Parent.CombatUtil)
 local OttiAnimationService = require(script.Parent.OttiAnimationService)
+local HeroCombatDefinitions = require(ReplicatedStorage.Shared.HeroCombatDefinitions)
+local Workspace = game:GetService("Workspace")
 local CompanionBossAI = require(script.Parent.CompanionBossAI)
 local CompanionBossDefinitions = require(ReplicatedStorage.Shared.CompanionBossDefinitions)
 
@@ -156,6 +158,7 @@ end
 local function move(boss: Boss, ctx: BossContext, targetRoot: BasePart, distance: number, now: number, dt: number)
 	local state = motion[boss]
 	local phase = BossPhaseDefinitions.Phases[boss.phase]
+	local profile = HeroCombatDefinitions.Movement[boss.companion or "Otti"]
 	if now >= state.nextDriftFlip then
 		state.drift = -state.drift
 		local quick = boss.stance == "Quad"
@@ -170,6 +173,7 @@ local function move(boss: Boss, ctx: BossContext, targetRoot: BasePart, distance
 	elseif distance < 11 and boss.stance == "Quad" and (phase.QuadChance == 0 or boss.rng:NextNumber() < dt * 1.2) then
 		wantQuad = false
 	end
+	if not profile.Quad then wantQuad = false end
 	if wantQuad ~= (boss.stance == "Quad") then
 		OttiAnimationService.setStance(boss, if wantQuad then "Quad" else "Biped")
 		return
@@ -184,8 +188,8 @@ local function move(boss: Boss, ctx: BossContext, targetRoot: BasePart, distance
 		boss.humanoid.AutoRotate = false
 		OttiAnimationService.faceTowards(boss, targetRoot.Position, dt)
 		local studying = now < state.studyUntil
-		local ring = if studying then 10 else 6.5
-		boss.humanoid.WalkSpeed = if distance > 14 then OttiBossConfig.WalkSpeedBiped else OttiBossConfig.StrafeSpeed
+		local ring = if studying then 8 else profile.Ring
+		boss.humanoid.WalkSpeed = if distance > 14 then profile.Walk else profile.Strafe
 		goal = targetRoot.Position + CFrame.fromAxisAngle(Vector3.yAxis, state.drift * 0.45):VectorToWorldSpace(direction) * ring
 	else
 		-- Low otter run: approach in curves and circle wide
@@ -204,7 +208,7 @@ end
 -- One AI step. Yields while an attack runs.
 -- Companion bosses: the personality AI picks a ROLE, the role runs a real, validated move (or a
 -- non-damaging stance / step). Otti's own choice (chooseMove) is not used for companions.
-local COMPANION_MOVES: { [string]: string } = { Strike = "GladiusSlash", Charge = "RiverDash", Sweep = "TailSweep", Roar = "BattleCry" }
+
 
 function OttiBossAI.companionDecide(boss: Boss, ctx: BossContext, target: Player, targetRoot: BasePart, distance: number, now: number)
 	local personality = CompanionBossDefinitions.get(boss.companion :: string)
@@ -223,14 +227,18 @@ function OttiBossAI.companionDecide(boss: Boss, ctx: BossContext, target: Player
 		end
 	end
 	local health = boss.health / math.max(1, boss.maxHealth)
+	local character = target.Character
+	local attackStart = if character then tonumber(character:GetAttribute("AttackStart")) or 0 else 0
+	local attackLength = if character then tonumber(character:GetAttribute("AttackLength")) or 0 else 0
+	local targetAttacking = Workspace:GetServerTimeNow() < attackStart + attackLength
 	local choice = CompanionBossAI.choose(personality, {
 		now = now,
 		distance = distance,
 		bossHealth = health,
 		lastRole = boss.companionLastRole :: any,
 		readyAt = readyAt :: any,
-		targetAttacking = false, -- the target's wind-up is not visible to the AI yet (integration step 2)
-		recentlyBlocked = false,
+		targetAttacking = targetAttacking,
+		recentlyBlocked = now < (tonumber(boss.model:GetAttribute("BlockedUntil")) or 0),
 		surrounded = near >= 3,
 	}, boss.rng)
 	local role: any = choice.role
@@ -241,28 +249,30 @@ function OttiBossAI.companionDecide(boss: Boss, ctx: BossContext, target: Player
 	boss.companionLastRole = role
 	boss.companionReadyAt[role] = CompanionBossAI.cooldownEnds(personality, role, now)
 	local def = personality.Roles[role :: any]
-	local moveId = COMPANION_MOVES[role :: string]
-	if moveId then
-		local move = OttiMoveDefinitions[moveId]
-		if move and not boss.busy then
-			BossAttackService.execute(boss, ctx, move, target)
-		end
+	local attack = HeroCombatDefinitions.move(boss.companion :: string, role, boss.phase)
+	if attack then
+		BossAttackService.execute(boss, ctx, attack, target)
+		boss.companionReadyAt[role] = boss.cooldowns[attack.Id] or os.clock() + def.Cooldown
 	elseif role == "Guard" then
+		boss.guardUntil = now + def.Recovery + 0.6
+		boss.lockedUntil = boss.guardUntil
 		OttiAnimationService.setGuard(boss, true)
+		OttiAnimationService.setPose(boss, if boss.companion == "Schili" then "ShellGuard" else "RaiseShield", 0.18)
+		boss.humanoid:MoveTo(boss.root.Position)
 		task.delay(def.Recovery + 0.6, function()
-			if boss.companion and not boss.defeated then
+			if boss.model.Parent and not boss.defeated and os.clock() >= boss.guardUntil then
 				OttiAnimationService.setGuard(boss, false)
+				if not boss.busy then OttiAnimationService.setPose(boss, "", 0.2) end
 			end
 		end)
-	elseif role == "Feint" then
-		boss.lockedUntil = now + def.Telegraph -- a readable feint: a short pause, no damage
 	elseif role == "Retreat" then
 		local away = CombatUtil.flat(boss.root.Position - targetRoot.Position)
 		if away.Magnitude > 0.1 then
-			boss.humanoid:MoveTo(boss.root.Position + away.Unit * 8)
+			boss.lockedUntil = now + 0.8
+			boss.humanoid:MoveTo(clampInside(boss.root.Position + away.Unit * 7))
 		end
 	end
-	boss.nextDecisionAt = os.clock() + CompanionBossAI.pause(personality, health, boss.rng) + def.Recovery
+	boss.nextDecisionAt = os.clock() + CompanionBossAI.pause(personality, health, boss.rng)
 end
 
 function OttiBossAI.step(boss: Boss, ctx: BossContext, dt: number)
@@ -286,6 +296,7 @@ function OttiBossAI.step(boss: Boss, ctx: BossContext, dt: number)
 	if boss.companion then
 		if now >= boss.nextDecisionAt and now >= state.studyUntil then
 			OttiBossAI.companionDecide(boss, ctx, target, targetRoot, distance, now)
+			return -- preserve guard/retreat and do not overwrite a completed attack with stale movement
 		end
 		move(boss, ctx, targetRoot, distance, now, dt)
 		return

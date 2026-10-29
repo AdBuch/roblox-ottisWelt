@@ -48,7 +48,7 @@ local function windUp(boss: Boss, ctx: BossContext, seconds: number, target: Pla
 		if not valid(boss, ctx) then
 			return false
 		end
-		if turn and target then
+		if turn and target and elapsed < seconds * 0.65 then
 			local _, _, root = CombatUtil.getLivingCharacter(target)
 			if root then
 				OttiAnimationService.faceTowards(boss, root.Position, dt)
@@ -94,6 +94,8 @@ local function hit(boss: Boss, ctx: BossContext, player: Player, move: OttiMove,
 		knockdownSeconds = move.KnockdownSeconds,
 		slowSeconds = move.PlayerSlowSeconds,
 	})
+	if blocked then boss.model:SetAttribute("BlockedUntil", os.clock() + 3) end
+	if dealt > 0 then boss.model:SetAttribute("AttackDamaged", true) end
 	if dealt >= 14 then
 		ctx.crowd("Gasp") -- a heavy hit on a player
 	end
@@ -119,18 +121,23 @@ local function meleeStep(boss: Boss, ctx: BossContext, move: OttiMove, target: P
 	boss.inActive = true
 	local landed = false
 	local elapsed = 0
+	local hitPlayers: { [Player]: boolean } = {}
 	repeat
-		local character, _, root = CombatUtil.getLivingCharacter(target)
-		if character and root and table.find(ctx.fighters(), target) then
-			local inRange = CombatUtil.flatDistance(boss.root.Position, root.Position) - 1 <= range
-			local facing = CombatUtil.isFacing(boss.root.CFrame, root.Position, arcDot)
-			local level = math.abs(boss.root.Position.Y - root.Position.Y) <= 6
-			if inRange and facing and level and CombatUtil.hasLineOfSight(boss.root.Position + Vector3.new(0, 2, 0), root.Position, losIgnore(boss)) then
-				local dealt, blocked = hit(boss, ctx, target, move, damage)
-				landed = dealt > 0 or blocked
-				break -- one hit per target per hit phase
+		if not valid(boss, ctx) then break end
+		for _, victim in (if move.MultiTarget then ctx.fighters() else { target }) do
+			local character, _, root = CombatUtil.getLivingCharacter(victim)
+			if not hitPlayers[victim] and character and root and table.find(ctx.fighters(), victim) then
+				local inRange = CombatUtil.flatDistance(boss.root.Position, root.Position) - 1 <= range
+				local facing = CombatUtil.isFacing(boss.root.CFrame, root.Position, arcDot)
+				local level = math.abs(boss.root.Position.Y - root.Position.Y) <= 6
+				if inRange and facing and level and CombatUtil.hasLineOfSight(boss.root.Position + Vector3.new(0, 2, 0), root.Position, losIgnore(boss)) then
+					local dealt, blocked = hit(boss, ctx, victim, move, damage)
+					landed = landed or dealt > 0 or blocked
+					hitPlayers[victim] = true
+				end
 			end
 		end
+		if not move.MultiTarget and hitPlayers[target] then break end
 		elapsed += RunService.Heartbeat:Wait()
 	until elapsed >= active or not valid(boss, ctx)
 	boss.inActive = false
@@ -150,7 +157,7 @@ local function executeMelee(boss: Boss, ctx: BossContext, move: OttiMove, target
 		end
 		return any
 	end
-	local pose = if move.Id == "ShieldBash" then "Bash" else "Slash"
+	local pose = move.Pose or (if move.Id == "ShieldBash" then "Bash" else "Slash")
 	return meleeStep(boss, ctx, move, target, pose, move.WindUp, move.Active, move.Damage, move.Range, move.ArcDot)
 end
 
@@ -190,7 +197,8 @@ local function executeSweep(boss: Boss, ctx: BossContext, move: OttiMove, target
 		for _, player in ctx.fighters() do
 			if not hitPlayers[player] then
 				local _, _, root = CombatUtil.getLivingCharacter(player)
-				if root and OttiTailService.inSweptSector(boss.root.Position, previousTail, tailYaw, 1.2, radius, root.Position) then
+				if root and math.abs(root.Position.Y - boss.root.Position.Y) <= 6 and OttiTailService.inSweptSector(boss.root.Position, previousTail, tailYaw, 1.2, radius, root.Position)
+				and CombatUtil.hasLineOfSight(boss.root.Position + Vector3.new(0, 1, 0), root.Position, losIgnore(boss)) then
 					if move.Jumpable and airborne(player, root) then
 						continue -- jumped over the tail (it may still catch them later in the same sweep)
 					end
@@ -315,27 +323,29 @@ local function executeDash(boss: Boss, ctx: BossContext, move: OttiMove, target:
 	end
 	-- Curved path to a spot behind/beside the target, kept away from walls and gates
 	local start = boss.root.Position
-	local behind = -CombatUtil.flat(targetRoot.CFrame.LookVector)
-	if behind.Magnitude < 0.1 then
-		behind = CombatUtil.flat(targetRoot.Position - start).Unit
-	end
-	local side = Vector3.new(-behind.Z, 0, behind.X) * (if boss.rng:NextNumber() < 0.5 then 1 else -1)
-	local finish = targetRoot.Position + behind.Unit * 6 + side * 3
+	local toward = CombatUtil.flat(targetRoot.Position - start)
+	local direction = if toward.Magnitude > 0.1 then toward.Unit else CombatUtil.flat(boss.root.CFrame.LookVector).Unit
+	local side = Vector3.new(-direction.Z, 0, direction.X) * (if boss.rng:NextNumber() < 0.5 then 1 else -1)
+	-- Cross the target's position regardless of which way the player faces.
+	local finish = targetRoot.Position + direction * 6 + side * 2
 	finish = Vector3.new(finish.X, start.Y, finish.Z)
 	if not Arena.isInside(finish, -8) then
 		finish = Vector3.new(0, start.Y, 0):Lerp(finish, 0.75)
 	end
-	local mid = (start + finish) / 2 + side * 8
+	if move.StraightDash then
+		finish = start + direction * math.min(24, toward.Magnitude + 5)
+	end
+	local mid = (start + finish) / 2 + side * (if move.StraightDash then 0 else 3)
 	if not Arena.isInside(mid, -6) then
 		mid = (start + finish) / 2
 	end
 
-	OttiAnimationService.setPose(boss, "DashWind", move.WindUp * 0.7)
+	OttiAnimationService.setPose(boss, if boss.companion then "RushWind" else "DashWind", move.WindUp * 0.7)
 	if not windUp(boss, ctx, move.WindUp, target, true) then
 		return false
 	end
-	OttiAnimationService.setPose(boss, "DashRun", 0.05)
-	OttiAnimationService.setLoco(boss, "QUADRUPED_RUN")
+	OttiAnimationService.setPose(boss, if boss.companion then "RushRun" else "DashRun", 0.05)
+	OttiAnimationService.setLoco(boss, if boss.companion then "BIPED_ATTACK" else "QUADRUPED_RUN")
 	boss.inActive = true
 	local ignore = losIgnore(boss)
 	local hitPlayers: { [Player]: boolean } = {}
@@ -358,7 +368,8 @@ local function executeDash(boss: Boss, ctx: BossContext, move: OttiMove, target:
 		for _, player in ctx.fighters() do
 			if not hitPlayers[player] then
 				local _, _, root = CombatUtil.getLivingCharacter(player)
-				if root and CombatUtil.flatDistance(root.Position, boss.root.Position) <= (move.Radius or OttiBossConfig.ContactRadius) then
+				if root and math.abs(root.Position.Y - boss.root.Position.Y) <= 6 and CombatUtil.flatDistance(root.Position, boss.root.Position) <= (move.Radius or OttiBossConfig.ContactRadius)
+				and CombatUtil.hasLineOfSight(boss.root.Position + Vector3.new(0, 1, 0), root.Position, ignore) then
 					hitPlayers[player] = true
 					local dealt, blocked = hit(boss, ctx, player, move, move.Damage)
 					landed = landed or dealt > 0 or blocked
@@ -399,11 +410,12 @@ export type Result = { landed: boolean, damaged: boolean }
 -- Runs one attack (yields through wind-up, active window and recovery) and starts its cooldown.
 function BossAttackService.execute(boss: Boss, ctx: BossContext, move: OttiMove, target: Player): Result
 	local result: Result = { landed = false, damaged = false }
-	if boss.busy or not valid(boss, ctx) then
+	if boss.busy or not valid(boss, ctx) or os.clock() < (boss.cooldowns[move.Id] or 0) then
 		return result
 	end
 	boss.busy = true
 	boss.attackId = move.Id
+	boss.model:SetAttribute("AttackDamaged", false)
 	boss.interrupted = false
 	boss.humanoid:MoveTo(boss.root.Position)
 	boss.humanoid.AutoRotate = false
@@ -449,13 +461,14 @@ function BossAttackService.execute(boss: Boss, ctx: BossContext, move: OttiMove,
 	end
 	if not boss.defeated then
 		OttiAnimationService.setPose(boss, "Recover", 0.2)
-		local recovery = move.Recovery + (if move.Kind == "Bite" and not result.landed then move.MissRecovery or 0 else 0)
+		local recovery = move.Recovery + (if not result.landed then move.MissRecovery or 0 else 0)
 		local elapsed = 0
 		while elapsed < recovery and ctx.stillValid() do
 			elapsed += RunService.Heartbeat:Wait()
 		end
 		OttiAnimationService.setPose(boss, "", 0.25)
 	end
+	result.damaged = boss.model:GetAttribute("AttackDamaged") == true or result.damaged
 	boss.model:SetAttribute("Attack", "")
 	boss.humanoid.AutoRotate = true
 	boss.attackId = nil

@@ -12,6 +12,8 @@
 -- Mock mode (Studio): a local match (ExperienceConfig.Studio.ArenaMockMode) starts a few seconds
 -- after the first player; RETRY works for every mode there (team modes alternate Red / Blue).
 
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -45,6 +47,8 @@ local retries = 0
 local POST_MATCH_SECONDS = 120
 type PostMatch = { fighters: { Player }, retry: { Player }, decided: { [Player]: boolean }, canRetry: boolean }
 local postMatch: PostMatch? = nil
+local selectedBoss: string? = nil
+local studioRequestAt = 0
 
 local function message(player: Player, text: string, ok: boolean)
 	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Shop, text, ok)
@@ -63,10 +67,13 @@ local function definition(): MatchDefinitions.MatchDefinition?
 end
 
 local function newMockRecord(): MatchTypes.MatchRecord
+	local boss = if RunService:IsStudio() then selectedBoss or Workspace:GetAttribute("StudioBossChoice") else nil
+	if boss ~= "Otti" and boss ~= "Kroko" and boss ~= "Schili" then boss = nil end
 	local mode = MatchDefinitions.get(ExperienceConfig.Studio.ArenaMockMode) and ExperienceConfig.Studio.ArenaMockMode or "COOP_ZOMBIES"
 	return {
 		matchId = "mock_local_" .. tostring(os.time()),
-		mode = mode :: any,
+		mode = (if boss then "BOSS_SOLO" else mode) :: any,
+		boss = boss :: string?,
 		protocol = GameProtocol.Version,
 		privateServerId = "",
 		fighters = {},
@@ -282,6 +289,22 @@ local function onEnded(result: MatchService.Result)
 	end)
 end
 
+-- Only Studio can select/restart local test fights; published servers use admission tickets.
+function ArenaMatchService.selectStudioBoss(id: string): boolean
+	if not RunService:IsStudio() or not mock or (id ~= "Otti" and id ~= "Kroko" and id ~= "Schili") then return false end
+	if os.clock() - studioRequestAt < 2 then return false end
+	studioRequestAt = os.clock()
+	selectedBoss = id
+	Workspace:SetAttribute("StudioBossChoice", id)
+	if started then
+		if not MatchService.isFinished() then MatchService.cancel("Studio boss selection") end
+	else
+		mockRecord = newMockRecord()
+		checkStart()
+	end
+	return true
+end
+
 function ArenaMatchService.init(folder: Instance)
 	mock = EnvironmentConfig.isMockMode()
 	if mock then
@@ -357,7 +380,11 @@ function ArenaMatchService.init(folder: Instance)
 	end
 
 	-- RETURN TO HUB (spectator bar / emergency button / the tribune door)
-	Remotes.MatchRequest.OnServerInvoke = function(player: Player, action: unknown)
+	Remotes.MatchRequest.OnServerInvoke = function(player: Player, action: unknown, bossId: unknown)
+		if action == "StudioBoss" and type(bossId) == "string" then
+			local ok = ArenaMatchService.selectStudioBoss(bossId)
+			return { ok = ok, message = if ok then "Boss selected; local restart in up to 14 seconds" else "Studio test unavailable" }
+		end
 		if action == "ReturnToHub" then
 			backToLobby(player)
 			return { ok = true, message = "Returning to the Hub…" }

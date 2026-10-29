@@ -60,7 +60,7 @@ local function weigh(p: Personality, s: Snapshot, role: Role, def: CompanionBoss
 		weight *= 0.5 + p.Boldness * 0.5
 	end
 	-- patience: committing attacks wait for a moment when the target isn't attacking
-	if STRIKING[role] and not s.targetAttacking then
+	if STRIKING[role] and s.targetAttacking then
 		weight *= 1 - 0.4 * p.Patience
 	end
 	-- situation

@@ -34,6 +34,8 @@ local OttiEntranceService = require(script.Parent.OttiEntranceService)
 local OttiModel = require(script.Parent.OttiModel)
 local OttiSpectatorService = require(script.Parent.OttiSpectatorService)
 local CompanionModel = require(script.Parent.CompanionModel)
+local HeroCombatDefinitions = require(ReplicatedStorage.Shared.HeroCombatDefinitions)
+local BossAttackService = require(script.Parent.BossAttackService)
 local CompanionBossDefinitions = require(ReplicatedStorage.Shared.CompanionBossDefinitions)
 
 type Boss = OttiAnimationService.Boss
@@ -242,6 +244,7 @@ local function runIntro(myToken: number): boolean
 		end
 	end
 	current.stance = "Biped"
+	current.model:SetAttribute("Stance", "Biped")
 	current.humanoid.WalkSpeed = OttiBossConfig.WalkSpeedBiped
 	setAttr(Config.BossIntroAttribute, "")
 	return true
@@ -368,6 +371,9 @@ function OttiBossService.startEncounter(newOptions: EncounterOptions)
 	pendingPhaseShow = false
 	phaseChanging = false
 	resetAttributes()
+	local identity = if newOptions.companion then CompanionBossDefinitions.get(newOptions.companion) else nil
+	setAttr(Config.BossNameAttribute, string.upper(newOptions.companion or OttiBossConfig.DisplayName))
+	setAttr(Config.BossTitleAttribute, if identity then identity.Title else OttiBossConfig.Title)
 	setAttr(Config.BossActiveAttribute, true)
 	print(PREFIX, "Round 7: OTTI — CHAMPION OF THE COLOSSEUM")
 
@@ -454,11 +460,11 @@ function OttiBossService.applyPlayerHit(attacker: Player, damage: number, fromPo
 		amount *= 1 - OttiBossConfig.GuardReduction
 		CombatEffects.burst(current.rig.shieldFace.Position, Color3.fromRGB(255, 220, 120), 0.8)
 		-- Phase 3: shield-and-tail counter (limited cooldown, never on every block)
-		local counter = OttiMoveDefinitions.ShieldTailCounter
-		if phase.CounterEnabled and now >= current.counterReadyAt and not current.busy then
+		local counter = if current.companion then HeroCombatDefinitions.move(current.companion, "Strike", current.phase) else OttiMoveDefinitions.ShieldTailCounter
+		if counter and (phase.CounterEnabled or current.companion == "Schili") and now >= current.counterReadyAt and not current.busy then
 			current.counterReadyAt = now + counter.Cooldown
 			local ctx = makeContext(token)
-			task.spawn(OttiBossAI.perform, current, ctx, counter.Id)
+			task.spawn(BossAttackService.execute, current, ctx, counter, attacker)
 		end
 	elseif frontal and not current.busy and now >= current.guardReadyAt then
 		-- Predictable frontal attacks from one player make him raise his shield

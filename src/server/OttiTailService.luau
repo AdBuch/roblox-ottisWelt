@@ -27,7 +27,7 @@ local REST_PITCH = { -35, -22, -10, 0, 6, 10 } -- degrees from horizontal: down 
 local OttiTailService = {}
 
 -- Builds the tail on the pelvis. basePoint is unscaled (rig space, feet at y = 0, facing -Z).
-function OttiTailService.build(pelvis: BasePart, basePoint: Vector3, scale: number, fur: Color3, makePart: MakePart): TailRig
+function OttiTailService.build(pelvis: BasePart, basePoint: Vector3, scale: number, fur: Color3, makePart: MakePart, proportions: number?): TailRig
 	local segments: { BasePart } = {}
 	local motors: { Motor6D } = {}
 	local start = basePoint * scale
@@ -35,9 +35,9 @@ function OttiTailService.build(pelvis: BasePart, basePoint: Vector3, scale: numb
 	for i, length in LENGTHS do
 		local pitch = math.rad(REST_PITCH[i])
 		local direction = Vector3.new(0, math.sin(pitch), math.cos(pitch)) -- backwards (+Z), tilted
-		local len = length * scale
+		local len = length * scale * (proportions or 1)
 		local joint = CFrame.lookAt(start, start + direction) -- -Z of the joint frame runs along the tail
-		local width = WIDTHS[i] * scale
+		local width = WIDTHS[i] * scale * math.sqrt(proportions or 1)
 		local segment = makePart("Tail" .. i, Vector3.new(width, width * FLATTEN, len * 1.35), joint * CFrame.new(0, 0, -len / 2), fur, Enum.Material.SmoothPlastic, "Sphere")
 		segment.CanQuery = false
 		segment.CanCollide = false

@@ -39,6 +39,8 @@ local Config = {
 	-- Final boss (Round 7), published on Workspace.GeneratedArena
 	BossActiveAttribute = "BossActive", -- the encounter runs (intro, fight or defeat scene)
 	BossIntroAttribute = "BossIntro", -- "" | Silence | Reveal (intro text stage)
+	BossNameAttribute = "BossName",
+	BossTitleAttribute = "BossTitle",
 	BossHealthAttribute = "BossHealth",
 	BossMaxHealthAttribute = "BossMaxHealth",
 	BossPhaseAttribute = "BossPhase", -- 1..3
