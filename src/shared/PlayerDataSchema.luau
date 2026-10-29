@@ -15,7 +15,7 @@
 -- v5 -> v6 needs no data change. A controlled test-data reset is prepared (off by default).
 
 local PlayerDataSchema = {
-	Version = 6,
+	Version = 7, -- v7: per-weapon special practice attempts; older profiles start at zero
 
 	-- Statistics (whole numbers, only ever increased by the server)
 	Stats = table.freeze({

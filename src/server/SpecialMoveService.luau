@@ -416,6 +416,7 @@ local function executeAerial(execution: Execution)
 	if not refresh(attacker) then
 		return
 	end
+	attacker.character:SetAttribute("SpecialLandingStart", Workspace:GetServerTimeNow())
 	local feet = attacker.root.Position - Vector3.new(0, 2.8, 0)
 	local landed = strike(execution, 1, false, nil, nil, alreadyHit)
 	if move.Shockwave and move.Shockwave > 0 then

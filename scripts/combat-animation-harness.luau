@@ -41,16 +41,27 @@ for part, name in {
 	UpperTorso = "Waist", LowerTorso = "Root", RightUpperArm = "RightShoulder",
 	LeftUpperArm = "LeftShoulder", RightUpperLeg = "RightHip", LeftUpperLeg = "LeftHip",
 	RightLowerArm = "RightElbow", LeftLowerArm = "LeftElbow", RightLowerLeg = "RightKnee", LeftLowerLeg = "LeftKnee",
+	RightHand = "RightWrist", LeftHand = "LeftWrist",
 } do
-	local motor = { Transform = CFrame.identity, IsA = function(_, kind) return kind == "Motor6D" end }
+	local motor = { Name = name, Enabled = true, Transform = CFrame.identity, IsA = function(_, kind) return kind == "Motor6D" end }
 	motors[name] = motor
-	parts[part] = { FindFirstChild = function(_, key) return if key == name then motor else nil end }
+	parts[part] = {
+		FindFirstChild = function(_, key) return if key == name then motor else nil end,
+		GetChildren = function() return { motor } end,
+	}
 end
 local character = {
 	Parent = true,
 	GetAttribute = function(_, key) return attrs[key] end,
 	SetAttribute = function(_, key, value) attrs[key] = value end,
 	FindFirstChild = function(_, key) return parts[key] end,
+	GetDescendants = function()
+		local list = {}
+		for part, holder in parts do
+			for _, child in holder.GetChildren() do table.insert(list, child) end
+		end
+		return list
+	end,
 }
 local player = { Character = character }
 local services = {
@@ -60,7 +71,23 @@ local services = {
 	ReplicatedStorage = { WaitForChild = function(self) return self end },
 }
 local game = { GetService = function(_, name) return services[name] end }
-local require = function() return { MaxChargeSeconds = 2.5 } end
+-- One table answers both requires: SpecialChargeDefinitions (MaxChargeSeconds) and the special tracks
+local arm = Vector3.new(85, 0, 60)
+local specialTracks = {
+	MaxChargeSeconds = 2.5,
+	["Test:Spin"] = { Style = "Sword", Aerial = false, Bow = false, Length = 0.6, Hits = { 0.1 }, Keys = {
+		{ t = 0.1, p = { rs = arm }, s = 0 },
+		{ t = 0.5, p = { rs = arm }, s = 360 },
+		{ t = 0.6, p = { rs = Vector3.new(40, 0, 0) } },
+	} },
+	["Test:Air"] = { Style = "Sword", Aerial = true, Bow = false, Length = 0.1, Hits = { 0.1 }, Keys = {
+		{ t = 0.1, p = { rh = Vector3.new(50, 0, 0), lh = Vector3.new(50, 0, 0) } },
+	}, Land = {
+		{ t = 0.06, p = { c = 0.8 } },
+		{ t = 0.3, p = { c = 0.8 } },
+	} },
+}
+local require = function() return specialTracks end
 local typeof = type
 -- ANIMATOR_MODULE
 animator.start()
@@ -98,8 +125,9 @@ check(near(held, motors.LeftShoulder.Transform[4]), "Charging leaves shield arm 
 check(motors.RightShoulder.Transform[4] > 0.2, "Charging coils weapon arm")
 attrs.BraceLevel = 1
 advance(0.5)
-check(motors.LeftShoulder.Transform[4] > math.rad(150), "Full brace lifts above head")
-check(motors.Root.Transform[2] < -0.7, "Brace crouches body")
+check(motors.LeftShoulder.Transform[4] > math.rad(135), "Full brace lifts the shield arm overhead")
+check(motors.Root.Transform[2] < -1.1, "Full brace sinks into a deep crouch")
+check(motors.RightKnee.Transform[4] < -math.rad(100) and motors.RightHip.Transform[4] > math.rad(45), "Deep crouch folds the legs (feet stay down)")
 attrs.SpecialChargeStart = nil
 attrs.Blocking = false
 attrs.BraceLevel = 0
@@ -108,6 +136,40 @@ frame(1/60)
 check(motors.LeftShoulder.Transform[4] > 0.2, "Block release crossfades rather than snapping")
 advance(1.5)
 for name, motor in motors do check(motor.Transform == CFrame.identity, "Restored locomotion: " .. name) end
+
+-- Carried shield: drawn, not blocking -> forearm across the chest; a strike takes the arm over
+reset()
+attrs.GuardStyle = "Shield"
+attrs.ShieldInHand = true
+advance(1)
+check(motors.LeftElbow.Transform[4] > math.rad(90), "Drawn shield carried across the chest")
+attrs.ShieldInHand = false
+advance(1.5)
+check(motors.LeftElbow.Transform == CFrame.identity, "Put-away shield lets the arm hang")
+-- Twin daggers: BLOCK crosses both blades before the face
+reset()
+attrs.GuardStyle = "Daggers"
+attrs.SpecialBlockHeld = true
+advance(0.6)
+check(motors.RightShoulder.Transform[4] > math.rad(90) and motors.LeftShoulder.Transform[4] > math.rad(90), "Daggers block with both blades raised")
+check(motors.RightShoulder.Transform[6] < 0 and motors.LeftShoulder.Transform[6] > 0, "Dagger blades cross inward")
+attrs.SpecialBlockHeld = false
+advance(1.5)
+for name, motor in motors do check(motor.Transform == CFrame.identity, "Dagger guard restored: " .. name) end
+-- Drawing from the back: the hand reaches over the shoulder, then returns
+reset()
+attrs.SheatheAt = now
+attrs.SheatheReach = "Back"
+attrs.SheatheOffReach = "Back"
+advance(0.3)
+check(motors.RightShoulder.Transform[4] > math.rad(130) and motors.LeftShoulder.Transform[4] > math.rad(130), "Draw reaches over both shoulders")
+advance(1.5)
+for name, motor in motors do check(motor.Transform == CFrame.identity, "Draw returns to the walk: " .. name) end
+reset()
+attrs.SheatheAt = now
+attrs.SheatheReach = "Belt"
+advance(0.3)
+check(motors.RightShoulder.Transform[4] < -math.rad(15) and motors.LeftShoulder.Transform == CFrame.identity, "Belt draw reaches down to the right hip only")
 
 local peaks = {}
 for _, name in { "SlashRL", "SlashLR", "Thrust", "Overhead", "RetreatCut", "Wide", "AirSpinL", "AirSpinR", "SlideCut", "SlideThrust", "SlideCross", "SlideRise", "SlideReaper", "Ultimate" } do
@@ -124,7 +186,7 @@ for _, dt in { 1/30, 1/60, 1/144 } do
 	reset()
 	attrs.Blocking = true
 	advance(0.6, dt)
-	check(near(motors.LeftShoulder.Transform[4], math.rad(88), 0.003), "Block settles at " .. 1/dt .. " fps")
+	check(near(motors.LeftShoulder.Transform[4], math.rad(90), 0.003), "Block settles at " .. 1/dt .. " fps")
 	attrs.Blocking = false
 	attack("Overhead")
 	advance(0.12, dt)
@@ -168,6 +230,91 @@ player.Character = character
 attrs.Blocking = true
 frame(1/60)
 check(true, "Missing character and optional joint tolerated")
+parts.LeftLowerArm = { FindFirstChild = function(_, key) return if key == "LeftElbow" then motors.LeftElbow else nil end, GetChildren = function() return { motors.LeftElbow } end }
+reset()
+
+-- Default sword chain: every swing is carried by the hand (wrist + elbow), with a follow-through
+local function peak(name, at)
+	reset()
+	attack(name)
+	advance(at)
+	return { rs = motors.RightShoulder.Transform, re = motors.RightElbow.Transform, rw = motors.RightWrist.Transform, waist = motors.Waist.Transform }
+end
+for _, name in { "Thrust", "SlashLR", "SlashRL", "Overhead" } do
+	local windup = peak(name, 0.09)
+	local strike = peak(name, 0.3)
+	check(math.abs(strike.rw[4]) > math.rad(40), "Wrist lines the blade up: " .. name)
+	check(math.abs(windup.re[4] - strike.re[4]) > math.rad(30), "Elbow travels through the swing: " .. name)
+	check(math.abs(windup.rs[4] - strike.rs[4]) > math.rad(60) or math.abs(windup.rs[6] - strike.rs[6]) > math.rad(40), "Big shoulder travel: " .. name)
+end
+local left, right = peak("SlashLR", 0.09), peak("SlashRL", 0.09)
+check(left.rs[6] < 0 and right.rs[6] > 0, "Cuts start high on opposite sides (upper left / upper right)")
+reset()
+attack("Overhead")
+attrs.AttackWind = 0.3
+advance(0.29)
+check(motors.RightShoulder.Transform[4] > math.rad(140), "Overhead winds up above the head")
+
+-- Upgraded avatar joints (AnimationConstraint) are driven exactly like Motor6D
+reset()
+local classicIsA = motors.RightShoulder.IsA
+motors.RightShoulder.IsA = function(_, kind) return kind == "AnimationConstraint" end
+attack("Thrust")
+advance(0.3)
+check(math.abs(motors.RightShoulder.Transform[4]) > math.rad(40), "AnimationConstraint rig animates")
+advance(1.5)
+check(motors.RightShoulder.Transform == CFrame.identity, "AnimationConstraint rig restored")
+motors.RightShoulder.IsA = classicIsA
+reset()
+
+-- Holding BLOCK: the shield climbs and the body sinks gradually through the stages
+attrs.Blocking = true
+advance(0.6)
+local stage1 = motors.LeftShoulder.Transform[4]
+attrs.BraceLevel = 0.4
+advance(1)
+local stage2, crouch2 = motors.LeftShoulder.Transform[4], motors.Root.Transform[2]
+attrs.BraceLevel = 1
+frame(1/60)
+check(motors.LeftShoulder.Transform[4] - stage2 < math.rad(10), "Brace rises slowly, never snaps")
+advance(1)
+local stage3, crouch3 = motors.LeftShoulder.Transform[4], motors.Root.Transform[2]
+check(stage1 < stage2 and stage2 < stage3, "Shield climbs per stage")
+check(crouch2 < -0.4 and crouch3 < crouch2, "Crouch deepens per stage")
+reset()
+
+-- Special tracks: a whole-body spin through the Root joint that never unwinds
+for _, motor in motors do motor.Transform = CFrame.identity end -- the walk animation's base pose again
+attrs.SpecialAnimation = "Test:Spin"
+attrs.SpecialAnimationStart = now
+local lastYaw, unwound, wrapped, armMid = 0, false, false, 0
+for index = 1, 40 do
+	frame(1/60)
+	if index == 20 then armMid = motors.RightShoulder.Transform[6] end
+	local yaw = motors.Root.Transform[5]
+	if yaw < lastYaw - 0.01 then
+		if lastYaw > math.rad(300) and yaw < math.rad(60) then wrapped = true else unwound = true end
+	end
+	lastYaw = yaw
+end
+check(not unwound, "Special spin never turns backwards")
+check(lastYaw > math.rad(250) or wrapped, "Special spin makes a whole turn")
+check(math.abs(armMid) > math.rad(40), "Special key pose drives the weapon arm")
+advance(1)
+for name, motor in motors do check(motor.Transform == CFrame.identity, "Special restored: " .. name) end
+reset()
+
+-- Aerial specials hold the air pose until the reported landing, then play their own landing
+attrs.SpecialAnimation = "Test:Air"
+attrs.SpecialAnimationStart = now
+advance(1.2)
+check(motors.RightHip.Transform[4] > math.rad(40), "Aerial holds the air pose until landing")
+attrs.SpecialLandingStart = now
+advance(0.15)
+check(motors.Root.Transform[2] < -0.4, "Landing plays its own impact crouch")
+advance(1)
+for name, motor in motors do check(motor.Transform == CFrame.identity, "Aerial restored: " .. name) end
+reset()
 
 local Workspace = services.Workspace
 local pending = {}

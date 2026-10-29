@@ -31,7 +31,7 @@ export type Anim =
 	| "Dive"
 	| "Guard"
 	| "SlashRL" -- right-to-left diagonal (upper right -> lower left)
-	| "SlashLR" -- left-to-right horizontal
+	| "SlashLR" -- left-to-right diagonal (upper left -> lower right)
 	| "RetreatCut" -- step back + defensive diagonal
 	| "ParryCounter" -- turn out of a deflection into a short direct thrust
 	| "Wide" -- wide horizontal sweep (several enemies)

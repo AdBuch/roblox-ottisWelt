@@ -6,6 +6,7 @@
 -- Nothing large stays on screen during combat.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -13,6 +14,7 @@ local MomentumConfig = require(Shared:WaitForChild("MomentumConfig"))
 local SpecialMoveDefinitions = require(Shared:WaitForChild("SpecialMoveDefinitions"))
 local UiConfig = require(Shared:WaitForChild("UiConfig"))
 local SpecialChargeDefinitions = require(Shared:WaitForChild("SpecialChargeDefinitions"))
+local Practice = require(Shared:WaitForChild("SpecialPracticeDefinitions"))
 
 type Visibility = {
 	register: (group: string, element: GuiObject, wanted: (() -> boolean)?, forced: (() -> boolean)?) -> (),
@@ -155,20 +157,28 @@ function ComboFeedbackController.start(group: (string, Vector2, UDim2, UDim2?) -
 			end
 			local lines = { '<font size="22" color="#FFD246"><b>TRAINING</b></font>', ("<b>%s</b>"):format(weapon.DisplayName:upper()) }
 			table.insert(lines, "ATTACK (LMB / R2): tap again for the combo · movement turns you.")
-			table.insert(lines, "BLOCK (RMB / L2): on / off · front 70 %, shield side 40 %, back 0 %.")
+			table.insert(lines, "Hold BLOCK (RMB / L2): stages I-III · crouch and raise shield overhead.")
 			table.insert(lines, "Blocking while charging works · ATTACK or firing a special lowers the shield.")
 			table.insert(lines, "")
 			table.insert(lines, '<font color="#FFD246"><b>SPECIAL</b></font>  hold Q / X / SPECIAL, release to fire')
 			for _, def in SpecialChargeDefinitions.Tiers do
 				local moveId = SpecialChargeDefinitions.specialFor(nil, weapon.Basic, def.Family)
 				local move = moveId and (SpecialMoveDefinitions :: any)[moveId]
-				table.insert(lines, ("%s · %d Momentum · from %.1f s · %s"):format(def.Name, def.MomentumCost, def.From, if move then move.Name else "-"))
+				table.insert(lines, ("%s · %d Momentum · %.1f s · %s · %s"):format(def.Name, def.MomentumCost, def.From, if move then move.Name else "-", Practice.label(Players.LocalPlayer, weapon.Id, moveId or "")))
 			end
 			local ultimateId = SpecialChargeDefinitions.specialFor(nil, weapon.Basic, "Ultimate")
 			local ultimate = ultimateId and (SpecialMoveDefinitions :: any)[ultimateId]
-			if ultimate then
-				table.insert(lines, ("ULTIMATE  full charge with full Momentum: %s"):format(ultimate.Name))
+			if ultimate and ultimateId then
+				table.insert(lines, ("ULTIMATE · 100 Momentum · 2.5 s · %s · %s"):format(ultimate.Name, Practice.label(Players.LocalPlayer, weapon.Id, ultimateId)))
 			end
+			for _, family in { "Up", "Circle" } do
+				local id = SpecialChargeDefinitions.specialFor(nil, weapon.Basic, family)
+				local special = id and (SpecialMoveDefinitions :: any)[id]
+				if special and id then
+					table.insert(lines, ("%s · %s · %s"):format(if family == "Up" then "Lv5 AIR: release SPECIAL in air" else "Lv9 ELITE: release SPECIAL holding BLOCK", special.Name, Practice.label(Players.LocalPlayer, weapon.Id, id)))
+				end
+			end
+			table.insert(lines, "Failed special = fall. Every valid attempt improves success by 1%; saved, also in training.")
 			table.insert(lines, ('<font color="#BBBBBB">MOMENTUM 0-%d: recharges over time; attacks and blocks do not change it.</font>'):format(MomentumConfig.Max))
 			table.insert(lines, '<font color="#BBBBBB">Practise on the dummies: no Aura here.</font>')
 			label.Text = table.concat(lines, "\n")

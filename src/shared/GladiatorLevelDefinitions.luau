@@ -23,6 +23,8 @@ local GladiatorLevelDefinitions = {
 		level({ Level = 5, Title = "PRIMUS PALUS", Aura = 1200 }),
 		level({ Level = 6, Title = "CHAMPION", Aura = 2000 }),
 		level({ Level = 7, Title = "LEGEND OF THE ARENA", Aura = 3200 }),
+		level({ Level = 8, Title = "ARENA MASTER", Aura = 4800 }),
+		level({ Level = 9, Title = "ELITE", Aura = 7000 }),
 	}) :: { Level },
 
 	-- Matchmaking: team battles only group entries whose gladiator levels differ by at most this

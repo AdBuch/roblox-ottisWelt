@@ -1,9 +1,9 @@
 --!strict
 -- Classic controls (the only control mode). Same combat on every device and in PvE, PvP and boss fights:
---   Desktop  move WASD · LMB attack (tap again for combos) · RMB block on/off · hold Q special,
+--   Desktop  move WASD · LMB attack (tap again for combos) · hold RMB block · hold Q special,
 --            release to fire · Space jump · F interact
---   Gamepad  left stick move · R2 attack · L2 block on/off · hold X special · A jump
---   Touch    Roblox thumbstick (left) · ATTACK, SPECIAL (hold), BLOCK (on/off) around Roblox's own
+--   Gamepad  left stick move · R2 attack · hold L2 block · hold X special · A jump
+--   Touch    Roblox thumbstick (left) · ATTACK, SPECIAL (hold), BLOCK (hold) around Roblox's own
 --            jump button (right) · drag on free screen space turns the camera
 -- Movement is camera-relative (Roblox's character controller) and turns the character; Soft
 -- Targeting nudges an attack toward the enemy in front (visible line of sight only), the server
