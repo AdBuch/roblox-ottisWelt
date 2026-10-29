@@ -441,6 +441,8 @@ local function refreshMatch()
 	local phase = tostring(arenaAttr(Config.WavePhaseAttribute) or "Idle")
 	local result = tostring(arenaAttr(Config.ResultAttribute) or "")
 	local intro = tostring(arenaAttr(Config.BossIntroAttribute) or "")
+	local bossName = tostring(arenaAttr(Config.BossNameAttribute) or "OTTI")
+	local bossTitle = tostring(arenaAttr(Config.BossTitleAttribute) or "CHAMPION OF THE COLOSSEUM")
 	local zombieMode = mode == "Solo" or mode == "Coop"
 
 	-- Compact round line: one slim line, shown briefly on every change
@@ -464,7 +466,7 @@ local function refreshMatch()
 			local coins = tonumber(player:GetAttribute(Config.RunDenariiAttribute)) or 0
 			local kills = tonumber(player:GetAttribute(Config.RunKillsAttribute)) or 0
 			local title = if result ~= "" then result elseif state == GameStates.Victory then "VICTORY" else "MATCH COMPLETE"
-			local subtitle = if result == "OTTI DEFEATED" then "CHAMPION OF THE COLOSSEUM" elseif state == GameStates.Victory then "GAME COMPLETE" else nil
+			local subtitle = if result:match(" DEFEATED$") then "CHAMPION OF THE COLOSSEUM" elseif state == GameStates.Victory then "GAME COMPLETE" else nil
 			local stats = if mode == "TeamBattle"
 				then ("Elims %d · Deaths %d · +%d Aura · +%d Denarii"):format(tonumber(player:GetAttribute(Config.EliminationsAttribute)) or 0, tonumber(player:GetAttribute(Config.DeathsAttribute)) or 0, earned, coins)
 				else ("Kills %d · +%d Aura · +%d Denarii"):format(kills, earned, coins)
@@ -489,9 +491,9 @@ local function refreshMatch()
 		if intro == "Silence" then
 			notifier.banner("THE CROWD FALLS SILENT...", nil, nil)
 		elseif intro == "Reveal" then
-			notifier.banner("OTTI", "CHAMPION OF THE COLOSSEUM", nil)
+			notifier.banner(bossName, bossTitle, nil)
 		elseif uiState == "Boss" then
-			notifier.banner("ROUND 7", "OTTI", nil, 2)
+			notifier.banner("BOSS FIGHT", bossName, nil, 2)
 		end
 	end
 	if phase ~= lastPhase then

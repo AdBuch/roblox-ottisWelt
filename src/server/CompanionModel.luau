@@ -1,19 +1,13 @@
 --!strict
--- Builds the two companion bosses (Kroko, Schili) from Parts only, with the SAME joint names as Otti's
--- rig (RootJoint, Waist, Neck, RightShoulder, LeftShoulder, RightHip, LeftHip, Tail1..6), so the
--- existing animation (OttiAnimationService / the client OttiAnimator) drives them without changes.
--- Built-in shapes only, no asset ids. This is a playable first design: the final look comes with the
--- character art (see docs/COMPANION_BOSSES.md, section 5).
---
---   Kroko   broad crocodile: long snout with an amber-eyed head, green back ridges, cream jaw and belly,
---           bronze shoulder guard, wooden club, round wooden shield on the left arm
---   Schili  tortoise: a large domed shell with bronze rim and a gold emblem, short sturdy legs, a small
---           head with dark-brown eyes, bronze bracers, a wooden staff
+-- Kroko and Schili: native procedural 3D heroes, with species-specific proportions and gear.
+-- HeroSkeleton adds the common articulated limbs; the shared animator reads each hero's profile.
+-- Primitive shapes keep the models asset-free and editable; they are not raster sprites or SVGs.
 
 local PhysicsService = game:GetService("PhysicsService")
 
 local OttiTailService = require(script.Parent.OttiTailService)
 local OttiModel = require(script.Parent.OttiModel)
+local HeroSkeleton = require(script.Parent.HeroSkeleton)
 
 type OttiRig = OttiModel.OttiRig
 
@@ -57,6 +51,7 @@ function CompanionModel.build(id: string): OttiRig
 	model.Name = "Companion_" .. id
 	model.ModelStreamingMode = Enum.ModelStreamingMode.Atomic
 	model:SetAttribute("BossName", palette.name)
+	model:SetAttribute("HeroId", id)
 	local bodyParts: { BasePart } = {}
 
 	local function makePart(name: string, size: Vector3, cframe: CFrame, color: Color3, material: Enum.Material, mesh: string?): BasePart
@@ -129,9 +124,9 @@ function CompanionModel.build(id: string): OttiRig
 	table.remove(bodyParts, table.find(bodyParts, root) :: number)
 
 	local pelvisY = legLen + 0.9
-	local chestY = pelvisY + 2.0
+	local chestY = pelvisY + (if isTortoise then 1.4 else 2.0)
 	local pelvis = body("Pelvis", Vector3.new(2.6, 2.0, 2.3), Vector3.new(0, pelvisY, 0.1), palette.body, "Sphere")
-	local chest = body("Chest", Vector3.new(2.6, 2.8, 2.2), Vector3.new(0, chestY, 0), palette.body, "Sphere")
+	local chest = body("Chest", Vector3.new(if isTortoise then 2.8 else 3.1, if isTortoise then 2.2 else 2.8, 2.2), Vector3.new(0, chestY, 0), palette.body, "Sphere")
 	local headY = chestY + 2.0
 	local head = body("Head", Vector3.new(2.0, 1.7, 2.1), Vector3.new(0, headY, -0.2), palette.body, "Sphere")
 	local rightArm = body("RightArm", Vector3.new(0.8, 2.1, 0.8), Vector3.new(1.5, chestY + 0.6, 0), palette.body, "Head")
@@ -153,14 +148,29 @@ function CompanionModel.build(id: string): OttiRig
 
 	if isTortoise then
 		-- Large domed shell with a bronze rim, plates and a gold emblem (the centre of the design)
-		local shellY = chestY + 0.9
-		local shell = add(chest, "Shell", Vector3.new(4.6, 2.8, 4.2), Vector3.new(0, shellY, 0.4), Color3.fromRGB(128, 84, 46), Enum.Material.Wood, nil, "Ball")
-		shell.Name = "Shell"
-		add(chest, "ShellRim", Vector3.new(4.9, 0.45, 4.5), Vector3.new(0, shellY - 0.9, 0.4), BRONZE, metal, nil, "Cylinder")
-		for _, p in { Vector3.new(-1.1, 0, -0.9), Vector3.new(1.1, 0, -0.9), Vector3.new(0, 0, 0.6), Vector3.new(-1.1, 0, 1.6), Vector3.new(1.1, 0, 1.6) } do
-			add(chest, "ShellPlate", Vector3.new(1.1, 0.25, 1.1), Vector3.new(p.X, shellY + 1.2, p.Z + 0.4), Color3.fromRGB(176, 110, 52), Enum.Material.Wood)
+		local shellY = chestY - 0.2
+		add(chest, "ShellRim", Vector3.new(4.4, 4.5, 0.55), Vector3.new(0, shellY, 1.0), GOLD, metal, nil, "Ball")
+		add(chest, "Shell", Vector3.new(4.1, 4.2, 2.2), Vector3.new(0, shellY, 1.45), Color3.fromRGB(112, 76, 43), Enum.Material.Wood, nil, "Ball")
+		for i = 0, 5 do
+			local angle = math.rad(i * 60)
+			local position = Vector3.new(math.sin(angle) * 1.05, shellY + math.cos(angle) * 1.1, 2.43)
+			local normal = Vector3.new(math.sin(angle) * 0.3, math.cos(angle) * 0.3, 1).Unit
+			add(chest, "ShellPlate", Vector3.new(1.25, 1.4, 0.32), position, if i % 2 == 0 then Color3.fromRGB(184, 131, 63) else Color3.fromRGB(136, 147, 74), Enum.Material.Wood, CFrame.lookAt(Vector3.zero, -normal) * CFrame.Angles(0, 0, -angle), "Sphere")
 		end
-		add(chest, "ShellEmblem", Vector3.new(0.5, 0.2, 0.5), Vector3.new(0, shellY + 1.45, 0.4), GOLD, Enum.Material.Metal, nil, "Ball")
+		add(chest, "ShellSun", Vector3.new(1.0, 1.0, 0.2), Vector3.new(0, shellY, 2.59), GOLD, metal, nil, "Ball")
+		for i = 0, 7 do
+			local a = math.rad(i * 45)
+			add(chest, "SunRay", Vector3.new(0.1, 0.3, 0.12), Vector3.new(math.sin(a) * 0.72, shellY + math.cos(a) * 0.72, 2.57), GOLD, metal, CFrame.Angles(0, 0, -a))
+		end
+		add(head, "Muzzle", Vector3.new(1.5, 0.8, 0.8), Vector3.new(0, headY - 0.35, -1.17), palette.belly, smooth, nil, "Ball")
+		for _, side in { -1, 1 } do
+			add(head, "Eye", Vector3.new(0.48, 0.56, 0.25), Vector3.new(side * 0.53, headY + 0.2, -1.16), Color3.fromRGB(62, 37, 24), smooth, nil, "Ball")
+			add(head, "Catchlight", Vector3.new(0.14, 0.16, 0.08), Vector3.new(side * 0.53 - 0.06, headY + 0.32, -1.3), CREAM, smooth, nil, "Ball")
+			add(head, "Brow", Vector3.new(0.54, 0.13, 0.17), Vector3.new(side * 0.53, headY + 0.62, -1.07), palette.ridge, smooth, CFrame.Angles(0, 0, side * math.rad(6)), "Ball")
+		end
+		add(pelvis, "TealCloth", Vector3.new(1.35, 0.9, 0.15), Vector3.new(0, pelvisY - 0.7, -1.04), Color3.fromRGB(37, 104, 105), Enum.Material.Fabric)
+		add(pelvis, "UtilityPouch", Vector3.new(0.6, 0.7, 0.4), Vector3.new(-1.3, pelvisY, -0.7), LEATHER, leather, nil, "Head")
+		add(pelvis, "ScrollCase", Vector3.new(0.45, 1.1, 0.45), Vector3.new(1.3, pelvisY + 0.1, -0.5), WOOD_LIGHT, Enum.Material.Wood, CFrame.Angles(0, 0, math.rad(-15)), "Head")
 		-- bronze bracers and a narrow leather chest strap
 		add(chest, "Strap", Vector3.new(0.35, 2.4, 0.12), Vector3.new(0.2, chestY, -1.1), LEATHER, leather, CFrame.Angles(0, 0, math.rad(34)))
 		for _, arm in { rightArm, leftArm } do
@@ -170,11 +180,13 @@ function CompanionModel.build(id: string): OttiRig
 		add(head, "Band", Vector3.new(1.9, 0.22, 1.9), Vector3.new(0, headY + 0.6, -0.2), BRONZE, metal, nil, "Head")
 	else
 		-- Crocodile: long snout, cream jaw, back ridges, amber eyes, bronze shoulder guard, harness
-		add(head, "Snout", Vector3.new(1.4, 0.9, 1.6), Vector3.new(0, headY - 0.1, -1.4), palette.body, smooth, nil, "Ball")
-		add(head, "Jaw", Vector3.new(1.2, 0.5, 1.4), Vector3.new(0, headY - 0.7, -1.3), CREAM, smooth, nil, "Ball")
+		add(head, "Snout", Vector3.new(2.0, 0.9, 1.9), Vector3.new(0, headY - 0.1, -1.4), palette.body, smooth, nil, "Ball")
+		add(head, "Jaw", Vector3.new(1.9, 0.5, 1.8), Vector3.new(0, headY - 0.7, -1.3), CREAM, smooth, nil, "Ball")
 		add(head, "Nose", Vector3.new(0.5, 0.3, 0.3), Vector3.new(0, headY + 0.1, -2.3), NOSE, smooth, nil, "Ball")
 		for _, side in { -1, 1 } do
-			add(head, "Eye", Vector3.new(0.4, 0.4, 0.3), Vector3.new(side * 0.7, headY + 0.5, -1.2), EYE_AMBER, Enum.Material.Neon, nil, "Ball")
+			add(head, "Eye", Vector3.new(0.4, 0.4, 0.3), Vector3.new(side * 0.7, headY + 0.5, -1.2), EYE_AMBER, smooth, nil, "Ball")
+			add(head, "Pupil", Vector3.new(0.18, 0.27, 0.12), Vector3.new(side * 0.7, headY + 0.5, -1.36), NOSE, smooth, nil, "Ball")
+			add(head, "Catchlight", Vector3.new(0.08, 0.09, 0.06), Vector3.new(side * 0.7 - 0.04, headY + 0.59, -1.43), CREAM, smooth, nil, "Ball")
 			add(head, "Brow", Vector3.new(0.6, 0.15, 0.3), Vector3.new(side * 0.7, headY + 0.85, -1.2), palette.ridge, smooth, CFrame.Angles(0, 0, side * math.rad(-14)))
 		end
 		for _, x in { -0.5, 0.5 } do
@@ -191,7 +203,17 @@ function CompanionModel.build(id: string): OttiRig
 		end
 	end
 
-	-- Feet: webbed or flat, same for both
+	-- An affectionate smile: curved corners, never a threatening row of teeth.
+	for i = -2, 2 do
+		local z = if isTortoise then -1.57 else -2.16
+		add(head, "Smile", Vector3.new(0.19, 0.055, 0.06), Vector3.new(i * 0.16, headY - 0.48 + math.abs(i) * 0.045, z), LEATHER_DARK, smooth, CFrame.Angles(0, 0, i * math.rad(10)), "Ball")
+	end
+	add(pelvis, "Belt", Vector3.new(2.75, 0.3, 2.4), Vector3.new(0, pelvisY, 0.1), LEATHER_DARK, leather, nil, "Head")
+	add(pelvis, "BeltEmblem", Vector3.new(0.55, 0.55, 0.15), Vector3.new(0, pelvisY, -1.19), BRONZE, metal, nil, "Ball")
+	if not isTortoise then
+		add(pelvis, "RedCloth", Vector3.new(1.4, 1.0, 0.15), Vector3.new(0, pelvisY - 0.65, -1.12), SHIELD_RED, Enum.Material.Fabric)
+	end
+	-- Feet: sturdy rounded paws.
 	for _, leg in { leftLeg, rightLeg } do
 		local x = leg.Position.X / S
 		add(leg, "Foot", Vector3.new(1.2, 0.4, 1.8), Vector3.new(x, 0.2, -0.3), palette.body, smooth, nil, "Ball")
@@ -199,8 +221,15 @@ function CompanionModel.build(id: string): OttiRig
 	end
 
 	-- Tail: the same six-segment tail as Otti (scaled to the species)
-	local tail = OttiTailService.build(pelvis, Vector3.new(0, pelvisY - 0.3, 1.2), S, palette.body, makePart)
+	local tail = OttiTailService.build(pelvis, Vector3.new(0, pelvisY - 0.3, 1.2), S, palette.body, makePart, if isTortoise then 0.15 else 1.15)
 
+	if not isTortoise then
+		for _, segment in tail.segments do
+			local ridge = makePart("TailRidge", Vector3.new(0.35, 0.4, 0.5) * S, segment.CFrame * CFrame.new(0, segment.Size.Y / 2, 0), palette.ridge, smooth, "Ball")
+			local weld = Instance.new("WeldConstraint")
+			weld.Part0, weld.Part1, weld.Parent = segment, ridge, ridge
+		end
+	end
 	-- Weapon in the right hand (swordParts: shown while the boss is armed)
 	local swordParts: { BasePart } = {}
 	local function weapon(name: string, size: Vector3, position: Vector3, color: Color3, material: Enum.Material, rotation: CFrame?, mesh: string?)
@@ -253,6 +282,7 @@ function CompanionModel.build(id: string): OttiRig
 	Instance.new("Animator").Parent = humanoid
 	model.PrimaryPart = root
 
+	HeroSkeleton.articulate(model, motors, bodyParts)
 	pcall(function()
 		local group = "OttiBoss"
 		if not PhysicsService:IsCollisionGroupRegistered(group) then

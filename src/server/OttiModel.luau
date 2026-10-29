@@ -17,6 +17,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local OttiBossConfig = require(ReplicatedStorage.Shared.OttiBossConfig)
 local OttiTailService = require(script.Parent.OttiTailService)
+local HeroSkeleton = require(script.Parent.HeroSkeleton)
 
 local FUR = Color3.fromRGB(92, 58, 38) -- chocolate brown
 local FUR_DARK = Color3.fromRGB(66, 40, 26)
@@ -168,7 +169,9 @@ function OttiModel.build(): OttiRig
 	end
 	add(head, "Nose", Vector3.new(0.72, 0.42, 0.45), Vector3.new(0, 7.5, -1.5), NOSE, smooth, nil, "Sphere")
 	add(head, "NoseShine", Vector3.new(0.18, 0.08, 0.1), Vector3.new(-0.12, 7.64, -1.66), Color3.fromRGB(120, 100, 90), smooth, nil, "Sphere")
-	add(head, "Mouth", Vector3.new(0.5, 0.06, 0.06), Vector3.new(0, 7.0, -1.47), NOSE, smooth)
+	for i = -2, 2 do
+		add(head, "Smile", Vector3.new(0.18, 0.055, 0.06), Vector3.new(i * 0.15, 6.97 + math.abs(i) * 0.035, -1.47), NOSE, smooth, CFrame.Angles(0, 0, i * math.rad(9)), "Sphere")
+	end
 	for _, side in { -1, 1 } do
 		add(head, "Eye", Vector3.new(0.36, 0.38, 0.3), Vector3.new(side * 0.48, 7.85, -0.86), EYE, Enum.Material.Glass, nil, "Sphere")
 		add(head, "EyeShine", Vector3.new(0.1, 0.1, 0.08), Vector3.new(side * 0.42, 7.93, -1.0), Color3.new(1, 1, 1), Enum.Material.Neon, nil, "Sphere")
@@ -217,9 +220,9 @@ function OttiModel.build(): OttiRig
 	-- Signature black-and-cream braided necklace
 	for i = 0, 15 do
 		local angle = i / 16 * 2 * math.pi
-		local position = Vector3.new(math.sin(angle) * 1.0, 6.75 - math.max(0, -math.cos(angle)) * 0.25, -math.cos(angle) * 0.92)
-		add(chest, "Bead", Vector3.one * 0.3, position, if i % 2 == 0 then Color3.fromRGB(28, 24, 22) else CREAM, smooth, nil, "Ball")
-		local inner = Vector3.new(math.sin(angle + 0.2) * 0.95, position.Y - 0.12, -math.cos(angle + 0.2) * 0.87)
+		local position = Vector3.new(math.sin(angle) * 1.0, 6.8 - math.max(0, math.cos(angle)) * 0.85, -math.cos(angle) * 1.3)
+		add(chest, "Bead", Vector3.one * 0.35, position, if i % 2 == 0 then Color3.fromRGB(28, 24, 22) else CREAM, smooth, nil, "Ball")
+		local inner = Vector3.new(math.sin(angle + 0.2) * 0.95, position.Y - 0.12, -math.cos(angle + 0.2) * 1.26)
 		add(chest, "Bead", Vector3.one * 0.22, inner, if i % 2 == 0 then CREAM else Color3.fromRGB(28, 24, 22), smooth, nil, "Ball")
 	end
 
@@ -330,6 +333,8 @@ function OttiModel.build(): OttiRig
 	Instance.new("Animator").Parent = humanoid -- for authored animations later (OttiBossConfig.AnimationIds)
 	model.PrimaryPart = root
 
+	HeroSkeleton.articulate(model, motors, bodyParts)
+	model:SetAttribute("HeroId", "Otti")
 	pcall(setupCollisionGroup)
 	root.CollisionGroup = "OttiBoss"
 	for _, part in bodyParts do

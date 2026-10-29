@@ -299,7 +299,7 @@ local function onBossDefeated(current: Match, damageBy: { [Player]: number })
 		end
 	end
 	AuraService.awardBossVictory(rewards)
-	endZombieMatch(current, true, "OTTI DEFEATED")
+	endZombieMatch(current, true, string.upper(current.boss or "Otti") .. " DEFEATED")
 end
 
 -- Round 7: after the last Round 6 zombie, clean the arena and start the Otti encounter.

@@ -77,6 +77,10 @@ function BossHudController.start(group: (string, Vector2, UDim2, UDim2?) -> Fram
 	warning.BackgroundTransparency = 1
 	warning.Font = Enum.Font.GothamBlack
 	warning.TextSize = 26
+	warning.TextScaled = true
+	local warningTextSize = Instance.new("UITextSizeConstraint")
+	warningTextSize.MinTextSize, warningTextSize.MaxTextSize = 12, 26
+	warningTextSize.Parent = warning
 	warning.TextColor3 = Color3.fromRGB(255, 120, 60)
 	warning.TextStrokeColor3 = Color3.fromRGB(40, 10, 0)
 	warning.TextStrokeTransparency = 0.1
@@ -111,6 +115,7 @@ function BossHudController.start(group: (string, Vector2, UDim2, UDim2?) -> Fram
 
 	local lastPhase = 0
 	local function refresh()
+		name.Text = tostring(arena:GetAttribute(Config.BossNameAttribute) or OttiBossConfig.DisplayName)
 		local maxHealth = tonumber(arena:GetAttribute(Config.BossMaxHealthAttribute)) or 0
 		local health = tonumber(arena:GetAttribute(Config.BossHealthAttribute)) or 0
 		local phase = math.clamp(tonumber(arena:GetAttribute(Config.BossPhaseAttribute)) or 1, 1, #BossPhaseDefinitions.Phases)
@@ -124,7 +129,7 @@ function BossHudController.start(group: (string, Vector2, UDim2, UDim2?) -> Fram
 			stroke.Color = def.Accent
 		end
 	end
-	for _, attribute in { Config.BossHealthAttribute, Config.BossMaxHealthAttribute, Config.BossPhaseAttribute, Config.BossDefeatedAttribute } do
+	for _, attribute in { Config.BossNameAttribute, Config.BossHealthAttribute, Config.BossMaxHealthAttribute, Config.BossPhaseAttribute, Config.BossDefeatedAttribute } do
 		arena:GetAttributeChangedSignal(attribute):Connect(refresh)
 	end
 	refresh()

@@ -24,7 +24,7 @@ local function A(x: number, y: number, z: number): CFrame
 	return CFrame.Angles(rad(x), rad(y), rad(z))
 end
 
-local MOTORS = { "RootJoint", "Waist", "Neck", "RightShoulder", "LeftShoulder", "RightHip", "LeftHip", "Tail1", "Tail2", "Tail3", "Tail4", "Tail5", "Tail6" }
+local MOTORS = { "RootJoint", "Waist", "Neck", "RightShoulder", "LeftShoulder", "RightHip", "LeftHip", "RightElbow", "LeftElbow", "RightKnee", "LeftKnee", "Tail1", "Tail2", "Tail3", "Tail4", "Tail5", "Tail6" }
 
 local BIPED: PoseTable = {
 	RootJoint = A(-10, 0, 0),
@@ -57,6 +57,12 @@ local QUAD: PoseTable = {
 	Tail5 = A(0, 0, 0),
 	Tail6 = A(0, 0, 0),
 }
+
+-- Shared limb joints also have defaults for older authored rigs without elbows/knees.
+for _, base in { BIPED, QUAD } do
+	base.RightElbow, base.LeftElbow = A(-12, 0, 0), A(-18, 0, 0)
+	base.RightKnee, base.LeftKnee = CFrame.identity, CFrame.identity
+end
 
 -- Attack and intro poses: only the listed joints are overridden.
 local POSES: { [string]: PoseTable } = {
@@ -110,6 +116,16 @@ local POSES: { [string]: PoseTable } = {
 		Tail1 = A(-20, 35, 0), Tail2 = A(0, 15, 0), Tail3 = A(0, 15, 0), Tail4 = A(0, 15, 0),
 	},
 }
+
+POSES.ClubWind = { RightShoulder = A(130, -20, 35), RightElbow = A(-65, 0, 0), Waist = A(0, 28, -8), Neck = A(10, -12, 0) }
+POSES.ClubStrike = { RightShoulder = A(15, 25, -30), RightElbow = A(-5, 0, 0), Waist = A(-16, -30, 7) }
+POSES.StaffWind = { RightShoulder = A(-15, -15, 15), RightElbow = A(-60, 0, 0), LeftShoulder = A(35, 0, -15), Waist = A(2, 22, 0) }
+POSES.StaffStrike = { RightShoulder = A(12, 0, -5), RightElbow = A(0, 0, 0), Waist = A(-10, -20, 0), RootJoint = A(-10, 0, 0) }
+POSES.StaffSweepWind = { RightShoulder = A(25, 0, 70), RightElbow = A(-35, 0, 0), Waist = A(0, 45, 0) }
+POSES.StaffSweepStrike = { RightShoulder = A(25, 0, -65), RightElbow = A(-5, 0, 0), Waist = A(0, -45, 0) }
+POSES.ShellGuard = { RootJoint = CFrame.new(0, -0.45, 0) * A(-28, 30, 0), Neck = CFrame.new(0, -0.3, 0.4) * A(20, 0, 0), RightShoulder = A(40, 0, 25), LeftShoulder = A(60, 0, -30), RightElbow = A(-65, 0, 0), LeftElbow = A(-70, 0, 0), RightKnee = A(22, 0, 0), LeftKnee = A(22, 0, 0) }
+POSES.RushWind = { RootJoint = CFrame.new(0, -0.4, 0.3) * A(-28, 0, 0), LeftShoulder = A(50, 0, -10), LeftElbow = A(-40, 0, 0), RightShoulder = A(-20, 0, 25), RightKnee = A(25, 0, 0) }
+POSES.RushRun = { RootJoint = A(-32, 0, 0), Neck = A(24, 0, 0), LeftShoulder = A(50, 0, -10), LeftElbow = A(-35, 0, 0), RightShoulder = A(-15, 0, 30) }
 
 -- Spectating in the imperial box: sits like an otter, tail beside the throne, paws on the knees
 local SITTING: PoseTable = {
@@ -262,7 +278,7 @@ local function update(state: State, dt: number, ids: { [string]: string })
 	local target: { [string]: CFrame } = {}
 	local sitting = loco == "SITTING"
 	for _, name in MOTORS do
-		target[name] = if sitting then SITTING[name] else BIPED[name]:Lerp(QUAD[name], q)
+		target[name] = if sitting then (SITTING[name] or CFrame.identity) else BIPED[name]:Lerp(QUAD[name], q)
 	end
 	if sitting then
 		moving = 0
@@ -275,6 +291,21 @@ local function update(state: State, dt: number, ids: { [string]: string })
 		end
 	end
 
+	local hero = model:GetAttribute("HeroId") or "Otti"
+	if hero == "Schili" and not sitting then
+		target.RootJoint = A(-4, 0, 0)
+		target.Waist, target.Neck = A(-2, 0, 0), A(6, 0, 0)
+		target.RightShoulder, target.LeftShoulder = A(5, 0, 12), A(20, 0, -10)
+	elseif hero == "Kroko" and not sitting then
+		target.RootJoint, target.Waist = A(-7, 0, 0), A(-2, 0, 0)
+		target.RightShoulder, target.LeftShoulder = A(15, 0, 22), A(35, 0, -12)
+	end
+	if not sitting then
+		target.RightKnee = A(math.max(0, -s) * 34 * moving, 0, 0)
+		target.LeftKnee = A(math.max(0, s) * 34 * moving, 0, 0)
+		target.RightElbow *= A(math.max(0, s) * -12 * moving, 0, 0)
+		target.LeftElbow *= A(math.max(0, -s) * -12 * moving, 0, 0)
+	end
 	-- Gait
 	if sitting then
 		target.Waist *= CFrame.Angles(math.sin(now * 1.6) * rad(2), 0, 0) -- breathing
@@ -295,7 +326,7 @@ local function update(state: State, dt: number, ids: { [string]: string })
 		-- Breathing
 		target.Waist *= CFrame.Angles(math.sin(now * 2) * rad(2), 0, 0)
 		-- Now and then a front paw goes down for balance while moving on two legs
-		if loco == "BIPED_STRAFE" and pose == "" and now >= state.nextPawDown then
+		if hero == "Otti" and loco == "BIPED_STRAFE" and pose == "" and now >= state.nextPawDown then
 			state.pawDownUntil = now + 0.6
 			state.nextPawDown = now + 4 + math.random() * 4
 		end
