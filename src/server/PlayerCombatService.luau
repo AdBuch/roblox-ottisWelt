@@ -23,6 +23,8 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
+local SpecialPracticeDefinitions = require(ReplicatedStorage.Shared.SpecialPracticeDefinitions)
+local specialRng = Random.new()
 
 local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
 local Config = require(ReplicatedStorage.Shared.Config)
@@ -63,9 +65,14 @@ local BALANCE_LOSS_SECONDS = 0.4
 local BALANCE_LOSS_COOLDOWN = 1.5
 
 -- Poses relative to the hand's grip attachment (+Y forward when the arm hangs, +Z up the arm).
--- Fixed hand-local grip: the body joints raise and turn the shield, never its weld.
-local SHIELD_GRIP = CFrame.new(0, -0.22, 0)
+-- Fixed hand-local grip: the body joints raise and turn the shield, never its weld. The shield
+-- rides on the OUTER forearm (face out of the back of the hand, long side along the forearm).
+local SHIELD_GRIP = CFrame.new(-0.45, 0.1, 0.7) * CFrame.Angles(0, 0, math.rad(90))
 local OFFHAND_REST = CFrame.Angles(math.rad(30), 0, 0)
+-- Drawing / putting away: the hand reaches the mount, the gear changes place, the arm returns.
+-- PlayerAnimator plays the reach from SheatheAt (same timing).
+local SHEATHE_REACH = 0.3
+local SHEATHE_CHECK = 0.2 -- seconds between combat-zone checks
 local TEAM_RED = Color3.fromRGB(170, 30, 34)
 local TEAM_BLUE = Color3.fromRGB(36, 70, 170)
 
@@ -78,6 +85,11 @@ type PlayerState = {
 	offhandModel: Model?,
 	weaponGrip: CFrame,
 	offhandGrip: CFrame,
+	rightHand: BasePart?,
+	leftHand: BasePart?,
+	drawn: boolean, -- gear in the hands (combat zone) or carried on the back / belt
+	drawTarget: boolean, -- where a running draw / put-away is heading
+	sheatheToken: number,
 	busyUntil: number,
 	cooldowns: { [string]: number },
 	blocking: boolean,
@@ -128,6 +140,11 @@ local function getState(player: Player): PlayerState
 			offhandModel = nil,
 			weaponGrip = CFrame.identity,
 			offhandGrip = CFrame.identity,
+			rightHand = nil,
+			leftHand = nil,
+			drawn = false,
+			drawTarget = false,
+			sheatheToken = 0,
 			busyUntil = 0,
 			cooldowns = {},
 			blocking = false,
@@ -290,6 +307,80 @@ local function attach(model: Model, core: BasePart, limb: BasePart, c0: CFrame, 
 	return weld
 end
 
+local function torsoPart(character: Model, mount: string): BasePart? -- "Back" | "Belt"
+	local part = character:FindFirstChild(if mount == "Back" then "UpperTorso" else "LowerTorso") or character:FindFirstChild("Torso")
+	return if part and part:IsA("BasePart") then part else nil
+end
+
+local function moveWeld(weld: Weld?, part: BasePart?, c0: CFrame)
+	if weld and weld.Parent and part then
+		weld.Part0 = part
+		weld.C0 = c0
+	end
+end
+
+-- Puts weapon and offhand where they belong right now: in the hands when drawn, otherwise on the
+-- back / belt. A bow needs both hands to shoot, so its shield stays on the back unless blocking.
+local function placeEquipment(player: Player, state: PlayerState)
+	local character = player.Character
+	if not character or not state.weaponId then
+		return
+	end
+	local bow = InventoryService.getEquippedWeapon(player).Kind == "Bow"
+	local shieldOnBack = state.shieldId ~= nil and (not state.drawn or (bow and not state.blocking))
+	if state.drawn then
+		moveWeld(state.weaponWeld, state.rightHand, state.weaponGrip * EquipmentModels.weaponRestPose(state.weaponId))
+	else
+		local mount, c0 = EquipmentModels.stowMount(state.weaponId, state.shieldId ~= nil)
+		moveWeld(state.weaponWeld, torsoPart(character, mount), c0)
+	end
+	if state.shieldId then
+		if shieldOnBack then
+			moveWeld(state.offhandWeld, torsoPart(character, "Back"), EquipmentModels.ShieldBackMount)
+		else
+			moveWeld(state.offhandWeld, state.leftHand, state.offhandGrip * SHIELD_GRIP)
+		end
+	elseif state.drawn then
+		moveWeld(state.offhandWeld, state.leftHand, state.offhandGrip * OFFHAND_REST)
+	else
+		moveWeld(state.offhandWeld, torsoPart(character, "Belt"), EquipmentModels.OffhandDaggerMount)
+	end
+	character:SetAttribute("WeaponDrawn", state.drawn)
+	character:SetAttribute("ShieldInHand", state.shieldId ~= nil and not shieldOnBack)
+end
+
+-- Draws (combat zone) or puts the gear away (everywhere else). `animated` plays the reach first;
+-- without it (spawn, an action that can't wait) the gear changes place at once.
+local function setDrawn(player: Player, state: PlayerState, drawn: boolean, animated: boolean)
+	if state.drawTarget == drawn and (state.drawn == drawn or animated) then
+		return
+	end
+	state.drawTarget = drawn
+	state.sheatheToken += 1
+	local character = player.Character
+	if character then
+		character:SetAttribute("CombatZone", drawn) -- the client only takes combat input here
+	end
+	if not animated or not character or not state.weaponId then
+		state.drawn = drawn
+		placeEquipment(player, state)
+		return
+	end
+	local bow = InventoryService.getEquippedWeapon(player).Kind == "Bow"
+	local mount = EquipmentModels.stowMount(state.weaponId, state.shieldId ~= nil)
+	character:SetAttribute("SheatheReach", mount)
+	-- the left hand reaches too: the shield on the back, the second dagger at the left hip
+	character:SetAttribute("SheatheOffReach", if state.shieldId == nil then "Belt" elseif bow then "" else "Back")
+	character:SetAttribute("SheatheAt", Workspace:GetServerTimeNow())
+	local token = state.sheatheToken
+	task.delay(SHEATHE_REACH, function()
+		if state.sheatheToken == token and player.Character == character then
+			state.drawn = drawn
+			placeEquipment(player, state)
+		end
+	end)
+end
+
 -- Rebuilds the weapon and shield (or offhand dagger) in the current character's hands.
 function PlayerCombatService.refreshEquipment(player: Player)
 	local character = player.Character
@@ -317,6 +408,8 @@ function PlayerCombatService.refreshEquipment(player: Player)
 	local weaponModel, weaponCore = EquipmentModels.buildWeapon(weapon.Id)
 	state.weaponGrip = rightGrip
 	state.offhandGrip = leftGrip
+	state.rightHand = rightHand
+	state.leftHand = leftHand
 	state.weaponWeld = attach(weaponModel, weaponCore, rightHand, rightGrip * EquipmentModels.weaponRestPose(weapon.Id), character)
 	state.weaponModel = weaponModel
 	state.weaponId = weapon.Id
@@ -338,6 +431,15 @@ function PlayerCombatService.refreshEquipment(player: Player)
 		state.offhandWeld = attach(daggerModel, daggerCore, leftHand, leftGrip * OFFHAND_REST, character)
 		state.offhandModel = daggerModel
 	end
+	-- How the guard looks (PlayerAnimator): shield on the forearm, crossed daggers, or a bow
+	-- whose shield only comes off the back to block
+	character:SetAttribute("GuardStyle", if not shield then "Daggers" elseif weapon.Kind == "Bow" then "Bow" else "Shield")
+	-- New gear starts where it belongs now (in a combat zone in the hands, otherwise put away)
+	state.drawTarget = CombatRules.getContext(player) ~= nil
+	state.drawn = state.drawTarget
+	state.sheatheToken += 1
+	character:SetAttribute("CombatZone", state.drawTarget)
+	placeEquipment(player, state)
 
 	-- Armor on the body (no helmet: the player stays recognisable); cloth takes the team color
 	local armorModel = EquipmentModels.buildArmor(InventoryService.getEquippedArmor(player).Id, character)
@@ -431,12 +533,20 @@ end
 
 local function setBlocking(player: Player, active: boolean)
 	local state = getState(player)
+	local model = player.Character
+	if not active and model and model:GetAttribute("SpecialBlockHeld") then
+		model:SetAttribute("SpecialBlockHeld", false)
+		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Block, false)
+	end
 	if state.blocking == active then
 		return
 	end
 	state.blocking = active
 	state.blockToken += 1
 	state.blockStart = os.clock()
+	if state.drawn then
+		placeEquipment(player, state) -- a bow's shield comes off the back for the block, and goes back
+	end
 	updateWalkSpeed(player)
 	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Block, active)
 	local character = player.Character
@@ -479,6 +589,13 @@ local function onBlockRequest(player: Player, wantsBlock: unknown)
 		refuseBlock(player)
 		return
 	end
+	if not state.drawn or not state.drawTarget then
+		if CombatRules.getContext(player) == nil then
+			refuseBlock(player)
+			return -- gear put away outside the combat zones
+		end
+		setDrawn(player, state, true, false) -- in the zone but still drawing: the guard can't wait
+	end
 	local now = os.clock()
 	if now < state.heavyReactUntil then
 		refuseBlock(player)
@@ -495,7 +612,9 @@ local function onBlockRequest(player: Player, wantsBlock: unknown)
 			end
 			Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Parry)
 		end
-		refuseBlock(player) -- daggers parry; there is no held guard to show
+		local character = player.Character
+		if character then character:SetAttribute("SpecialBlockHeld", true) end
+		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Block, true)
 		return
 	end
 	local activeShield = InventoryService.getActiveShield(player)
@@ -925,16 +1044,22 @@ end
 
 -- A short, controlled knockdown (the client owns its physics and lies down at most
 -- OttiBossConfig.MaxKnockdownSeconds), followed by brief recovery protection.
-function PlayerCombatService.knockdown(player: Player, seconds: number)
+function PlayerCombatService.knockdown(player: Player, seconds: number, protect: boolean?)
 	local duration = math.min(seconds, 1.2)
 	setBlocking(player, false)
 	cancelCharge(player, "INTERRUPTED")
 	local state = getState(player)
 	state.knockedUntil = os.clock() + duration
+	state.actionToken += 1
+	local character = player.Character
+	if character then
+		character:SetAttribute("AttackAnim", nil)
+		character:SetAttribute("SpecialAnimation", nil)
+	end
 	AttackSequenceService.reset(player) -- a knockdown resets the attack chain
 	SlideService.cancel(player)
 	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Knockdown, duration)
-	PlayerCombatService.grantImmunity(player, duration + 1)
+	if protect ~= false then PlayerCombatService.grantImmunity(player, duration + 1) end
 end
 
 -- Otti's grapple: no walking or jumping while held. Always paired with an unlock.
@@ -1024,6 +1149,7 @@ local function runMove(player: Player, state: PlayerState, context: CombatRules.
 	if not character or not root then
 		return
 	end
+	setDrawn(player, state, true, false) -- a strike can't wait for the draw to finish
 	local now = os.clock()
 	local tier = options.tier or 0
 	state.cooldowns[options.cooldownKey or move.Id] = now + (options.cooldown or move.Cooldown) -- starts when the move executes
@@ -1031,13 +1157,18 @@ local function runMove(player: Player, state: PlayerState, context: CombatRules.
 	if options.kind == "Special" then
 		state.committedUntil = state.busyUntil -- no slide out of a committed special
 	end
-	if state.blocking then
+	if state.blocking or character:GetAttribute("SpecialBlockHeld") then
 		setBlocking(player, false) -- a move lowers the shield
 	end
 	if move.CounterWindow then
 		state.counterUntil = now + move.CounterWindow -- only the opening counter window, never the whole move
 	end
 	local isSpecial = options.kind == "Special"
+	local prefix = weapon.Basic:gsub("_Basic$", "")
+	character:SetAttribute("SpecialAnimation", if isSpecial then prefix .. ":" .. move.Id else nil)
+	character:SetAttribute("SpecialAnimationStart", Workspace:GetServerTimeNow())
+	character:SetAttribute("SpecialLandingStart", nil)
+	local animationStarted = false
 	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Action, if isSpecial then "Special" else options.kind, move.Name, move.Cooldown, options.label)
 	if move.Ultimate then
 		-- Strong, readable telegraph: everyone sees where the Ultimate will land
@@ -1076,6 +1207,8 @@ local function runMove(player: Player, state: PlayerState, context: CombatRules.
 		fromCombo = isSpecial or move.Kind == "Aerial" or options.kind == "Slide",
 		weaponModel = state.weaponModel,
 		animate = function(anim: Anim, windUp: number, duration: number)
+			if isSpecial and animationStarted then return end -- whole sequence owns every hit stage
+			animationStarted = true
 			animate(player, state, anim, windUp, duration, tier)
 		end,
 		extendBusy = function(seconds: number)
@@ -1143,6 +1276,8 @@ local SPECIAL_COOLDOWN_KEY = "Special"
 
 -- SPECIAL START: begins a charge (allowed while blocking). Not during an attack or the cooldown.
 local function startSpecial(player: Player, state: PlayerState)
+	local dataStatus = player:GetAttribute(Config.DataStatusAttribute)
+	if dataStatus == "Loading" or dataStatus == "Transferring" then return end
 	local now = os.clock()
 	if state.chargeStart > 0 then
 		return -- already charging (repeated presses can't restart or stack a charge)
@@ -1193,7 +1328,8 @@ local function releaseSpecial(player: Player, state: PlayerState, context: Comba
 		return
 	end
 	local tier = tierDef.Tier
-	local family = if ultimate then "Ultimate" else tierDef.Family
+	local family = SpecialPracticeDefinitions.family(tierDef.Family, ultimate,
+		JumpAttackService.isAirborne(player), state.blocking or (character ~= nil and character:GetAttribute("SpecialBlockHeld") == true), InventoryService.getLevel(player))
 	local move = SpecialMoveDefinitions[SpecialChargeDefinitions.specialFor(nil, weapon.Basic, family) or ""]
 	if not move then
 		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.SpecialCharge, "cancel", "NO SPECIAL")
@@ -1202,6 +1338,25 @@ local function releaseSpecial(player: Player, state: PlayerState, context: Comba
 	-- Charge only for a valid move; no yield between deduction and execution.
 	if not MomentumService.trySpend(player, cost) then
 		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.SpecialCharge, "cancel", "SPECIAL RECHARGING")
+		return
+	end
+	local failure = InventoryService.practiceSpecial(player, weapon.Id, move.Id)
+	if specialRng:NextNumber() < failure then
+		setBlocking(player, false)
+		state.actionToken += 1
+		state.busyUntil = now + SpecialPracticeDefinitions.FallSeconds
+		state.committedUntil = state.busyUntil
+		state.cooldowns[SPECIAL_COOLDOWN_KEY] = now + (if ultimate then SpecialChargeDefinitions.UltimateCooldown else tierDef.Cooldown)
+		if character then
+			character:SetAttribute("SpecialFallStart", Workspace:GetServerTimeNow())
+			character:SetAttribute("SpecialFallLength", SpecialPracticeDefinitions.FallSeconds)
+		end
+		if character then
+			character:SetAttribute("SpecialAnimation", nil)
+			character:SetAttribute("AttackAnim", nil)
+		end
+		PlayerCombatService.knockdown(player, SpecialPracticeDefinitions.FallSeconds, false)
+		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.SpecialCharge, "cancel", move.Name .. " · FAILED · practice improved")
 		return
 	end
 	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.SpecialCharge, "fire", tier)
@@ -1214,7 +1369,7 @@ local function releaseSpecial(player: Player, state: PlayerState, context: Comba
 		cooldownKey = SPECIAL_COOLDOWN_KEY,
 		cooldown = if ultimate then SpecialChargeDefinitions.UltimateCooldown else tierDef.Cooldown,
 		extraRecovery = if ultimate then 0 else tierDef.Recovery,
-		label = if ultimate then move.Name else ("%s %s"):format(move.Name, tierDef.Name),
+		label = ("%s · %s · fail %.0f%%"):format(move.Name, family, failure * 100),
 	})
 end
 
@@ -1424,6 +1579,25 @@ function PlayerCombatService.init()
 	end)
 	MomentumService.init()
 	TrainingService.setSparringHandler(PlayerCombatService.trainingSwing)
+
+	-- Entering a combat zone (training yard, a running fight) draws the gear; leaving it (lobby,
+	-- tribunes, spectating, defeated) puts it away again, both with the reach animation
+	task.spawn(function()
+		while true do
+			task.wait(SHEATHE_CHECK)
+			for player, state in states do
+				if player.Parent and player.Character and state.weaponWeld and state.weaponWeld.Parent then
+					local wanted = CombatRules.getContext(player) ~= nil
+					if wanted ~= state.drawTarget and (wanted or os.clock() >= state.busyUntil) then
+						if not wanted then
+							setBlocking(player, false)
+						end
+						setDrawn(player, state, wanted, true)
+					end
+				end
+			end
+		end
+	end)
 end
 
 return PlayerCombatService

@@ -137,6 +137,14 @@ local function gameState(): string
 	return tostring(player:GetAttribute(GameStates.StateAttribute) or GameStates.Lobby)
 end
 
+-- Combat input only where the gear is drawn (training yard, a running fight); in the lobby and on
+-- the tribunes it hangs on the back / belt and attacks would only swing empty hands
+local function canFight(): boolean
+	local state = gameState()
+	local character = player.Character
+	return (GameStates.isFighter(state) or GameStates.isInLobby(state)) and character ~= nil and character:GetAttribute("CombatZone") == true
+end
+
 local function arenaAttr(name: string): any
 	return if arena then arena:GetAttribute(name) else nil
 end
@@ -183,7 +191,9 @@ if not isArena and GameModeMenuController and ActiveBattlesController then
 end
 
 -- CAMERA setting (saved)
-local settings = CombatSettingsController.start(edge, preferenceEvent, notify)
+local settings = CombatSettingsController.start(edge, preferenceEvent, function(text: string)
+	notify("Info", text)
+end)
 
 local aura = AuraDisplayController.start(hud.group, visibility, notify)
 local controls = MobileControlsController.start(hud.group, visibility, hud.onLayout, function()
@@ -210,6 +220,9 @@ local comboFeedback = ComboFeedbackController.start(hud.group, visibility, hud.o
 local function refreshSpecials()
 	comboFeedback.showBoard(equippedWeapon())
 end
+player.AttributeChanged:Connect(function(name: string)
+	if name:sub(1, 16) == "SpecialAttempts_" then refreshSpecials() end
+end)
 
 ------------------------------------------------------------------ effects (shared by every fight)
 local cameraFx = CombatCameraController.start()
@@ -231,10 +244,7 @@ local input: any = nil
 if combatAction and shieldBlock and shieldBlock:IsA("RemoteEvent") then
 	input = InputController.init({
 		remotes = { combatAction = combatAction, shieldBlock = shieldBlock },
-		canAct = function()
-			local state = gameState()
-			return GameStates.isFighter(state) or GameStates.isInLobby(state) -- lobby: training dummies
-		end,
+		canAct = canFight,
 		attackButton = controls.attackButton,
 		blockButton = controls.blockButton,
 		specialButton = controls.specialButton,
@@ -649,9 +659,6 @@ ZombieAnimator.start(CombatConfig.ZombieTag)
 OttiAnimator.start(Config.OttiTag)
 OttiAnimator.start(Config.OttiSpectatorTag)
 PlayerAnimator.start()
-BowController.start(hud.gui, Config.EquippedWeaponAttribute, function()
-	local state = gameState()
-	return GameStates.isFighter(state) or GameStates.isInLobby(state)
-end)
+BowController.start(hud.gui, Config.EquippedWeaponAttribute, canFight)
 
 print(PREFIX, "Ready: responsive HUD (Full / Minimal / Hidden), Classic controls, touch + gamepad + keyboard")

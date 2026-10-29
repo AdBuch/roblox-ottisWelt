@@ -26,6 +26,7 @@ export type Controls = {
 	setCharge: (seconds: number?) -> (),
 }
 local MobileControlsController = {}
+local Preview = require(script.Parent.SpecialPreview)
 local PHASE = UiConfig.SpecialPhaseColors
 local STAGE = UiConfig.BlockStageColors
 local EMPTY = Color3.fromRGB(65, 57, 46)
@@ -130,6 +131,11 @@ function MobileControlsController.start(group: (string, Vector2, UDim2, UDim2?) 
 		end
 		fillRing(dots, value / MomentumConfig.Max, color)
 		label.Text = ("SPECIAL\n%s · %d%%"):format(tierName, math.floor(value))
+		if held ~= nil then
+			local preview = Preview.text(player, held, value)
+			local failure = preview:match("fail %d+%%") or ""
+			label.Text ..= "\n" .. failure
+		end
 		stroke.Color = if held ~= nil then color else UiConfig.Gold
 		stroke.Transparency = if held ~= nil then 0 else 0.3
 		stroke.Thickness = if held ~= nil then 3 else 2

@@ -24,6 +24,9 @@ local GladiatorLevelDefinitions = require(ReplicatedStorage.Shared.GladiatorLeve
 local PlayerDataSchema = require(ReplicatedStorage.Shared.PlayerDataSchema)
 local ShieldDefinitions = require(ReplicatedStorage.Shared.ShieldDefinitions)
 local WeaponDefinitions = require(ReplicatedStorage.Shared.WeaponDefinitions)
+local WeaponSpecialDefinitions = require(ReplicatedStorage.Shared.WeaponSpecialDefinitions)
+local WeaponAttackDefinitions = require(ReplicatedStorage.Shared.WeaponAttackDefinitions)
+local SpecialPracticeDefinitions = require(ReplicatedStorage.Shared.SpecialPracticeDefinitions)
 
 type WeaponDefinition = WeaponDefinitions.WeaponDefinition
 type ShieldDefinition = ShieldDefinitions.ShieldDefinition
@@ -44,6 +47,7 @@ export type Profile = {
 	equippedArmor: string,
 	preferences: { [string]: string },
 	stats: { [string]: number },
+	specialAttempts: { [string]: number },
 	resetToken: string?, -- the last controlled test-data reset applied (PlayerDataResetConfig)
 }
 
@@ -57,6 +61,15 @@ local InventoryService = {}
 
 local profiles: { [number]: Profile } = {}
 local changedListeners: { (player: Player) -> () } = {}
+local practiceKeys: { [string]: boolean } = {}
+for _, weapon in WeaponDefinitions.ById do
+	local families = WeaponSpecialDefinitions.forPrefix(WeaponAttackDefinitions.prefixOf(weapon.Basic))
+	if families then
+		for _, moveId in families do
+			practiceKeys[SpecialPracticeDefinitions.key(weapon.Id, moveId)] = true
+		end
+	end
+end
 
 local function newProfile(): Profile
 	return {
@@ -72,6 +85,7 @@ local function newProfile(): Profile
 		equippedArmor = ArmorDefinitions.Starter,
 		preferences = {},
 		stats = {},
+		specialAttempts = {},
 	}
 end
 
@@ -161,6 +175,15 @@ function InventoryService.migrateProfile(profile: Profile): Profile
 		stats[key] = if value and value == value then math.max(0, math.floor(value)) else 0
 	end
 	profile.stats = stats
+	local attempts: { [string]: number } = {}
+	local savedAttempts: any = profile.specialAttempts
+	for key in practiceKeys do
+		local value = if typeof(savedAttempts) == "table" then tonumber(savedAttempts[key]) else nil
+		if value and value == value then
+			attempts[key] = math.clamp(math.floor(value), 0, SpecialPracticeDefinitions.MaxAttempts)
+		end
+	end
+	profile.specialAttempts = attempts
 	if typeof(profile.resetToken) ~= "string" then
 		profile.resetToken = nil
 	end
@@ -212,6 +235,9 @@ function InventoryService.publish(player: Player)
 	player:SetAttribute(Config.OwnedWeaponsAttribute, joinOwned(profile.ownedWeapons))
 	player:SetAttribute(Config.OwnedShieldsAttribute, joinOwned(profile.ownedShields))
 	player:SetAttribute(Config.OwnedArmorAttribute, joinOwned(profile.ownedArmor))
+	for key in practiceKeys do
+		player:SetAttribute(SpecialPracticeDefinitions.attribute(key), profile.specialAttempts[key] or 0)
+	end
 	for key in PREFERENCES do
 		player:SetAttribute(Config.PreferencePrefix .. key, profile.preferences[key] or "")
 	end
@@ -229,6 +255,24 @@ function InventoryService.load(player: Player, saved: { [string]: any }?, earned
 		profile.resetToken = resetToken -- this profile is reset at most once per token
 	end
 	profiles[player.UserId] = profile
+	InventoryService.publish(player)
+end
+
+-- Studio test switch (ExperienceConfig.Studio.UnlockAllGear): every item owned, top level.
+-- Only called for mock player data, so it is never written to a DataStore.
+function InventoryService.unlockAll(player: Player)
+	local profile = getProfile(player)
+	for id in WeaponDefinitions.ById do
+		profile.ownedWeapons[id] = true
+	end
+	for id in ShieldDefinitions.ById do
+		profile.ownedShields[id] = true
+	end
+	for id in ArmorDefinitions.ById do
+		profile.ownedArmor[id] = true
+	end
+	local levels = GladiatorLevelDefinitions.Levels
+	profile.auraPoints = math.max(profile.auraPoints, levels[#levels].Aura)
 	InventoryService.publish(player)
 end
 
@@ -474,6 +518,18 @@ function InventoryService.getPreference(player: Player, key: string): string?
 end
 
 -- Plain table for the DataStore (only JSON-safe values).
+function InventoryService.practiceSpecial(player: Player, weaponId: string, moveId: string): number
+	local key = SpecialPracticeDefinitions.key(weaponId, moveId)
+	assert(practiceKeys[key], "Unknown special practice key")
+	local profile = getProfile(player)
+	local previous = profile.specialAttempts[key] or 0
+	local attempts = math.min(SpecialPracticeDefinitions.MaxAttempts, previous + 1)
+	profile.specialAttempts[key] = attempts
+	player:SetAttribute(SpecialPracticeDefinitions.attribute(key), attempts)
+	if attempts ~= previous then changed(player) end
+	return SpecialPracticeDefinitions.failure(previous) -- roll with the odds BEFORE this attempt
+end
+
 function InventoryService.serialize(player: Player): { [string]: any }
 	local profile = getProfile(player)
 	return {
@@ -488,6 +544,7 @@ function InventoryService.serialize(player: Player): { [string]: any }
 		equippedArmor = profile.equippedArmor,
 		preferences = table.clone(profile.preferences),
 		stats = table.clone(profile.stats),
+		specialAttempts = table.clone(profile.specialAttempts),
 		resetToken = profile.resetToken,
 	}
 end

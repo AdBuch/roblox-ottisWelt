@@ -24,6 +24,7 @@ export type ChargeHud = {
 }
 
 local SpecialChargeHudController = {}
+local Preview = require(script.Parent.SpecialPreview)
 
 local COLORS = UiConfig.SpecialPhaseColors
 local DIM = Color3.fromRGB(60, 50, 40)
@@ -81,14 +82,14 @@ function SpecialChargeHudController.start(group: (string, Vector2, UDim2, UDim2?
 	maxLabel.Parent = frame
 	-- The active phase (what a release fires right now), in that phase's colour
 	local phaseLabel = Instance.new("TextLabel")
-	phaseLabel.AnchorPoint = Vector2.new(1, 0)
-	phaseLabel.Position = UDim2.new(0, -6, 0, -4)
-	phaseLabel.Size = UDim2.fromOffset(44, 20)
+	phaseLabel.AnchorPoint = Vector2.new(0.5, 1)
+	phaseLabel.Position = UDim2.new(0.5, 0, 0, -6)
+	phaseLabel.Size = UDim2.fromOffset(420, 22)
 	phaseLabel.BackgroundTransparency = 1
 	phaseLabel.Font = Enum.Font.GothamBlack
-	phaseLabel.TextSize = 16
+	phaseLabel.TextSize = 12
 	phaseLabel.TextStrokeTransparency = 0.4
-	phaseLabel.TextXAlignment = Enum.TextXAlignment.Right
+	phaseLabel.TextXAlignment = Enum.TextXAlignment.Center
 	phaseLabel.Parent = frame
 	local active = false
 	visibility.register("Momentum", frame, function()
@@ -107,7 +108,7 @@ function SpecialChargeHudController.start(group: (string, Vector2, UDim2, UDim2?
 		end
 		maxLabel.Visible = seconds >= max and momentum >= SpecialChargeDefinitions.UltimateMomentum
 		local selected, ultimate = SpecialChargeDefinitions.forRelease(seconds, momentum)
-		phaseLabel.Text = if ultimate then "ULT" elseif selected then selected.Name else "..."
+		phaseLabel.Text = (if ultimate then "ULT" elseif selected then selected.Name else "...") .. " · " .. Preview.text(Players.LocalPlayer, seconds, momentum)
 		phaseLabel.TextColor3 = if ultimate then UiConfig.UltimateColor elseif selected then COLORS[selected.Tier] else DIM
 		onCharge(seconds)
 	end

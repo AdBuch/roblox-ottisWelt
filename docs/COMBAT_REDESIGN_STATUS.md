@@ -2,6 +2,11 @@
 
 Last updated: 2026-10-19 · branch `feature/combat-encounter`
 
+> **Superseded (2026-10-27):** this handover is historical. Everything below was finished and committed
+> (client wiring in `0bf196f` / `2d725ca`), then reworked by Combat V2: Classic-only controls (Wild mode and the
+> gesture pad were removed), hold-to-charge specials, and shield and block stages. The current state lives on branch
+> `feature/combat-movements`; see [COMBAT_V2_REPORT.md](COMBAT_V2_REPORT.md) and the README.
+
 > **Update 2026-10-20:** all blood was removed again so the game is suitable for children
 > (`BloodConfig`, `BloodEffectsController`, `SandStainController`, the BLOOD setting and the stain epoch are gone;
 > hits show sparks and dust only). Mentions of blood and stains below describe the earlier state.

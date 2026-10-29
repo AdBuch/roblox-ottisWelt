@@ -85,7 +85,9 @@ local function describe(kind: string, id: string): Card?
 			local moveId = families and (families :: any)[family]
 			local move = moveId and (SpecialMoveDefinitions :: any)[moveId]
 			if move then
-				table.insert(specials, move.Name)
+				local Practice = require(ReplicatedStorage.Shared.SpecialPracticeDefinitions)
+				local unlock = if family == "Up" then " · air Lv5" elseif family == "Circle" then " · block Lv9" else ""
+				table.insert(specials, move.Name .. " (" .. Practice.label(Players.LocalPlayer, weapon.Id, moveId) .. unlock .. ")")
 			end
 		end
 		local stats = { ("DAMAGE  %d"):format(weapon.Damage) }

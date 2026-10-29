@@ -142,6 +142,10 @@ local function onPlayerAdded(player: Player)
 	local dataStore = store
 	if not dataStore then
 		setStatus(player, session, if EnvironmentConfig.useMockData() then "Mock" else "Unsaved")
+		if EnvironmentConfig.useMockData() and ExperienceConfig.Studio.UnlockAllGear then
+			InventoryService.unlockAll(player)
+			print(PREFIX, "Studio test switch UnlockAllGear: every weapon, shield and armor, ELITE level for", player.Name)
+		end
 		local refresh = loadedCallback
 		if refresh then
 			refresh(player)

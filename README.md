@@ -225,6 +225,15 @@ Damage, reach, hits, cooldowns, block results, charge time, rewards and progress
 
   `specialFor(characterId, weapon, family)` is the one place that picks the move, so Otti, Schili, Krokero and later
   characters can get their own specials without changing the combat code.
+- **Special choreography** (`SpecialAnimationDefinitions`, played by `PlayerAnimator`): every one of the 48
+  weapon/family assignments has its own keyframe track. Key times are tied to the server's hits (wind-up end, the
+  n-th hit, duration), so a weapon's tempo never desynchronises them. Specials can turn the whole body (one turn =
+  360° through the Root joint, never unwinding), aerials hold their air pose until the real landing and then play
+  their own landing. Shared moves have one variant per style: sword, heavy (Morning Star, Axe), spear (Trident,
+  Hoplite), daggers (both hands) and bow (right hand aims, left hand draws). Examples: REBELLION COMBO = counter stance
+  → low cut → rising cut from the upper left → full turn → lunge; ARENA SPIN = two full turns, arm out; VIPER DANCE =
+  cut → evasive turn → right / left / right stabs → turn with both blades. The full list is in
+  [docs/SPECIAL_MOVES_PROMPT.md](docs/SPECIAL_MOVES_PROMPT.md).
 - **Block and shield defense** (`ShieldDefenseConfig`, by hit direction computed on the server). The shield is on the
   left arm:
 
@@ -244,11 +253,23 @@ Damage, reach, hits, cooldowns, block results, charge time, rewards and progress
     |---|---|---|---|---|
     | I | from 0 s | + 0 | 100 % | shield in front of the chest |
     | II | from 0.6 s | + 10 % | 70 % | half crouch, shield at the forehead |
-    | III | from 1.5 s | + 20 % | 40 % | full crouch, shield flat over the head |
+    | III | from 1.5 s | + 20 % | 40 % | deep crouch (legs fold, feet stay down), shield flat over the head at about standing shoulder height |
   - **Per shield:** values scale with the shield's quality; arrows use its projectile ratio.
   - **Perfect block:** raising the block at most 0.2 s before a valid hit stops it and opens a 1 s counter.
   - **Heavy hits on the block** push the blocker back briefly.
-  - **Twin daggers** parry instead of blocking.
+  - **Twin daggers** parry instead of blocking; holding BLOCK crosses both blades before and above the face.
+- **Carrying gear** (`PlayerCombatService.placeEquipment`, mounts in `EquipmentModels.stowMount`). The shield rides on
+  the outer left forearm, carried upright beside the chest while drawn. Gear is drawn only where you can fight (the
+  training yard, a running match); everywhere else (lobby, tribunes, spectating, defeated) it is put away. Entering or
+  leaving plays a reach (over the shoulder or down to the hip) and the gear changes place at its peak (0.3 s); an
+  attack or block in the zone draws at once.
+
+  | Gear | Put away |
+  |---|---|
+  | Rusty Gladius, Legion Sword, Twin Daggers | right hip (second dagger: left hip) |
+  | Morning Star, Battle Axe, Trident, Hoplite Spear, Hunter Bow | diagonally across the back, head over the right shoulder |
+  | Shield | flat on the back (weapons sit over it) |
+  | Shield with the Hunter Bow | on the back even when drawn (both hands shoot); it comes off only while blocking |
 - **Hit reactions:** knockback, a short stumble pose, and on heavy unblocked hits a brief loss of balance (55 % walk
   speed for 0.4 s, at most every 1.5 s). Control loss stays short.
 - **Effects:** sparks and dust only. **No blood and no loss of body parts** (Roblox family standards).

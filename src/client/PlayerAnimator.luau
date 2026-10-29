@@ -18,6 +18,7 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local SpecialChargeDefinitions = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SpecialChargeDefinitions"))
+local SpecialAnimations = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SpecialAnimationDefinitions"))
 
 local PlayerAnimator = {}
 
@@ -125,20 +126,45 @@ local ALIAS: { [string]: string } = {
 	SlideRise = "Rise", SlideReaper = "Low",
 }
 
--- Block poses: the shield arm (left) comes up in front, across, over the head or down low
+-- The shield rides on the outer left forearm (its face points out of the back of the hand), so
+-- these arm angles turn the face: they were solved against the R15 arm chain for the shield
+-- centre and facing given in each comment (torso space, -Z forward).
+-- Carried, drawn and not blocking: forearm across the body, shield upright beside the chest.
+local CARRY: Pose = pose(Vector3.zero, nil, v(20, -60, 30), nil, nil, 0, { le = 105, lw = v(0, 0, 30) })
+local CARRY_RISE = 5 -- 1 / seconds
+-- Block poses: the shield comes up in front of the chest, to either side, up high or down low
 local BLOCK: { [string]: Pose } = {
-	Front = pose(v(-8, 10, 0), nil, v(88, -15, -18), nil, v(-10, 0, 0), 0.3),
-	Left = pose(v(-6, -22, 0), nil, v(70, 0, 28), nil, v(-6, 0, 0), 0.2),
-	Right = pose(v(-6, 22, 0), nil, v(68, -14, -12), nil, v(-6, 0, 0), 0.25),
-	High = pose(v(-4, 0, 0), nil, v(120, 0, 0), nil, v(-6, 0, 0), 0),
-	Low = pose(v(12, 0, 0), nil, v(28, 0, 0), nil, v(12, 0, 0), 0.4),
+	Front = pose(v(-8, 10, 0), nil, v(90, 0, 60), nil, v(-10, 0, 0), 0.3, { le = 30, lw = v(-30, 0, 30) }), -- chest high, facing forward
+	Left = pose(v(-6, -22, 0), nil, v(90, 0, 45), nil, v(-6, 0, 0), 0.2, { le = 120, lw = v(-30, 0, 0) }), -- facing front-left
+	Right = pose(v(-6, 22, 0), nil, v(90, -45, 60), nil, v(-6, 0, 0), 0.25, { le = 60, lw = v(-30, 0, 60) }), -- across, facing front-right
+	High = pose(v(-4, 0, 0), nil, v(130, 30, 60), nil, v(-6, 0, 0), 0, { le = 0, lw = v(0, 0, 30) }), -- before the forehead, tilted up
+	Low = pose(v(12, 0, 0), nil, v(70, -45, 60), nil, v(12, 0, 0), 0.4, { le = 0, lw = v(0, 0, 30) }), -- before the knees, tilted down
 }
--- Holding BLOCK (BraceLevel 0 -> 1, server-driven): the player sinks slowly into a crouch while
+-- Holding BLOCK (BraceLevel 0 -> 1, server-driven): the player sinks slowly into a deep crouch while
 -- the shield climbs from the chest (stage I) to the forehead (II) until it lies flat over the head
--- (III). The sword arm stays back, ready.
+-- (III), about where the standing player's shoulders were. The sword arm stays back, ready.
 local BRACE_MID_AT = 0.4 -- BraceLevel of the middle pose (= stage II, BlockDefinitions)
-local BRACE_MID: Pose = pose(v(-10, 4, 0), v(10, 0, 10), v(125, -8, -8), v(18, 0, 0), v(18, 0, 0), 0.55, { re = 30, le = 60, lw = v(0, 0, 0) })
-local BRACE: Pose = pose(v(-10, 0, 0), v(15, 0, 14), v(165, 0, 6), v(30, 0, 0), v(30, 0, 0), 0.9, { re = 35, le = 25 })
+local BRACE_MID: Pose = pose(v(-10, 4, 0), v(10, 0, 10), v(130, 30, 60), v(10, 0, 0), v(10, 0, 0), 0.7, { re = 30, le = 0, lw = v(0, 0, 30) })
+local BRACE: Pose = pose(v(-12, 0, 0), v(15, 0, 14), v(140, 45, 60), v(10, 0, 0), v(10, 0, 0), 1.25, { re = 35, le = 0, lw = v(30, 0, 60) }) -- flat, face up
+-- Twin daggers have no shield: BLOCK crosses both blades before and above the face like a grille.
+local DAGGER_GUARD: Pose = pose(v(-6, 0, 0), v(100, -15, -30), v(100, 15, 30), nil, nil, 0.25, { re = 0, le = 0, rw = v(-60, 0, 60), lw = v(-60, 0, -60) })
+-- Drawing and putting away (SheatheAt, SheatheReach, SheatheOffReach): each hand reaches its
+-- mount (over the shoulder to the back, or down to the hip), the gear changes place on the
+-- server at the peak, then the arm returns.
+local SHEATHE_REACH = 0.3 -- = PlayerCombatService
+local SHEATHE_RETURN = 0.4
+local REACH_RIGHT: { [string]: Pose } = {
+	Back = pose(v(0, -8, 0), v(160, 45, 15), nil, nil, nil, 0, { re = 120 }),
+	Belt = pose(v(0, -10, 0), v(-30, 0, 0), nil, nil, nil, 0.05, { re = 50 }),
+}
+local REACH_LEFT: { [string]: Pose } = {
+	Back = pose(v(0, 8, 0), nil, v(160, -45, -15), nil, nil, 0, { le = 120 }),
+	Belt = pose(v(0, 10, 0), nil, v(-30, 0, 0), nil, nil, 0.05, { le = 50 }),
+}
+-- Deep crouch: beyond CROUCH_FREE the legs fold (thigh forward, shin back) so the feet stay on
+-- the ground instead of sinking while the root drops (two leg segments of about LEG studs).
+local CROUCH_FREE = 0.45
+local LEG = 1.05
 local BRACE_FOLLOW = 6 -- 1 / seconds: the shown brace eases toward the server's BraceLevel
 local BLOCK_RISE = 8 -- 1 / seconds to fully raise the block
 local IMPACT_SECONDS = 0.3
@@ -212,6 +238,70 @@ local function sample(anim: string, elapsed: number, wind: number, length: numbe
 	return blend(last, ZERO, ease((elapsed - settled) / recover))
 end
 
+-- SPECIAL MOVES: keyframe tracks from SpecialAnimationDefinitions ("<Prefix>:<MoveId>" in the
+-- SpecialAnimation attribute). Poses are eased between keys; the whole-body spin is sampled straight
+-- from the track (never crossfaded) and wraps at 360°, so a turn never unwinds backwards.
+local SPECIAL_RECOVER = 0.3 -- seconds from the last key back to the walk
+local SPECIAL_MAX_AIR = 3 -- an aerial without a reported landing lets go after this long
+
+local converted: { [SpecialAnimations.KeyPose]: Pose } = setmetatable({}, { __mode = "k" }) :: any
+local function keyPose(p: SpecialAnimations.KeyPose): Pose
+	local cached = converted[p]
+	if not cached then
+		cached = pose(p.w or Vector3.zero, p.rs, p.ls, p.rh, p.lh, p.c, { re = p.re, le = p.le, rw = p.rw, lw = p.lw })
+		converted[p] = cached
+	end
+	return cached
+end
+
+-- The pose and spin of a key list at `t` (nil once the keys and their recovery are over). `hold`
+-- keeps the last key instead of recovering (an aerial waiting for its landing).
+local function sampleKeys(keys: { SpecialAnimations.Key }, t: number, hold: boolean): (Pose?, number)
+	if #keys == 0 or t < 0 then
+		return nil, 0
+	end
+	local spin = 0
+	local previous: SpecialAnimations.Key? = nil
+	for _, key in keys do
+		if t < key.t then
+			local fromPose = if previous then keyPose(previous.p) else ZERO
+			local fromTime = if previous then previous.t else 0
+			local share = ease((t - fromTime) / math.max(0.001, key.t - fromTime))
+			local toSpin = key.s or spin
+			return blend(fromPose, keyPose(key.p), share), spin + (toSpin - spin) * share
+		end
+		spin = key.s or spin
+		previous = key
+	end
+	local last = keys[#keys]
+	if hold then
+		return keyPose(last.p), spin
+	end
+	local after = t - last.t
+	if after > SPECIAL_RECOVER then
+		return nil, 0
+	end
+	return blend(keyPose(last.p), ZERO, ease(after / SPECIAL_RECOVER)), spin
+end
+
+local function specialPose(character: Model, now: number): (Pose?, number)
+	local name = character:GetAttribute("SpecialAnimation")
+	local track = if typeof(name) == "string" then SpecialAnimations[name] else nil
+	if not track then
+		return nil, 0
+	end
+	local start = tonumber(character:GetAttribute("SpecialAnimationStart")) or 0
+	local landing = tonumber(character:GetAttribute("SpecialLandingStart"))
+	local p: Pose?, spin: number
+	if track.Aerial and track.Land and landing and landing >= start then
+		p, spin = sampleKeys(track.Land, now - landing, false)
+	else
+		local elapsed = now - start
+		p, spin = sampleKeys(track.Keys, elapsed, track.Aerial and elapsed < SPECIAL_MAX_AIR)
+	end
+	return p, spin % 360
+end
+
 -- The shield pose for a raised guard of `brace` (0 = just raised, 1 = full brace over the head)
 local function guardPose(direction: Pose, brace: number): Pose
 	if brace <= BRACE_MID_AT then
@@ -226,7 +316,7 @@ type Motors = {
 	waist: Joint?, root: Joint?, rightShoulder: Joint?, leftShoulder: Joint?, rightHip: Joint?, leftHip: Joint?,
 	rightElbow: Joint?, leftElbow: Joint?, rightKnee: Joint?, leftKnee: Joint?, rightWrist: Joint?, leftWrist: Joint?,
 }
-type BlockState = { alpha: number, pose: string, brace: number }
+type BlockState = { alpha: number, pose: string, brace: number, carry: number }
 type AttackState = { start: number, from: Pose, last: Pose }
 
 -- How well a joint of the wanted name can drive the limb: an enabled upgraded joint beats an
@@ -331,11 +421,20 @@ function PlayerAnimator.start()
 
 			local total: Pose = ZERO
 			local active = false
+			local spin = 0
 
-			-- Attack
+			-- Attack: a special move's own choreography, otherwise the basic attack pose
 			local anim = character:GetAttribute("AttackAnim")
 			local attackState = attacks[character]
-			if typeof(anim) == "string" then
+			local special, specialSpin = specialPose(character, now)
+			if special then
+				total = add(total, special)
+				spin = specialSpin
+				active = true
+				if attackState then
+					attackState.last = special -- the next attack winds up from here
+				end
+			elseif typeof(anim) == "string" then
 				local start = tonumber(character:GetAttribute("AttackStart")) or 0
 				if not attackState then
 					attackState = { start = start, from = ZERO, last = ZERO }
@@ -359,10 +458,11 @@ function PlayerAnimator.start()
 			-- recoil on every blocked hit
 			local state = blocks[character]
 			if not state then
-				state = { alpha = 0, pose = "Front", brace = 0 }
+				state = { alpha = 0, pose = "Front", brace = 0, carry = 0 }
 				blocks[character] = state
 			end
-			local blocking = character:GetAttribute("Blocking") == true
+			local daggers = character:GetAttribute("GuardStyle") == "Daggers"
+			local blocking = character:GetAttribute("Blocking") == true or (daggers and character:GetAttribute("SpecialBlockHeld") == true)
 			if blocking then
 				local chosen = character:GetAttribute("BlockPose")
 				if typeof(chosen) == "string" and BLOCK[chosen] then
@@ -375,7 +475,32 @@ function PlayerAnimator.start()
 			local braceTarget = if blocking then math.clamp(tonumber(character:GetAttribute("BraceLevel")) or 0, 0, 1) else 0
 			state.brace += (braceTarget - state.brace) * (1 - math.exp(-BRACE_FOLLOW * math.min(dt, 0.1)))
 			if state.alpha > 0.001 then
-				total = add(total, scaled(guardPose(BLOCK[state.pose] or BLOCK.Front, state.brace), ease(state.alpha)))
+				local guard = if daggers then DAGGER_GUARD else guardPose(BLOCK[state.pose] or BLOCK.Front, state.brace)
+				total = add(total, scaled(guard, ease(state.alpha)))
+				active = true
+			end
+			-- Shield carried beside the chest while drawn; it gives way to strikes and the block
+			local carryTarget = if not active and character:GetAttribute("ShieldInHand") == true and character:GetAttribute("GuardStyle") == "Shield" then 1 else 0
+			state.carry += math.clamp(carryTarget - state.carry, -dt * CARRY_RISE * 2, dt * CARRY_RISE)
+			local carryWeight = ease(state.carry) * (1 - ease(state.alpha))
+			if carryWeight > 0.001 then
+				total = add(total, scaled(CARRY, carryWeight))
+				active = true
+			end
+
+			-- Drawing / putting away: reach to the mount, then back
+			local sheatheAt = tonumber(character:GetAttribute("SheatheAt"))
+			local sinceSheathe = if sheatheAt then now - sheatheAt else -1
+			if sinceSheathe >= 0 and sinceSheathe < SHEATHE_REACH + SHEATHE_RETURN then
+				local w = if sinceSheathe < SHEATHE_REACH then ease(sinceSheathe / SHEATHE_REACH) else 1 - ease((sinceSheathe - SHEATHE_REACH) / SHEATHE_RETURN)
+				local right = REACH_RIGHT[tostring(character:GetAttribute("SheatheReach"))]
+				local left = REACH_LEFT[tostring(character:GetAttribute("SheatheOffReach"))]
+				if right then
+					total = add(total, scaled(right, w))
+				end
+				if left then
+					total = add(total, scaled(left, w))
+				end
 				active = true
 			end
 			local impactAt = tonumber(character:GetAttribute("BlockImpactAt")) or 0
@@ -387,7 +512,7 @@ function PlayerAnimator.start()
 			end
 
 			local sinceParry = now - (tonumber(character:GetAttribute("ParryPoseAt")) or 0)
-			if sinceParry >= 0 and sinceParry < 0.3 then
+			if sinceParry >= 0 and sinceParry < 0.3 and not daggers then -- the crossed guard is the daggers' parry
 				total = add(total, scaled(POSES.Cross[2], math.sin(math.pi * sinceParry / 0.3)))
 				active = true
 			end
@@ -420,6 +545,15 @@ function PlayerAnimator.start()
 				local lean = scaled(HIT_POSE, w)
 				lean.waist += Vector3.new(0, side * 8 * w, side * 18 * w)
 				total = add(total, lean)
+				active = true
+			end
+
+			local fallAt = tonumber(character:GetAttribute("SpecialFallStart")) or -100
+			local fallLength = tonumber(character:GetAttribute("SpecialFallLength")) or 1.1
+			if now >= fallAt and now < fallAt + fallLength then
+				local phase = (now - fallAt) / fallLength
+				local weight = if phase < 0.2 then ease(phase / 0.2) elseif phase > 0.7 then 1 - ease((phase - 0.7) / 0.3) else 1
+				total = scaled(pose(v(15, 0, 8), v(65, 0, 40), v(65, 0, -40), v(25, 0, 8), v(12, 0, -8), 0.1, { re = 35, le = 35 }), weight)
 				active = true
 			end
 
@@ -460,18 +594,28 @@ function PlayerAnimator.start()
 			end
 			local m = motors :: Motors
 			applyAdditive(m.waist, angles(total.waist))
-			applyAdditive(m.root, if total.crouch > 0 then CFrame.new(0, -total.crouch, 0) else nil)
+			-- Root: the crouch, and the whole-body spin of a special (one turn = 360°)
+			local rootOffset: CFrame? = if total.crouch > 0 then CFrame.new(0, -total.crouch, 0) else nil
+			if spin ~= 0 then
+				rootOffset = (rootOffset or CFrame.identity) * CFrame.Angles(0, rad(spin), 0)
+			end
+			applyAdditive(m.root, rootOffset)
 			applyAdditive(m.rightShoulder, angles(total.rightShoulder))
 			applyAdditive(m.leftShoulder, angles(total.leftShoulder))
-			applyAdditive(m.rightHip, angles(total.rightHip))
-			applyAdditive(m.leftHip, angles(total.leftHip))
+			-- Deep crouch: fold both legs by `fold` (thigh) and twice that (knee) so the feet stay down
+			local fold = 0
+			if total.crouch > CROUCH_FREE then
+				fold = math.deg(math.acos(math.clamp(1 - (total.crouch - CROUCH_FREE) / (2 * LEG), -1, 1)))
+			end
+			applyAdditive(m.rightHip, angles(total.rightHip + Vector3.new(fold, 0, 0)))
+			applyAdditive(m.leftHip, angles(total.leftHip + Vector3.new(fold, 0, 0)))
 			-- Bend through the limb chain; grips inherit hand movement without any weld animation.
 			applyAdditive(m.rightElbow, angles(Vector3.new(math.clamp(total.rightElbow, 0, 120), 0, 0)))
 			applyAdditive(m.leftElbow, angles(Vector3.new(math.clamp(total.leftElbow, 0, 120), 0, 0)))
 			applyAdditive(m.rightWrist, angles(total.rightWrist))
 			applyAdditive(m.leftWrist, angles(total.leftWrist))
-			applyAdditive(m.rightKnee, angles(Vector3.new(-math.min(55, math.abs(total.rightHip.X) * 0.5 + total.crouch * 25), 0, 0)))
-			applyAdditive(m.leftKnee, angles(Vector3.new(-math.min(55, math.abs(total.leftHip.X) * 0.5 + total.crouch * 25), 0, 0)))
+			applyAdditive(m.rightKnee, angles(Vector3.new(-math.min(140, math.min(55, math.abs(total.rightHip.X) * 0.5 + total.crouch * 25) + 2 * fold), 0, 0)))
+			applyAdditive(m.leftKnee, angles(Vector3.new(-math.min(140, math.min(55, math.abs(total.leftHip.X) * 0.5 + total.crouch * 25) + 2 * fold), 0, 0)))
 		end
 	end)
 end
