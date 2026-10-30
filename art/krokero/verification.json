@@ -1,0 +1,167 @@
+{
+  "checks": [
+    {
+      "name": "25 real bones including root, jaw and six tail bones",
+      "passed": true
+    },
+    {
+      "name": "root has no deformation influences",
+      "passed": true
+    },
+    {
+      "name": "body is one connected surface, not intersecting primitive objects",
+      "passed": true
+    },
+    {
+      "name": "Krokero_Body stays under 10000 triangles",
+      "passed": true
+    },
+    {
+      "name": "Krokero_Body has UV coordinates",
+      "passed": true
+    },
+    {
+      "name": "Krokero_Body has a real armature modifier",
+      "passed": true
+    },
+    {
+      "name": "Krokero_Body has one to four skin influences on every vertex",
+      "passed": true
+    },
+    {
+      "name": "Krokero_Body weights are normalized",
+      "passed": true
+    },
+    {
+      "name": "Krokero_Details stays under 10000 triangles",
+      "passed": true
+    },
+    {
+      "name": "Krokero_Details has UV coordinates",
+      "passed": true
+    },
+    {
+      "name": "Krokero_Details has a real armature modifier",
+      "passed": true
+    },
+    {
+      "name": "Krokero_Details has one to four skin influences on every vertex",
+      "passed": true
+    },
+    {
+      "name": "Krokero_Details weights are normalized",
+      "passed": true
+    },
+    {
+      "name": "Krokero_Shield stays under 10000 triangles",
+      "passed": true
+    },
+    {
+      "name": "Krokero_Shield has UV coordinates",
+      "passed": true
+    },
+    {
+      "name": "Krokero_Shield has a real armature modifier",
+      "passed": true
+    },
+    {
+      "name": "Krokero_Shield has one to four skin influences on every vertex",
+      "passed": true
+    },
+    {
+      "name": "Krokero_Shield weights are normalized",
+      "passed": true
+    },
+    {
+      "name": "Krokero_TrainingClub stays under 10000 triangles",
+      "passed": true
+    },
+    {
+      "name": "Krokero_TrainingClub has UV coordinates",
+      "passed": true
+    },
+    {
+      "name": "Krokero_TrainingClub has a real armature modifier",
+      "passed": true
+    },
+    {
+      "name": "Krokero_TrainingClub has one to four skin influences on every vertex",
+      "passed": true
+    },
+    {
+      "name": "Krokero_TrainingClub weights are normalized",
+      "passed": true
+    },
+    {
+      "name": "Kroko_Idle has no extreme stretched skin triangles",
+      "passed": true
+    },
+    {
+      "name": "Kroko_Walk has no extreme stretched skin triangles",
+      "passed": true
+    },
+    {
+      "name": "Kroko_ClubStrike has no extreme stretched skin triangles",
+      "passed": true
+    },
+    {
+      "name": "Kroko_Stagger has no extreme stretched skin triangles",
+      "passed": true
+    },
+    {
+      "name": "FBX bind re-import contains exactly one skeleton",
+      "passed": true
+    },
+    {
+      "name": "FBX preserves bone hierarchy",
+      "passed": true
+    },
+    {
+      "name": "FBX preserves four skinned mesh objects",
+      "passed": true
+    },
+    {
+      "name": "FBX preserves skinning on all meshes",
+      "passed": true
+    },
+    {
+      "name": "FBX embedded atlas texture is readable",
+      "passed": true
+    },
+    {
+      "name": "attack FBX contains animation data",
+      "passed": true
+    },
+    {
+      "name": "attack FBX binds its animation to the imported rig",
+      "passed": true
+    }
+  ],
+  "pose_bounds": {
+    "Kroko_Idle": {
+      "worst_edge_stretch": 1.1443004014141065,
+      "min_z": 0.03352420777082443,
+      "max_z": 2.745305299758911,
+      "longest_edge_with_ratio_over_5": 0
+    },
+    "Kroko_Walk": {
+      "worst_edge_stretch": 1.56361942848307,
+      "min_z": 0.012239336967468262,
+      "max_z": 2.7686004638671875,
+      "longest_edge_with_ratio_over_5": 0
+    },
+    "Kroko_ClubStrike": {
+      "worst_edge_stretch": 2.734641800245799,
+      "min_z": 0.025869224220514297,
+      "max_z": 2.7457523345947266,
+      "longest_edge_with_ratio_over_5": 0
+    },
+    "Kroko_Stagger": {
+      "worst_edge_stretch": 1.492712456395078,
+      "min_z": 0.03352420777082443,
+      "max_z": 2.779477834701538,
+      "longest_edge_with_ratio_over_5": 0
+    }
+  },
+  "status": "passed"
+}

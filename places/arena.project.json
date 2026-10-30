@@ -53,6 +53,11 @@
           "$path": "../src/character/Health.server.luau"
         }
       }
+    },
+    "ServerStorage": {
+      "HeroAssets": {
+        "$path": "../assets/characters"
+      }
     }
   }
 }

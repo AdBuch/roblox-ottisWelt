@@ -107,6 +107,8 @@ end
 ------------------------------------------------------------------------------------------
 
 local function meleeStep(boss: Boss, ctx: BossContext, move: OttiMove, target: Player, pose: string, wind: number, active: number, damage: number, range: number, arcDot: number): boolean
+	boss.model:SetAttribute("AttackWindDuration", wind)
+	boss.model:SetAttribute("AttackActiveDuration", active)
 	OttiAnimationService.setPose(boss, pose .. "Wind", math.max(0.08, wind * 0.8))
 	if wind >= 0.35 then
 		CombatEffects.glow(boss.model, Color3.fromRGB(255, 200, 110), wind)
@@ -460,8 +462,9 @@ function BossAttackService.execute(boss: Boss, ctx: BossContext, move: OttiMove,
 		boss.vulnerableUntil = os.clock() + move.Recovery + 0.6
 	end
 	if not boss.defeated then
-		OttiAnimationService.setPose(boss, "Recover", 0.2)
 		local recovery = move.Recovery + (if not result.landed then move.MissRecovery or 0 else 0)
+		boss.model:SetAttribute("AttackRecoveryDuration", recovery)
+		OttiAnimationService.setPose(boss, "Recover", 0.2)
 		local elapsed = 0
 		while elapsed < recovery and ctx.stillValid() do
 			elapsed += RunService.Heartbeat:Wait()

@@ -14,6 +14,7 @@
 local CollectionService = game:GetService("CollectionService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+local SkinnedKrokoAnimator = require(script.Parent.SkinnedKrokoAnimator)
 
 local OttiAnimator = {}
 
@@ -393,6 +394,10 @@ function OttiAnimator.start(tag: string)
 	RunService.Stepped:Connect(function(_time: number, dt: number)
 		for _, model in CollectionService:GetTagged(tag) do
 			if model:IsA("Model") then
+				if model:GetAttribute("SkinnedRig") then
+					SkinnedKrokoAnimator.update(model, dt)
+					continue
+				end
 				local state = states[model]
 				if not state or not state.root.Parent then
 					local root = model:FindFirstChild("HumanoidRootPart")

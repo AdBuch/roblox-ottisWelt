@@ -1,0 +1,80 @@
+{
+  "character": "Krokero / Kroko",
+  "format": "custom skinned NPC",
+  "blender": "5.2.3 LTS",
+  "bones": [
+    "Root",
+    "Pelvis",
+    "Spine",
+    "Chest",
+    "Neck",
+    "Head",
+    "Jaw",
+    "UpperArm.L",
+    "Forearm.L",
+    "Hand.L",
+    "Thigh.L",
+    "Shin.L",
+    "Foot.L",
+    "UpperArm.R",
+    "Forearm.R",
+    "Hand.R",
+    "Thigh.R",
+    "Shin.R",
+    "Foot.R",
+    "Tail01",
+    "Tail02",
+    "Tail03",
+    "Tail04",
+    "Tail05",
+    "Tail06"
+  ],
+  "meshes": {
+    "Krokero_Body": {
+      "vertices": 4402,
+      "triangles": 8800,
+      "max_bone_influences": 4,
+      "unweighted_vertices": 0
+    },
+    "Krokero_Details": {
+      "vertices": 4719,
+      "triangles": 9000,
+      "max_bone_influences": 4,
+      "unweighted_vertices": 0
+    },
+    "Krokero_Shield": {
+      "vertices": 1720,
+      "triangles": 3320,
+      "max_bone_influences": 1,
+      "unweighted_vertices": 0
+    },
+    "Krokero_TrainingClub": {
+      "vertices": 852,
+      "triangles": 1680,
+      "max_bone_influences": 1,
+      "unweighted_vertices": 0
+    }
+  },
+  "animations": {
+    "Kroko_Idle": {
+      "frames": 61,
+      "fps": 30,
+      "file": "Kroko_Idle.fbx"
+    },
+    "Kroko_Walk": {
+      "frames": 31,
+      "fps": 30,
+      "file": "Kroko_Walk.fbx"
+    },
+    "Kroko_ClubStrike": {
+      "frames": 46,
+      "fps": 30,
+      "file": "Kroko_ClubStrike.fbx"
+    },
+    "Kroko_Stagger": {
+      "frames": 31,
+      "fps": 30,
+      "file": "Kroko_Stagger.fbx"
+    }
+  }
+}

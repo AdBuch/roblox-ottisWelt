@@ -8,6 +8,7 @@ local PhysicsService = game:GetService("PhysicsService")
 local OttiTailService = require(script.Parent.OttiTailService)
 local OttiModel = require(script.Parent.OttiModel)
 local HeroSkeleton = require(script.Parent.HeroSkeleton)
+local SkinnedCompanionModel = require(script.Parent.SkinnedCompanionModel)
 
 type OttiRig = OttiModel.OttiRig
 
@@ -44,6 +45,8 @@ function CompanionModel.has(id: string): boolean
 end
 
 function CompanionModel.build(id: string): OttiRig
+	local imported = SkinnedCompanionModel.build(id)
+	if imported then return imported end
 	local palette = SPECIES[id] or SPECIES.Kroko
 	local isTortoise = id == "Schili"
 	local S = palette.scale
