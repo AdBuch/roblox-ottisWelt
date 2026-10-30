@@ -1,7 +1,7 @@
 --!strict
 -- OTTI HUB (start place) server entry. Builds the circular concourse under the Colosseum:
 -- Otti / Schili / Krokero statue halls, three equipment shops, tribune stairs,
--- lower training cages, party meeting point and Gate to Rome. Starts the Hub
+-- lower training cages, party meeting point and exits to the granite grounds. Starts the Hub
 -- services: persistent data, equipment, training combat, parties, matchmaking, live battles and
 -- the teleports to reserved Arena servers. No arena match ever runs in the Hub.
 
@@ -33,6 +33,7 @@ local TeleportUtil = require(Server.TeleportUtil)
 local TrainingService = require(Server.TrainingService)
 local ZombieDisplayService = require(Server.ZombieDisplayService)
 local HubMatchService = require(script.Parent.HubMatchService)
+local LobbyIntroService = require(script.Parent.LobbyIntroService)
 
 if EnvironmentConfig.role() ~= "Hub" then
 	warn(PREFIX, "This place was not built as the Hub (PlaceRole). Build it from places/hub.project.json.")
@@ -79,7 +80,11 @@ CombatRules.install({
 })
 
 TeleportUtil.init()
-PlayerDataService.init(PlayerCombatService.refreshEquipment) -- same schema and store as the Arena
+LobbyIntroService.init(lobby)
+PlayerDataService.init(function(player: Player) -- same schema and store as the Arena
+	PlayerCombatService.refreshEquipment(player)
+	LobbyIntroService.onLoaded(player)
+end)
 PlayerCombatService.init()
 EquipmentShopService.build(lobby.folder, lobby.armory)
 TrainingService.build(lobby.folder, lobby.trainingSlots, lobby.trainingCFrame, lobby.trainingSize)

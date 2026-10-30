@@ -101,6 +101,9 @@ local ExperienceConfig = {
 		-- Arena place opened directly in Studio: run this match with the local players
 		ArenaMockMode = "BOSS_SOLO", -- Studio: choose Otti / Schili / Krokero at the arena test pedestals
 		ArenaMockStartSeconds = 4,
+		-- TEST SWITCH: 0-4 shows the Hub intro at that stage on every join (hint and revealed signs);
+		-- -1 = the saved progress
+		IntroStage = -1,
 	}),
 }
 

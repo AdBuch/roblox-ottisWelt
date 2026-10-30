@@ -727,8 +727,8 @@ function MatchService.cancel(reason: string)
 	end
 end
 
--- Mock mode only (Studio): allow a fresh match on the same server after the previous one.
-function MatchService.resetForMock()
+-- A fresh match on the same server after the previous one (RETRY, Studio mock).
+function MatchService.reset()
 	match = nil
 	finished = false
 	if arenaFolder then

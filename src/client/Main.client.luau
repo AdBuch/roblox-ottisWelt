@@ -92,6 +92,7 @@ local isArena = placeRole == "Arena"
 local placeFolder = script.Parent:FindFirstChild("Place")
 local GameModeMenuController = if not isArena then load(placeFolder, "GameModeMenuController") else nil
 local ActiveBattlesController = if not isArena then load(placeFolder, "ActiveBattlesController") else nil
+local LobbyIntroController = if not isArena then load(placeFolder, "LobbyIntroController") else nil
 for _, module in {
 	Config, CombatConfig, GameStates, GameModeDefinitions, WeaponDefinitions, WeaponAttackDefinitions, WeaponSpecialDefinitions, GladiatorLevelDefinitions,
 	ShieldDefinitions, SpecialMoveDefinitions,
@@ -216,6 +217,11 @@ end
 
 -- The TRAINING board (lobby training yard) shows the controls, the special tiers and Momentum
 local lobbyFolder = if isArena then nil else Workspace:WaitForChild(Config.LobbyFolderName, WAIT_TIMEOUT)
+if LobbyIntroController then
+	LobbyIntroController.start(lobbyFolder, matchEvent, function(title: string, text: string)
+		notifier.banner(title, text, nil, 7)
+	end)
+end
 local comboFeedback = ComboFeedbackController.start(hud.group, visibility, hud.onLayout, lobbyFolder)
 local function refreshSpecials()
 	comboFeedback.showBoard(equippedWeapon())

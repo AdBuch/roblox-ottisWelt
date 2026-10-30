@@ -217,23 +217,17 @@ function ArenaAdmissionService.demote(player: Player)
 	end
 end
 
--- Mock mode only: a fresh local match with the players already here (first `maxFighters` fight).
-function ArenaAdmissionService.reassignMock(maxFighters: number): { { player: Player, role: MatchTypes.Role, team: string } }
-	local result = {}
-	local fighters = 0
+-- A new match on this server (RETRY, Studio mock): these players fight, in alternating teams
+-- for a team mode; everybody else here watches.
+function ArenaAdmissionService.reassign(fighters: { Player }, teams: boolean)
 	for _, player in Players:GetPlayers() do
-		local entry: Admitted
-		if fighters < maxFighters then
-			entry = { role = "FIGHTER", team = if fighters % 2 == 0 then "Red" else "Blue" }
-			fighters += 1
-		else
-			entry = { role = "SPECTATOR", team = "" }
-		end
+		local index = table.find(fighters, player)
+		local entry: Admitted = if index
+			then { role = "FIGHTER", team = if not teams then "" elseif index % 2 == 1 then "Red" else "Blue" }
+			else { role = "SPECTATOR", team = "" }
 		admitted[player] = entry
 		player:SetAttribute(Config.ArenaRoleAttribute, entry.role)
-		table.insert(result, { player = player, role = entry.role, team = entry.team })
 	end
-	return result
 end
 
 function ArenaAdmissionService.init(newHooks: Hooks)

@@ -29,6 +29,7 @@ local PlayerDataSchema = {
 		"eliminations",
 		"deaths",
 		"matchesSpectated",
+		"introSeen", -- Hub intro: the last stage shown (LobbyIntroService)
 	}),
 
 	-- Preferences a client may store (value must be one of the listed strings)

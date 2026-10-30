@@ -44,13 +44,13 @@ export type LobbyLayout = {
 	pads: { PadLayout },
 	bossBoard: BasePart,
 	bossBoards: { BasePart },
-	soloHosts: { BasePart },
+	arenaTriggers: { BasePart }, -- invisible volumes at every arena gate: walking in starts a solo run
+	introTargets: { Vector3 }, -- where each Hub intro stage points (index = stage + 1)
 	matchActions: { { part: BasePart, mode: string } },
 	modeBoards: { BasePart },
-	arenaGate: BasePart, -- portcullis at the end of the main corridor (starts Solo Zombies)
-	romeGate: BasePart, -- the closed gate to Rome
+	arenaGate: BasePart, -- the trigger at Otti's gate (the start hall's way into the arena)
 	tribuneDoors: { BasePart }, -- WATCH LIVE entrances at the top of the side stairs
-	liveBoard: TextLabel,
+	liveBoards: { TextLabel }, -- live battle count on every hall's LIVE BATTLES sign
 	liveCFrame: CFrame, -- where returning spectators arrive
 	archiveSlots: { CFrame },
 	archivePlaques: { CFrame },

@@ -7,8 +7,8 @@
 --   Queue / LeaveQueue matchmaking for COOP_ZOMBIES, TIME_BATTLE, FIRST_TO, ELIMINATION
 --   ListBattles        the LIVE IN THE COLOSSEUM sections (filter)
 --   Watch / WatchRandom spectate one battle (slot reserved atomically)
--- The lobby's walk-on pads (LobbyPadService), the arena portcullis (opens the PLAY menu), the
--- tribune doors (WATCH LIVE) and the Gate to Rome call the same functions. Clients never send
+-- The lobby's walk-on pads (LobbyPadService), the arena gates (walking in starts a solo run), the
+-- tribune doors (WATCH LIVE) call the same functions. Clients never send
 -- match ids for fighting, teams, roles, rewards, ids of places or servers, Aura or inventory:
 -- those come from the server-side records.
 
@@ -328,7 +328,10 @@ local function updateLiveBoard()
 	end
 	local records = MatchRegistryService.list(false)
 	local count = #records
-	current.liveBoard.Text = if count == 0 then "No live battles" elseif count == 1 then "1 live battle" else ("%d live battles"):format(count)
+	local text = if count == 0 then "No live battles" elseif count == 1 then "1 live battle" else ("%d live battles"):format(count)
+	for _, board in current.liveBoards do
+		board.Text = text
+	end
 	current.folder:SetAttribute(Config.LiveBattleCountAttribute, count)
 end
 
@@ -395,10 +398,24 @@ function HubMatchService.init(lobby: LobbyService.LobbyLayout)
 		toggleQueue = toggleQueue,
 		message = HubTeleportService.message,
 	})
-	-- Walking to the gate starts Solo Zombies via the entrance pad; no choice menu here.
-	for _,host in lobby.soloHosts do
-		addPrompt(host, "Start solo fight", "ZOMBIE SOLO", HubMatchService.playSolo)
+	-- Walking up to a gate starts Solo Zombies: no key, no menu (once per player every few seconds)
+	local lastGate: { [Player]: number } = {}
+	for _, trigger in lobby.arenaTriggers do
+		trigger.Touched:Connect(function(hit: BasePart)
+			local player = Players:GetPlayerFromCharacter(hit.Parent)
+			if not player or not inLobby(player) or os.clock() - (lastGate[player] or 0) < 5 then
+				return
+			end
+			lastGate[player] = os.clock()
+			local ok, text = HubMatchService.playSolo(player)
+			if text ~= "" then
+				HubTeleportService.message(player, text, ok)
+			end
+		end)
 	end
+	Players.PlayerRemoving:Connect(function(player)
+		lastGate[player] = nil
+	end)
 	for _,host in lobby.bossBoards do
 		addPrompt(host, "Choose boss", "BOSS FIGHT · TEST", function(player)
 			Remotes.MatchEvent:FireClient(player, "OpenMenu", "BOSS")
@@ -422,9 +439,6 @@ function HubMatchService.init(lobby: LobbyService.LobbyLayout)
 			return toggleQueue(player, entry.mode)
 		end)
 	end
-	addPrompt(lobby.romeGate, "Open", "GATE TO ROME", function()
-		return false, "The gate to Rome is still barred · the road opens soon"
-	end)
 
 	Players.PlayerAdded:Connect(function(player)
 		player:SetAttribute(Config.QueueStatusAttribute, "")

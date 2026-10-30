@@ -131,7 +131,7 @@ function ArenaRegistryHeartbeat.complete()
 	end
 end
 
--- Mock mode only: a new local match on the same server.
+-- A new match on the same server (RETRY, Studio mock): listed and joinable again.
 function ArenaRegistryHeartbeat.reset(newRecord: MatchTypes.MatchRecord)
 	matchRecord = newRecord
 	completed = false
