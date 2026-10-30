@@ -136,7 +136,7 @@ function OttiEntranceService.play(boss: Boss, arena: Instance, valid: () -> bool
 	OttiAnimationService.setPose(boss, "", 0.3)
 	OttiAnimationService.setLoco(boss, "BIPED_IDLE")
 	for _, part in boss.rig.bodyParts do
-		part.CanQuery = part.Name == "Pelvis" or part.Name == "Chest" or part.Name == "Head"
+		part.CanQuery = part:IsA("MeshPart") or part.Name == "Pelvis" or part.Name == "Chest" or part.Name == "Head"
 			or part.Name == "RightArm" or part.Name == "LeftArm" or part.Name == "RightLeg" or part.Name == "LeftLeg"
 	end
 	root.CanCollide = true

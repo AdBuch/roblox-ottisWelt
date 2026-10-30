@@ -16,6 +16,7 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local SkinnedKrokoAnimator = require(script.Parent.SkinnedKrokoAnimator)
 local SkinnedSchiliAnimator = require(script.Parent.SkinnedSchiliAnimator)
+local SkinnedOttiAnimator = require(script.Parent.SkinnedOttiAnimator)
 
 local OttiAnimator = {}
 
@@ -398,6 +399,8 @@ function OttiAnimator.start(tag: string)
 			if model:IsA("Model") and model:GetAttribute("SkinnedRig") then
 				if model:GetAttribute("HeroId") == "Schili" then
 					SkinnedSchiliAnimator.update(model, dt)
+				elseif model:GetAttribute("HeroId") == "Otti" then
+					SkinnedOttiAnimator.update(model, dt)
 				else
 					SkinnedKrokoAnimator.update(model, dt)
 				end

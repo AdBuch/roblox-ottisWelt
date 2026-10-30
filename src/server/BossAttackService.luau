@@ -422,6 +422,8 @@ function BossAttackService.execute(boss: Boss, ctx: BossContext, move: OttiMove,
 	boss.humanoid:MoveTo(boss.root.Position)
 	boss.humanoid.AutoRotate = false
 	boss.model:SetAttribute("Attack", move.Id)
+	boss.model:SetAttribute("AttackWindDuration", move.WindUp)
+	boss.model:SetAttribute("AttackActiveDuration", move.Active)
 
 	if move.Stance ~= "Any" and boss.stance ~= move.Stance then
 		OttiAnimationService.setStance(boss, move.Stance)

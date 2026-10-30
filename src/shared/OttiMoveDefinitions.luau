@@ -70,7 +70,7 @@ end
 local Moves: { [string]: OttiMove } = {
 	GladiusSlash = move({
 		Id = "GladiusSlash", Name = "GLADIUS SLASH", Kind = "Melee", Stance = "Biped",
-		WindUp = 0.45, Active = 0.15, Recovery = 0.45, Cooldown = 2.2, StartRange = 7.5,
+		WindUp = 0.28, Active = 0.12, Recovery = 0.28, Cooldown = 2.2, StartRange = 7.5,
 		Damage = 14, Range = 7.5, ArcDot = 0.4, Knockback = 10, Blockable = true,
 	}),
 	GladiatorCombination = move({
@@ -78,15 +78,15 @@ local Moves: { [string]: OttiMove } = {
 		WindUp = 0, Active = 0, Recovery = 0.6, Cooldown = 6, StartRange = 7.5,
 		Damage = 0, Range = 7.5, ArcDot = 0.4, Knockback = 8, Blockable = true,
 		Steps = {
-			{ Pose = "Feint", WindUp = 0.35, Active = 0, Damage = 0, Range = 0, ArcDot = 1 },
-			{ Pose = "SlashH", WindUp = 0.3, Active = 0.12, Damage = 8, Range = 7.5, ArcDot = 0.3 },
-			{ Pose = "SlashH2", WindUp = 0.25, Active = 0.12, Damage = 10, Range = 7.5, ArcDot = 0.3 },
-			{ Pose = "Thrust", WindUp = 0.3, Active = 0.12, Damage = 14, Range = 9.5, ArcDot = 0.75 },
+			{ Pose = "Feint", WindUp = 0.25, Active = 0, Damage = 0, Range = 0, ArcDot = 1 },
+			{ Pose = "SlashH", WindUp = 0.22, Active = 0.12, Damage = 8, Range = 7.5, ArcDot = 0.3 },
+			{ Pose = "SlashH2", WindUp = 0.18, Active = 0.12, Damage = 10, Range = 7.5, ArcDot = 0.3 },
+			{ Pose = "Thrust", WindUp = 0.22, Active = 0.12, Damage = 14, Range = 9.5, ArcDot = 0.75 },
 		},
 	}),
 	ShieldBash = move({
 		Id = "ShieldBash", Name = "SHIELD BASH", Kind = "Melee", Stance = "Biped",
-		WindUp = 0.4, Active = 0.15, Recovery = 0.5, Cooldown = 4.5, StartRange = 6,
+		WindUp = 0.3, Active = 0.12, Recovery = 0.35, Cooldown = 4.5, StartRange = 6,
 		Damage = 8, Range = 6, ArcDot = 0.5, Knockback = 36, KnockbackIfBlocked = true, PlayerSlowSeconds = 0.6,
 		Blockable = true, BlockPierce = 0.5,
 		FollowUp = { Move = "TailSweep", Chance = 0.6, MinPhase = 3 }, -- Phase 3: bash into a tail sweep

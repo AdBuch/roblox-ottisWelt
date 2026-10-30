@@ -328,7 +328,7 @@ local function defeat(current: Boss)
 	for _, part in blade do
 		local copy = part:Clone()
 		for _, child in copy:GetChildren() do
-			if not child:IsA("SpecialMesh") then
+			if not child:IsA("SpecialMesh") and not child:IsA("SurfaceAppearance") then
 				child:Destroy()
 			end
 		end

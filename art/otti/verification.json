@@ -1,0 +1,307 @@
+{
+  "checks": [
+    {
+      "name": "26 bones with flexible spine and six tail joints",
+      "passed": true
+    },
+    {
+      "name": "one connected body surface",
+      "passed": true
+    },
+    {
+      "name": "Otti_Body triangle budget",
+      "passed": true
+    },
+    {
+      "name": "Otti_Body UV atlas",
+      "passed": true
+    },
+    {
+      "name": "Otti_Body one to four influences",
+      "passed": true
+    },
+    {
+      "name": "Otti_Body normalized weights",
+      "passed": true
+    },
+    {
+      "name": "Otti_Details triangle budget",
+      "passed": true
+    },
+    {
+      "name": "Otti_Details UV atlas",
+      "passed": true
+    },
+    {
+      "name": "Otti_Details one to four influences",
+      "passed": true
+    },
+    {
+      "name": "Otti_Details normalized weights",
+      "passed": true
+    },
+    {
+      "name": "Otti_Sheathed triangle budget",
+      "passed": true
+    },
+    {
+      "name": "Otti_Sheathed UV atlas",
+      "passed": true
+    },
+    {
+      "name": "Otti_Sheathed one to four influences",
+      "passed": true
+    },
+    {
+      "name": "Otti_Sheathed normalized weights",
+      "passed": true
+    },
+    {
+      "name": "Otti_Shield triangle budget",
+      "passed": true
+    },
+    {
+      "name": "Otti_Shield UV atlas",
+      "passed": true
+    },
+    {
+      "name": "Otti_Shield one to four influences",
+      "passed": true
+    },
+    {
+      "name": "Otti_Shield normalized weights",
+      "passed": true
+    },
+    {
+      "name": "Otti_Sword triangle budget",
+      "passed": true
+    },
+    {
+      "name": "Otti_Sword UV atlas",
+      "passed": true
+    },
+    {
+      "name": "Otti_Sword one to four influences",
+      "passed": true
+    },
+    {
+      "name": "Otti_Sword normalized weights",
+      "passed": true
+    },
+    {
+      "name": "Otti_Backslash skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_Bash skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_BipedIdle skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_BipedWalk skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_Bite skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_Celebrate skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_Draw skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_Feint skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_Grapple skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_Guard skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_Land skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_Leap skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_QuadIdle skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_QuadRun skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_QuadWalk skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_Rise skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_Roar skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_Sit skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_Slam skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_Slash skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_Stagger skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_Surrender skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_Sweep skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_Thrust skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_Trip skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "bind FBX round trip has five meshes",
+      "passed": true
+    },
+    {
+      "name": "bind FBX preserves all bones",
+      "passed": true
+    },
+    {
+      "name": "strike FBX contains animation",
+      "passed": true
+    }
+  ],
+  "pose_bounds": {
+    "Otti_Backslash": {
+      "worst_edge_ratio": 2.800900657010189,
+      "longest_extreme_edge": 0
+    },
+    "Otti_Bash": {
+      "worst_edge_ratio": 3.029903309906754,
+      "longest_extreme_edge": 0
+    },
+    "Otti_BipedIdle": {
+      "worst_edge_ratio": 1.226023933409054,
+      "longest_extreme_edge": 0
+    },
+    "Otti_BipedWalk": {
+      "worst_edge_ratio": 1.841288347415951,
+      "longest_extreme_edge": 0
+    },
+    "Otti_Bite": {
+      "worst_edge_ratio": 3.2933986922737155,
+      "longest_extreme_edge": 0
+    },
+    "Otti_Celebrate": {
+      "worst_edge_ratio": 3.093768691935262,
+      "longest_extreme_edge": 0
+    },
+    "Otti_Draw": {
+      "worst_edge_ratio": 1.6223491376075352,
+      "longest_extreme_edge": 0
+    },
+    "Otti_Feint": {
+      "worst_edge_ratio": 1.5016446713990688,
+      "longest_extreme_edge": 0
+    },
+    "Otti_Grapple": {
+      "worst_edge_ratio": 2.919185955531168,
+      "longest_extreme_edge": 0
+    },
+    "Otti_Guard": {
+      "worst_edge_ratio": 2.53128656284328,
+      "longest_extreme_edge": 0
+    },
+    "Otti_Land": {
+      "worst_edge_ratio": 2.0820967357893743,
+      "longest_extreme_edge": 0
+    },
+    "Otti_Leap": {
+      "worst_edge_ratio": 2.693550812571854,
+      "longest_extreme_edge": 0
+    },
+    "Otti_QuadIdle": {
+      "worst_edge_ratio": 3.2933986922737155,
+      "longest_extreme_edge": 0
+    },
+    "Otti_QuadRun": {
+      "worst_edge_ratio": 3.7022223548361706,
+      "longest_extreme_edge": 0
+    },
+    "Otti_QuadWalk": {
+      "worst_edge_ratio": 3.548052988333201,
+      "longest_extreme_edge": 0
+    },
+    "Otti_Rise": {
+      "worst_edge_ratio": 3.2933995170350587,
+      "longest_extreme_edge": 0
+    },
+    "Otti_Roar": {
+      "worst_edge_ratio": 1.639163090682878,
+      "longest_extreme_edge": 0
+    },
+    "Otti_Sit": {
+      "worst_edge_ratio": 2.704692677165936,
+      "longest_extreme_edge": 0
+    },
+    "Otti_Slam": {
+      "worst_edge_ratio": 1.4219730538600661,
+      "longest_extreme_edge": 0
+    },
+    "Otti_Slash": {
+      "worst_edge_ratio": 2.7313473384340794,
+      "longest_extreme_edge": 0
+    },
+    "Otti_Stagger": {
+      "worst_edge_ratio": 1.52456628157933,
+      "longest_extreme_edge": 0
+    },
+    "Otti_Surrender": {
+      "worst_edge_ratio": 3.9156790553540537,
+      "longest_extreme_edge": 0
+    },
+    "Otti_Sweep": {
+      "worst_edge_ratio": 2.0086434318919313,
+      "longest_extreme_edge": 0
+    },
+    "Otti_Thrust": {
+      "worst_edge_ratio": 2.569666265804003,
+      "longest_extreme_edge": 0
+    },
+    "Otti_Trip": {
+      "worst_edge_ratio": 3.3240643350506227,
+      "longest_extreme_edge": 0
+    }
+  },
+  "status": "passed"
+}

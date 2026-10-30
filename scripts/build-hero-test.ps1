@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Kroko','Schili')][string]$Hero = 'Schili',
+    [ValidateSet('Kroko','Schili','Otti')][string]$Hero = 'Schili',
     [string]$RojoExe = 'rojo'
 )
 $ErrorActionPreference = 'Stop'

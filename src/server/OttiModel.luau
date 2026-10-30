@@ -1,5 +1,5 @@
 --!strict
--- Builds Otti the Gladiator from Parts only (built-in SpecialMesh shapes, no asset IDs), after the
+-- Loads the skinned otter asset; the Parts builder below remains an offline fallback, after the
 -- reference art: a chocolate-brown otter with a cream muzzle, throat and chest, broad dark nose,
 -- short rounded ears, dark eyes, whiskers, webbed paws, a long thick tapered tail and his
 -- black-and-cream braided necklace. Gear: chipped gladius (right paw), battered round wooden
@@ -18,6 +18,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local OttiBossConfig = require(ReplicatedStorage.Shared.OttiBossConfig)
 local OttiTailService = require(script.Parent.OttiTailService)
 local HeroSkeleton = require(script.Parent.HeroSkeleton)
+local HeroRigTypes = require(script.Parent.HeroRigTypes)
 
 local FUR = Color3.fromRGB(92, 58, 38) -- chocolate brown
 local FUR_DARK = Color3.fromRGB(66, 40, 26)
@@ -36,23 +37,7 @@ local WOOD = Color3.fromRGB(110, 76, 46)
 local STEEL = Color3.fromRGB(178, 176, 168)
 local STEEL_DARK = Color3.fromRGB(120, 118, 112)
 
-export type OttiRig = {
-	model: Model,
-	humanoid: Humanoid,
-	root: BasePart,
-	pelvis: BasePart,
-	chest: BasePart,
-	head: BasePart,
-	rightArm: BasePart,
-	leftArm: BasePart,
-	swordParts: { BasePart }, -- in the paw while drawn
-	sheathedParts: { BasePart }, -- hilt at the hip while sheathed
-	shieldFace: BasePart,
-	guardLight: PointLight,
-	tail: OttiTailService.TailRig,
-	motors: { [string]: Motor6D },
-	bodyParts: { BasePart },
-}
+export type OttiRig = HeroRigTypes.OttiRig
 
 local OttiModel = {}
 
@@ -65,6 +50,8 @@ local function setupCollisionGroup()
 end
 
 function OttiModel.build(): OttiRig
+	local imported = require(script.Parent.SkinnedCompanionModel).build("Otti")
+	if imported then return imported end
 	local S = OttiBossConfig.Scale
 	local model = Instance.new("Model")
 	model.Name = "OttiTheGladiator"

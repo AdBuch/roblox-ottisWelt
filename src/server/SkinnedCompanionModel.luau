@@ -1,14 +1,15 @@
 --!strict
 -- Minimal shared physics/encounter adapter; character anatomy lives in the skinned asset.
 local ServerStorage = game:GetService("ServerStorage")
-local OttiModel = require(script.Parent.OttiModel)
+local HeroRigTypes = require(script.Parent.HeroRigTypes)
 local SkinnedCompanionModel = {}
 local PROFILES = {
 	Kroko = {body="Krokero_Body", guard="Krokero_Shield", weapon="Krokero_TrainingClub", height=4, width=3},
 	Schili = {body="Schili_Body", guard="Schili_Shell", weapon="Schili_Staff", height=2.6, width=2.3},
+	Otti = {body="Otti_Body", guard="Otti_Shield", weapon="Otti_Sword", height=3.4, width=2.7},
 }
 
-function SkinnedCompanionModel.build(id: string): OttiModel.OttiRig?
+function SkinnedCompanionModel.build(id: string): HeroRigTypes.OttiRig?
 	local assets = ServerStorage:FindFirstChild("HeroAssets")
 	local template = assets and assets:FindFirstChild(id)
 	local profile = (PROFILES :: any)[id]
@@ -19,7 +20,7 @@ function SkinnedCompanionModel.build(id: string): OttiModel.OttiRig?
 	local shield = model:FindFirstChild(profile.guard) :: BasePart
 	local club = model:FindFirstChild(profile.weapon) :: BasePart
 	assert(rigRoot and body and shield and club, "Incomplete skinned hero import: " .. id)
-	model.Name = "Companion_" .. id
+	model.Name = if id == "Otti" then "OttiTheGladiator" else "Companion_" .. id
 	model.ModelStreamingMode = Enum.ModelStreamingMode.Atomic
 	model:SetAttribute("HeroId", id)
 	model:SetAttribute("BossName", id)
@@ -63,10 +64,12 @@ function SkinnedCompanionModel.build(id: string): OttiModel.OttiRig?
 	glow.Name = "GuardGlow"; glow.Enabled = false
 	glow.Color = Color3.fromRGB(255,220,120); glow.Range = 10; glow.Brightness = 3
 	glow.Parent = shield
+	local sheathed = model:FindFirstChild("Otti_Sheathed")
+	if sheathed and sheathed:IsA("BasePart") then sheathed.Transparency = 1 end
 	return {
 		model=model, humanoid=humanoid, root=root,
 		pelvis=body, chest=body, head=body, rightArm=body, leftArm=body,
-		swordParts={club}, sheathedParts={}, shieldFace=shield, guardLight=glow,
+		swordParts={club}, sheathedParts=if sheathed and sheathed:IsA("BasePart") then {sheathed} else {}, shieldFace=shield, guardLight=glow,
 		tail={segments={},motors={}}, motors={}, bodyParts=parts,
 	}
 end

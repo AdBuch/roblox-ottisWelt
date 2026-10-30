@@ -212,6 +212,9 @@ function OttiAnimationService.setStance(boss: Boss, stance: Stance)
 	end
 	boss.stance = stance
 	boss.model:SetAttribute("Stance", stance)
+	if boss.model:GetAttribute("SkinnedRig") and boss.model:GetAttribute("HeroId") == "Otti" then
+		OttiAnimationService.setSwordDrawn(boss, stance == "Biped")
+	end
 	local seconds = if stance == "Biped" then 0.5 else 0.4
 	OttiAnimationService.setLoco(boss, if stance == "Biped" then "RISE_TO_BIPED" else "DROP_TO_QUADRUPED")
 	boss.lockedUntil = math.max(boss.lockedUntil, os.clock() + seconds)

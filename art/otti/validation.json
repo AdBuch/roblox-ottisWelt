@@ -1,0 +1,161 @@
+{
+  "character": "Otti / otter gladiator",
+  "fps": 60,
+  "bones": [
+    "Root",
+    "Pelvis",
+    "Lumbar",
+    "Spine",
+    "Chest",
+    "Neck",
+    "Head",
+    "Jaw",
+    "UpperArm.L",
+    "Forearm.L",
+    "Hand.L",
+    "Thigh.L",
+    "Shin.L",
+    "Foot.L",
+    "UpperArm.R",
+    "Forearm.R",
+    "Hand.R",
+    "Thigh.R",
+    "Shin.R",
+    "Foot.R",
+    "Tail01",
+    "Tail02",
+    "Tail03",
+    "Tail04",
+    "Tail05",
+    "Tail06"
+  ],
+  "meshes": {
+    "Otti_Body": {
+      "triangles": 9000,
+      "vertices": 4502,
+      "max_influences": 4
+    },
+    "Otti_Details": {
+      "triangles": 8999,
+      "vertices": 4811,
+      "max_influences": 4
+    },
+    "Otti_Shield": {
+      "triangles": 2320,
+      "vertices": 1200,
+      "max_influences": 1
+    },
+    "Otti_Sword": {
+      "triangles": 772,
+      "vertices": 400,
+      "max_influences": 1
+    },
+    "Otti_Sheathed": {
+      "triangles": 1068,
+      "vertices": 540,
+      "max_influences": 1
+    }
+  },
+  "animations": {
+    "Otti_BipedIdle": {
+      "frames": 121,
+      "fps": 60
+    },
+    "Otti_BipedWalk": {
+      "frames": 49,
+      "fps": 60
+    },
+    "Otti_QuadIdle": {
+      "frames": 91,
+      "fps": 60
+    },
+    "Otti_QuadWalk": {
+      "frames": 61,
+      "fps": 60
+    },
+    "Otti_QuadRun": {
+      "frames": 37,
+      "fps": 60
+    },
+    "Otti_Rise": {
+      "frames": 31,
+      "fps": 60
+    },
+    "Otti_Slash": {
+      "frames": 43,
+      "fps": 60
+    },
+    "Otti_Backslash": {
+      "frames": 43,
+      "fps": 60
+    },
+    "Otti_Thrust": {
+      "frames": 43,
+      "fps": 60
+    },
+    "Otti_Bash": {
+      "frames": 49,
+      "fps": 60
+    },
+    "Otti_Sweep": {
+      "frames": 67,
+      "fps": 60
+    },
+    "Otti_Trip": {
+      "frames": 61,
+      "fps": 60
+    },
+    "Otti_Slam": {
+      "frames": 73,
+      "fps": 60
+    },
+    "Otti_Bite": {
+      "frames": 55,
+      "fps": 60
+    },
+    "Otti_Grapple": {
+      "frames": 73,
+      "fps": 60
+    },
+    "Otti_Guard": {
+      "frames": 31,
+      "fps": 60
+    },
+    "Otti_Stagger": {
+      "frames": 49,
+      "fps": 60
+    },
+    "Otti_Sit": {
+      "frames": 121,
+      "fps": 60
+    },
+    "Otti_Celebrate": {
+      "frames": 91,
+      "fps": 60
+    },
+    "Otti_Leap": {
+      "frames": 61,
+      "fps": 60
+    },
+    "Otti_Land": {
+      "frames": 37,
+      "fps": 60
+    },
+    "Otti_Surrender": {
+      "frames": 85,
+      "fps": 60
+    },
+    "Otti_Roar": {
+      "frames": 79,
+      "fps": 60
+    },
+    "Otti_Feint": {
+      "frames": 31,
+      "fps": 60
+    },
+    "Otti_Draw": {
+      "frames": 43,
+      "fps": 60
+    }
+  }
+}
