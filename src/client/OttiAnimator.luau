@@ -15,6 +15,7 @@ local CollectionService = game:GetService("CollectionService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local SkinnedKrokoAnimator = require(script.Parent.SkinnedKrokoAnimator)
+local SkinnedSchiliAnimator = require(script.Parent.SkinnedSchiliAnimator)
 
 local OttiAnimator = {}
 
@@ -390,12 +391,24 @@ end
 function OttiAnimator.start(tag: string)
 	local states: { [Instance]: State } = setmetatable({}, { __mode = "k" }) :: any
 	local ids = animationIds()
+	-- Bone skinning must be written at render time. Stepped updates can leave the
+	-- properties posed while the rendered mesh remains in its previous pose.
+	RunService.PreRender:Connect(function(dt: number)
+		for _, model in CollectionService:GetTagged(tag) do
+			if model:IsA("Model") and model:GetAttribute("SkinnedRig") then
+				if model:GetAttribute("HeroId") == "Schili" then
+					SkinnedSchiliAnimator.update(model, dt)
+				else
+					SkinnedKrokoAnimator.update(model, dt)
+				end
+			end
+		end
+	end)
 
 	RunService.Stepped:Connect(function(_time: number, dt: number)
 		for _, model in CollectionService:GetTagged(tag) do
 			if model:IsA("Model") then
 				if model:GetAttribute("SkinnedRig") then
-					SkinnedKrokoAnimator.update(model, dt)
 					continue
 				end
 				local state = states[model]

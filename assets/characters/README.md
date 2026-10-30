@@ -3,7 +3,7 @@
 `Kroko.rbxmx` is the real Blender/FBX import: four skinned MeshParts, 25 bones,
 one material atlas, wooden club and shield. It replaces the procedural Kroko
 when `ServerStorage.HeroAssets.Kroko` is available. Otti and Schili retain their
-existing models. All three Rojo projects include this folder.
+existing models unless another imported asset is present. All three Rojo projects include this folder.
 
 The server adapter adds one collision root and a Humanoid. Existing combat
 validation, damage, boss selection and phase logic remain authoritative.
@@ -27,3 +27,12 @@ shield 75281390347092, club 134993227892638. Studio imported the texture assets
 with the FBX. The local arena rendered these successfully. Studio reported
 that automatic experience permission grants failed during import; access in
 a published experience still needs verification before release.
+
+## Schili
+
+`Schili.rbxmx` adds the newly designed little tortoise mentor with a 21-bone
+skeleton, four skinned meshes and nine original staff/shell animation clips.
+Its editable Blender source, reference sheet, textures, FBXs and validation
+reports are in `art/schili`. It shares only the minimal server physics adapter
+with Kroko and uses its own `SkinnedSchiliAnimator` choreography.
+Build a preselected local test with `scripts/build-hero-test.ps1 -Hero Schili`.

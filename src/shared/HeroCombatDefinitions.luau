@@ -40,7 +40,7 @@ function HeroCombatDefinitions.move(hero: string, role: string, phase: number): 
 		move.StraightDash = true
 		move.Active = if kroko then 0.8 else 1.1
 		move.Radius = 3.8
-		move.Warning = if kroko then "KROKO STÜRMT — SEITLICH AUSWEICHEN!" else "SCHILI RÜCKT VOR!"
+		move.Warning = if kroko then "KROKO STÜRMT — SEITLICH AUSWEICHEN!" else "SCHILIS KURZSPRINT — SEITLICH AUSWEICHEN!"
 		move.MissRecovery = 0.6
 	elseif role == "Sweep" and not kroko then
 		-- A tortoise has a short tail. Schili sweeps the staff, never an invisible otter tail.
@@ -53,8 +53,8 @@ function HeroCombatDefinitions.move(hero: string, role: string, phase: number): 
 	elseif role == "Feint" then
 		move.Warning = if kroko then "KROKOS DOPPELSCHLAG!" else "SCHILI TÄUSCHT AN — WARTE AUF DEN STAB!"
 		move.Steps = {
-			{ Pose = "Feint", WindUp = 0.45, Active = 0, Damage = 0, Range = 0, ArcDot = 1 },
-			{ Pose = if kroko then "Club" else "Staff", WindUp = 0.4, Active = 0.22, Damage = 16, Range = 8, ArcDot = 0.55 },
+			{ Pose = "Feint", WindUp = if kroko then 0.45 else 0.7, Active = 0, Damage = 0, Range = 0, ArcDot = 1 },
+			{ Pose = if kroko then "Club" else "Staff", WindUp = if kroko then 0.4 else 0.3, Active = 0.22, Damage = 16, Range = 8, ArcDot = 0.55 },
 		}
 	end
 	return move

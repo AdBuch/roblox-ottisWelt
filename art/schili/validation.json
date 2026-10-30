@@ -1,0 +1,86 @@
+{
+  "character": "Schilibitzli / Schili",
+  "bones": [
+    "Root",
+    "Pelvis",
+    "Spine",
+    "Chest",
+    "Neck",
+    "Head",
+    "Jaw",
+    "Shell",
+    "Scarf",
+    "UpperArm.L",
+    "Forearm.L",
+    "Hand.L",
+    "Thigh.L",
+    "Shin.L",
+    "Foot.L",
+    "UpperArm.R",
+    "Forearm.R",
+    "Hand.R",
+    "Thigh.R",
+    "Shin.R",
+    "Foot.R"
+  ],
+  "meshes": {
+    "Schili_Body": {
+      "triangles": 7200,
+      "vertices": 3602,
+      "max_influences": 4
+    },
+    "Schili_Details": {
+      "triangles": 8800,
+      "vertices": 4551,
+      "max_influences": 1
+    },
+    "Schili_Shell": {
+      "triangles": 8800,
+      "vertices": 4590,
+      "max_influences": 1
+    },
+    "Schili_Staff": {
+      "triangles": 1476,
+      "vertices": 750,
+      "max_influences": 1
+    }
+  },
+  "animations": {
+    "Schili_Idle": {
+      "frames": 91,
+      "fps": 30
+    },
+    "Schili_Walk": {
+      "frames": 37,
+      "fps": 30
+    },
+    "Schili_StaffStrike": {
+      "frames": 49,
+      "fps": 30
+    },
+    "Schili_Feint": {
+      "frames": 31,
+      "fps": 30
+    },
+    "Schili_StaffSweep": {
+      "frames": 55,
+      "fps": 30
+    },
+    "Schili_ShellGuard": {
+      "frames": 31,
+      "fps": 30
+    },
+    "Schili_Rush": {
+      "frames": 25,
+      "fps": 30
+    },
+    "Schili_Stagger": {
+      "frames": 37,
+      "fps": 30
+    },
+    "Schili_Bow": {
+      "frames": 61,
+      "fps": 30
+    }
+  }
+}

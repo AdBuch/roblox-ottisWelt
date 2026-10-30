@@ -1,0 +1,163 @@
+{
+  "checks": [
+    {
+      "name": "21 real bones with independent shell and scarf",
+      "passed": true
+    },
+    {
+      "name": "one connected body surface",
+      "passed": true
+    },
+    {
+      "name": "Schili_Body triangle budget",
+      "passed": true
+    },
+    {
+      "name": "Schili_Body UV atlas",
+      "passed": true
+    },
+    {
+      "name": "Schili_Body one to four influences",
+      "passed": true
+    },
+    {
+      "name": "Schili_Body normalized weights",
+      "passed": true
+    },
+    {
+      "name": "Schili_Details triangle budget",
+      "passed": true
+    },
+    {
+      "name": "Schili_Details UV atlas",
+      "passed": true
+    },
+    {
+      "name": "Schili_Details one to four influences",
+      "passed": true
+    },
+    {
+      "name": "Schili_Details normalized weights",
+      "passed": true
+    },
+    {
+      "name": "Schili_Shell triangle budget",
+      "passed": true
+    },
+    {
+      "name": "Schili_Shell UV atlas",
+      "passed": true
+    },
+    {
+      "name": "Schili_Shell one to four influences",
+      "passed": true
+    },
+    {
+      "name": "Schili_Shell normalized weights",
+      "passed": true
+    },
+    {
+      "name": "Schili_Staff triangle budget",
+      "passed": true
+    },
+    {
+      "name": "Schili_Staff UV atlas",
+      "passed": true
+    },
+    {
+      "name": "Schili_Staff one to four influences",
+      "passed": true
+    },
+    {
+      "name": "Schili_Staff normalized weights",
+      "passed": true
+    },
+    {
+      "name": "Schili_Bow skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Schili_Feint skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Schili_Idle skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Schili_Rush skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Schili_ShellGuard skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Schili_StaffStrike skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Schili_StaffSweep skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Schili_Stagger skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Schili_Walk skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "bind FBX round trip has four meshes",
+      "passed": true
+    },
+    {
+      "name": "bind FBX preserves all bones",
+      "passed": true
+    },
+    {
+      "name": "strike FBX contains animation",
+      "passed": true
+    }
+  ],
+  "pose_bounds": {
+    "Schili_Bow": {
+      "worst_edge_ratio": 1.949919396371762,
+      "longest_extreme_edge": 0
+    },
+    "Schili_Feint": {
+      "worst_edge_ratio": 1.9386584423533715,
+      "longest_extreme_edge": 0
+    },
+    "Schili_Idle": {
+      "worst_edge_ratio": 1.1700471548129705,
+      "longest_extreme_edge": 0
+    },
+    "Schili_Rush": {
+      "worst_edge_ratio": 2.2887377874346067,
+      "longest_extreme_edge": 0
+    },
+    "Schili_ShellGuard": {
+      "worst_edge_ratio": 4.9437194610681,
+      "longest_extreme_edge": 0
+    },
+    "Schili_StaffStrike": {
+      "worst_edge_ratio": 2.5941992533328393,
+      "longest_extreme_edge": 0
+    },
+    "Schili_StaffSweep": {
+      "worst_edge_ratio": 3.0028114064623384,
+      "longest_extreme_edge": 0
+    },
+    "Schili_Stagger": {
+      "worst_edge_ratio": 2.4021409787576724,
+      "longest_extreme_edge": 0
+    },
+    "Schili_Walk": {
+      "worst_edge_ratio": 1.5601877875230155,
+      "longest_extreme_edge": 0
+    }
+  },
+  "status": "passed"
+}

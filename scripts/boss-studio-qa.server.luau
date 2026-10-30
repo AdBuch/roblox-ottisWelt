@@ -131,8 +131,16 @@ for index, id in { "Otti", "Kroko", "Schili" } do
 			task.wait(1.3)
 		end
 	end
-	for _, joint in { "RightElbow", "LeftElbow", "RightKnee", "LeftKnee" } do
-		check(rig.motors[joint] ~= nil, id .. " articulated " .. joint)
+	if rig.model:GetAttribute("SkinnedRig") then
+		local count=0
+		for _,d in rig.model:GetDescendants() do if d:IsA("Bone") then count+=1 end end
+		check(count==(if id=="Schili" then 21 else 25),id .. " imported skeleton preserved")
+		check(rig.model:FindFirstChild("Forearm.L",true)~=nil,id .. " real elbow bone")
+		check(rig.model:FindFirstChild("Shin.R",true)~=nil,id .. " real knee bone")
+	else
+		for _, joint in { "RightElbow", "LeftElbow", "RightKnee", "LeftKnee" } do
+			check(rig.motors[joint] ~= nil, id .. " articulated " .. joint)
+		end
 	end
 	Animation.setPose(boss, "", 0.1)
 	Animation.setLoco(boss, "BIPED_IDLE")

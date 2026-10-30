@@ -1,23 +1,28 @@
 --!strict
--- Small physics/encounter adapter around the imported, genuinely skinned Kroko asset.
+-- Minimal shared physics/encounter adapter; character anatomy lives in the skinned asset.
 local ServerStorage = game:GetService("ServerStorage")
 local OttiModel = require(script.Parent.OttiModel)
 local SkinnedCompanionModel = {}
+local PROFILES = {
+	Kroko = {body="Krokero_Body", guard="Krokero_Shield", weapon="Krokero_TrainingClub", height=4, width=3},
+	Schili = {body="Schili_Body", guard="Schili_Shell", weapon="Schili_Staff", height=2.6, width=2.3},
+}
 
 function SkinnedCompanionModel.build(id: string): OttiModel.OttiRig?
 	local assets = ServerStorage:FindFirstChild("HeroAssets")
 	local template = assets and assets:FindFirstChild(id)
-	if id ~= "Kroko" or not template or not template:IsA("Model") then return nil end
+	local profile = (PROFILES :: any)[id]
+	if not profile or not template or not template:IsA("Model") then return nil end
 	local model = template:Clone()
 	local rigRoot = model:FindFirstChild("RootPart") :: BasePart
-	local body = model:FindFirstChild("Krokero_Body") :: BasePart
-	local shield = model:FindFirstChild("Krokero_Shield") :: BasePart
-	local club = model:FindFirstChild("Krokero_TrainingClub") :: BasePart
-	assert(rigRoot and body and shield and club, "Incomplete Kroko import")
-	model.Name = "Companion_Kroko"
+	local body = model:FindFirstChild(profile.body) :: BasePart
+	local shield = model:FindFirstChild(profile.guard) :: BasePart
+	local club = model:FindFirstChild(profile.weapon) :: BasePart
+	assert(rigRoot and body and shield and club, "Incomplete skinned hero import: " .. id)
+	model.Name = "Companion_" .. id
 	model.ModelStreamingMode = Enum.ModelStreamingMode.Atomic
-	model:SetAttribute("HeroId", "Kroko")
-	model:SetAttribute("BossName", "Kroko")
+	model:SetAttribute("HeroId", id)
+	model:SetAttribute("BossName", id)
 	model:SetAttribute("SkinnedRig", true)
 	local parts: {BasePart} = {}
 	for _, item in model:GetDescendants() do
@@ -33,11 +38,11 @@ function SkinnedCompanionModel.build(id: string): OttiModel.OttiRig?
 	end
 	local root = Instance.new("Part")
 	root.Name = "HumanoidRootPart"
-	root.Size = Vector3.new(3, 2, 2.5)
+	root.Size = Vector3.new(profile.width, 2, 2.5)
 	root.Transparency = 1
 	root.CanCollide = true
 	root.CanTouch = false
-	root.CFrame = rigRoot.CFrame * CFrame.new(0, 4, 0)
+	root.CFrame = rigRoot.CFrame * CFrame.new(0, profile.height, 0)
 	root.RootPriority = 127
 	root.Parent = model
 	rigRoot.Size = Vector3.new(.1,.1,.1)
@@ -46,7 +51,7 @@ function SkinnedCompanionModel.build(id: string): OttiModel.OttiRig?
 	local humanoid = Instance.new("Humanoid")
 	humanoid.RequiresNeck = false
 	humanoid.BreakJointsOnDeath = false
-	humanoid.HipHeight = 3
+	humanoid.HipHeight = profile.height - 1
 	humanoid.MaxHealth = 1e6; humanoid.Health = 1e6
 	humanoid.WalkSpeed = 9
 	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
