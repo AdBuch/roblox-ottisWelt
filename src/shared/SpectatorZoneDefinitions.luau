@@ -47,9 +47,12 @@ local SpectatorZoneDefinitions = {
 
 	-- Never seat an animal here
 	Exclusions = table.freeze({
-		{ CenterDegrees = 30, HalfWidthDegrees = 9, Levels = { "Lower" } }, -- staircase
-		{ CenterDegrees = 210, HalfWidthDegrees = 9, Levels = { "Lower" } }, -- staircase
-		{ CenterDegrees = 0, HalfWidthDegrees = 9, Levels = { "Lower" } }, -- RETURN TO HUB door
+		{ CenterDegrees = 30, HalfWidthDegrees = 9, Levels = { "Lower", "Middle", "Upper" } }, -- staircase
+		{ CenterDegrees = 210, HalfWidthDegrees = 9, Levels = { "Lower", "Middle", "Upper" } }, -- staircase
+		{ CenterDegrees = 0, HalfWidthDegrees = 9, Levels = { "Lower" } }, -- RETURN TO HUB door, vomitorium
+		{ CenterDegrees = 121, HalfWidthDegrees = 6, Levels = { "Lower" } }, -- vomitoria onto tier 2
+		{ CenterDegrees = 177, HalfWidthDegrees = 6, Levels = { "Lower" } },
+		{ CenterDegrees = 301, HalfWidthDegrees = 6, Levels = { "Lower" } },
 		{ CenterDegrees = 270, HalfWidthDegrees = 16, Levels = { "Lower", "Middle", "Upper" } }, -- imperial box / Otti
 	} :: { Exclusion }),
 

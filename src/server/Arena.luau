@@ -1,10 +1,11 @@
 --!strict
--- Generates a Colosseum-style arena from anchored Parts: an oval sand floor (~140 x 110),
--- a podium wall with barred gates and red banners, eight seating tiers in two storeys, the
--- galleries behind them and an outer facade like the Roman Colosseum's (three storeys of arches
--- with a statue in every upper arch, attic on top) standing on an endless granite plate. An invisible barrier on the podium keeps
--- everyone on the arena floor. Decorations inside the floor area are non-collidable,
--- so they never block movement or pathfinding.
+-- Generates a Colosseum-style arena from anchored Parts: an oval sand floor (~152 x 96, the
+-- Flavian proportions), a podium wall with barred gates and red banners, eight steep seating
+-- tiers in two storeys carried by an open substructure (piers and four switchback stair houses),
+-- an ambulatory per storey behind them and an outer facade like the Roman Colosseum's (three
+-- storeys of arches with a statue in every upper arch, attic on top) standing on an endless
+-- granite plate. An invisible barrier on the podium keeps everyone on the arena floor.
+-- Decorations inside the floor area are non-collidable, so they never block movement or pathfinding.
 -- Calling build() again replaces the previous Workspace.GeneratedArena (no duplicates).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -33,35 +34,38 @@ local PODIUM_HEIGHT = Architecture.PodiumHeight
 local PODIUM_THICKNESS = Architecture.PodiumThickness
 local BARRIER_TOP = FLOOR_TOP + 70
 local SEAT_TIERS = Architecture.SeatTiers
-local SEAT_DEPTH = Architecture.SeatDepth
-local SEAT_RISE = Architecture.SeatRise
-local SEATS_END = Architecture.seatsEnd() -- behind the top tier: the galleries
+local SLAB = Architecture.SlabThickness
+local tierTop, tierFront, tierDepth = Architecture.tierTop, Architecture.tierFront, Architecture.tierDepth
+-- Underside of tier k's slab: its riser starts on the terrace below, the space beneath stays open
+local function tierBottom(k: number): number
+	return tierTop(k - 1) - SLAB
+end
+local SEATS_END = Architecture.seatsEnd() -- behind the top tier: the ambulatories
 local GALLERY_END = SEATS_END + Architecture.GalleryWidth -- inner face of the facade
 local OUTER_OFFSET = Architecture.facadeEnd() -- outer face of the facade
-local PLAZA_END = OUTER_OFFSET + Architecture.GroundRingWidth -- the ring of ground slabs ends here
-local GALLERY_TOP = Architecture.tierTop(SEAT_TIERS) -- top gallery floor, level with the top tier
+local GALLERY_TOP = tierTop(SEAT_TIERS) -- top gallery floor, level with the top tier
 local STOREY = (GALLERY_TOP - FLOOR_TOP) / 3 -- three arcade storeys below it
 local OUTER_TOP = GALLERY_TOP + Architecture.AtticHeight
 local FACADE_ARCHES = Architecture.FacadeArches
--- Steps between the gallery levels: 3 flights per stair set, each FLIGHT_ARCHES arches long
-local FLIGHT_ARCHES, FLIGHT_STEPS = 3, 23
-local STAIR_SETS = { 4, 20, 36, 52 } -- first arch of each set (a set spans 11 arches)
--- Vomitoria: straight passages along the normal from every gallery level into the stands, one
--- per level and quarter, in bays without gallery stairs. Each steps evenly from its gallery floor
--- (`from`, at SEATS_END) to the front of the terrace it opens onto (`to`, at offset `exit`).
-local VOMITORIUM_HALF, VOMITORIUM_CLEAR = 4, 10
-local VOMITORIA: { { arch: number, from: number, to: number, exit: number } } = {}
+-- Stair houses: under tiers 7 and 8, against the ambulatories (which stay clear), each storey
+-- climbs in two flights that turn on a half landing. Local x runs along the ring, +z outward.
+local TOWER_ANGLES = { 45, 135, 225, 315 }
+local TOWER_INNER = tierFront(7)
+local TOWER_HALF_DEPTH = (SEATS_END - TOWER_INNER) / 2
+local TOWER_LENGTH, TOWER_END_WALL, TOWER_LANDING = 36, 3, 7
+local TOWER_RISERS = math.round(STOREY / 2) -- per flight: ten steps, then the landing
+-- Vomitoria: flat passages along the normal from the ambulatories of storeys 2 and 3 onto the
+-- terrace at the same height (tier 2 and tier 5), one per level and quarter, clear of the stair
+-- houses, the tribune stairs and the imperial box. `exit`: the offset where they come out.
+local VOMITORIUM_HALF, VOMITORIUM_CLEAR = 4, 8
+local VOMITORIA: { { theta: number, from: number, to: number, exit: number } } = {}
 for _, set in {
-	{ level = 0, tier = 1, arches = { 3, 19, 31, 51 } }, -- ground -> lower walkway
-	{ level = 1, tier = 3, arches = { 1, 17, 33, 49 } }, -- storey 2 balcony -> middle walkway
-	{ level = 2, tier = 5, arches = { 63, 15, 35, 47 } }, -- storey 3 balcony -> upper stand
+	{ level = 1, tier = 2, degrees = { 3, 121, 177, 301 } },
+	{ level = 2, tier = 5, degrees = { 59, 160, 239, 340 } },
 } do
-	for _, arch in set.arches do
-		table.insert(VOMITORIA, { arch = arch, from = FLOOR_TOP + set.level * STOREY, to = Architecture.tierTop(set.tier), exit = PODIUM_THICKNESS + set.tier * SEAT_DEPTH })
+	for _, degrees in set.degrees do
+		table.insert(VOMITORIA, { theta = math.rad(degrees), from = FLOOR_TOP + set.level * STOREY, to = tierTop(set.tier), exit = tierFront(set.tier + 1) })
 	end
-end
-local function archTheta(arch: number): number
-	return (arch + 0.5) / FACADE_ARCHES * 2 * math.pi
 end
 
 local ZOMBIE_GATE_ANGLES = { 0, 45, 135, 180, 225, 270, 315 }
@@ -77,18 +81,16 @@ Arena.Layout = {
 	OuterOffset = OUTER_OFFSET,
 	SeatsEnd = SEATS_END,
 	GalleryTop = GALLERY_TOP,
-	PlazaEnd = PLAZA_END,
+	Storey = STOREY,
 	PodiumThickness = PODIUM_THICKNESS,
 	PodiumHeight = PODIUM_HEIGHT,
 	SeatTiers = SEAT_TIERS,
-	SeatDepth = SEAT_DEPTH,
-	SeatRise = SEAT_RISE,
 	-- The main gladiator gate (north, under the OTTI ARENA sign): Otti enters here
 	MainGateAngle = math.rad(270),
 	-- Where the fighter enters the arena floor (south, facing the center)
 	StartPosition = Vector3.new(0, FLOOR_TOP + 3.5, B - 10),
 	-- Lower tribune walkway (top of the first seating tier) and its return door
-	TribuneWalkwayY = FLOOR_TOP + PODIUM_HEIGHT + SEAT_RISE,
+	TribuneWalkwayY = tierTop(1),
 	ReturnDoor = nil :: BasePart?,
 	-- Imperial box (pulvinar) above the north side: Otti watches the zombie rounds from here
 	ImperialSeat = CFrame.identity, -- floor point in front of the throne, facing the arena
@@ -97,6 +99,8 @@ Arena.Layout = {
 	ZombieSpawns = {} :: { CFrame },
 	-- Passages from the galleries onto the stands (theta, gallery floor, terrace floor, exit offset)
 	Vomitoria = {} :: { { theta: number, from: number, to: number, exit: number } },
+	-- Every flight of the stair houses: foot of its first step, its run direction and size
+	StairFlights = {} :: { { cf: CFrame, rise: number, run: number, count: number } },
 	-- 12 symmetric shell spots; any prefix of 4, 6, 8, 10 or 12 stays point-symmetric
 	ShellPositions = {
 		Vector3.new(35, FLOOR_TOP + 2, 0),
@@ -209,15 +213,24 @@ local function ring(parent: Instance, name: string, segments: number, innerOffse
 		local bottom = if opening then math.max(bottomY, FLOOR_TOP + Architecture.GateHeight + 2) else bottomY
 		local length = chord + thickness * 0.2 + 0.6
 		-- Vomitoria cut a slot (from just below their floor to their ceiling) through every tier
-		-- behind the terrace they open onto
+		-- behind the terrace they open onto; the stair houses replace tiers 7 and 8 entirely
+		-- (their end walls take the last stud and a half of the cut)
 		local cuts = {}
+		local function addCut(theta: number, half: number, y0: number, y1: number)
+			local axis = frame:PointToObjectSpace(ellipsePoint(theta, innerOffset + thickness / 2) + Vector3.new(0, frame.Position.Y, 0))
+			if math.abs(axis.Z) < thickness and math.abs(axis.X) < length / 2 + half then
+				table.insert(cuts, { x0 = axis.X - half, x1 = axis.X + half, y0 = y0, y1 = y1 })
+			end
+		end
 		if name:match("^Tier") or name == "SeatLip" then
 			for _, v in VOMITORIA do
 				if innerOffset >= v.exit - 0.01 then
-					local axis = frame:PointToObjectSpace(ellipsePoint(archTheta(v.arch), innerOffset + thickness / 2) + Vector3.new(0, frame.Position.Y, 0))
-					if math.abs(axis.Z) < thickness and math.abs(axis.X) < length / 2 + VOMITORIUM_HALF then
-						table.insert(cuts, { x0 = axis.X - VOMITORIUM_HALF, x1 = axis.X + VOMITORIUM_HALF, y0 = math.min(v.from, v.to) - 1, y1 = v.to + VOMITORIUM_CLEAR })
-					end
+					addCut(v.theta, VOMITORIUM_HALF, math.min(v.from, v.to) - 1, v.to + VOMITORIUM_CLEAR)
+				end
+			end
+			if innerOffset >= TOWER_INNER - 0.01 then
+				for _, degrees in TOWER_ANGLES do
+					addCut(math.rad(degrees), TOWER_LENGTH / 2 - TOWER_END_WALL / 2, -math.huge, math.huge)
 				end
 			end
 			table.sort(cuts, function(a, b)
@@ -261,17 +274,71 @@ local function buildWalls(folder: Folder)
 	ring(folder, "PodiumWall", 64, 0, PODIUM_THICKNESS, FLOOR_TOP, FLOOR_TOP + PODIUM_HEIGHT, TRAVERTINE, Enum.Material.Limestone)
 	ring(folder, "InvisibleBarrier", 64, 0, PODIUM_THICKNESS, FLOOR_TOP + PODIUM_HEIGHT, BARRIER_TOP, TRAVERTINE, Enum.Material.SmoothPlastic, { transparency = 1 })
 
-	-- Spectator seating rising behind the podium
+	-- Spectator seating rising steeply behind the podium: every terrace is a slab whose riser stands
+	-- on the terrace below, so the substructure underneath stays open
 	local seating = Instance.new("Model")
 	seating.Name = "Seating"
-	for tier = 0, SEAT_TIERS - 1 do
-		local top = Architecture.tierTop(tier + 1)
-		local color = if tier % 2 == 0 then SANDSTONE else TRAVERTINE
-		ring(seating, "Tier" .. (tier + 1), 48, PODIUM_THICKNESS + tier * SEAT_DEPTH, SEAT_DEPTH, FLOOR_TOP, top, color, Enum.Material.Sandstone)
+	for tier = 1, SEAT_TIERS do
+		local top = tierTop(tier)
+		local color = if tier % 2 == 1 then SANDSTONE else TRAVERTINE
+		ring(seating, "Tier" .. tier, 48, tierFront(tier), tierDepth(tier), tierBottom(tier), top, color, Enum.Material.Sandstone)
 		-- Marble lip along the front of every terrace (the upper storey's parapet is a taller riser)
-		ring(seating, "SeatLip", 48, PODIUM_THICKNESS + tier * SEAT_DEPTH, 1.2, top, top + 0.3, TRAVERTINE, Enum.Material.Marble, DECOR)
+		ring(seating, "SeatLip", 48, tierFront(tier), 1.2, top, top + 0.3, TRAVERTINE, Enum.Material.Marble, DECOR)
 	end
 	seating.Parent = folder
+end
+
+-- Under the stands: one paved hall from the podium to the facade, open to the ambulatory, its
+-- vault the stepped underside of the terraces. Piers under the risers carry the slabs (none on
+-- the way to the hero gates, under a vomitorium or in a stair house), every other one with a lamp.
+local function buildSubstructure(folder: Folder)
+	local model = Instance.new("Model")
+	model.Name = "Substructure"
+	local bands = 4
+	local inner, outer = PODIUM_THICKNESS - 0.5, SEATS_END + 0.5
+	for band = 0, bands - 1 do
+		local o0 = inner + band * (outer - inner) / bands
+		ring(model, "HallFloor", FACADE_ARCHES, o0, (outer - inner) / bands + 0.5, FLOOR_TOP - 1, FLOOR_TOP, TRAVERTINE, Enum.Material.Pavement)
+	end
+	local function clear(theta: number, degrees: number): boolean
+		for _, angle in Architecture.HeroAngles do
+			if math.abs((math.deg(theta) - angle + 180) % 360 - 180) < degrees + 4 then
+				return false
+			end
+		end
+		for _, angle in TOWER_ANGLES do
+			if math.abs((math.deg(theta) - angle + 180) % 360 - 180) < degrees + 2 then
+				return false
+			end
+		end
+		for _, v in VOMITORIA do
+			if math.abs((math.deg(theta) - math.deg(v.theta) + 180) % 360 - 180) < degrees then
+				return false
+			end
+		end
+		return true
+	end
+	local lit = 0
+	for j = 0, FACADE_ARCHES / 4 - 1 do
+		local theta = (4 * j + 2) / FACADE_ARCHES * 2 * math.pi
+		for tier = 2, SEAT_TIERS do
+			if clear(theta, 5) then
+				local height = tierBottom(tier) - FLOOR_TOP
+				local pier = frameAt(theta, tierFront(tier) + 1.5, FLOOR_TOP + height / 2)
+				makePart("Pier", Vector3.new(3, height, 3), pier, SANDSTONE, Enum.Material.Limestone, model)
+				lit += 1
+				if lit % 2 == 0 then
+					local lamp = makePart("HallLamp", Vector3.new(0.8, 1.2, 0.8), pier * CFrame.new(0, math.min(height - 1.5, 9) - height / 2, -1.9), Color3.fromRGB(255, 180, 90), Enum.Material.Neon, model, DECOR)
+					local light = Instance.new("PointLight")
+					light.Range = 26
+					light.Brightness = 0.9
+					light.Color = Color3.fromRGB(255, 205, 150)
+					light.Parent = lamp
+				end
+			end
+		end
+	end
+	model.Parent = folder
 end
 
 -- A Roblox-style figure in marble on a plinth; base on the sill, -Z = where it looks.
@@ -303,48 +370,61 @@ local function buildStatue(parent: Instance, base: CFrame, pose: number)
 	statue.Parent = parent
 end
 
--- Behind the top tier: a gallery at the ground (plaza level), narrow balconies behind the
--- statue arches of storeys 2 and 3 and the top gallery level with the top tier ("behind the
--- stands"), roofed and open to the seats. Stairs climb along the inner half of the ring.
-local function flightOf(arch: number): number?
-	for _, first in STAIR_SETS do
-		local i = (arch - first) % FACADE_ARCHES
-		if i < 11 and i % 4 < FLIGHT_ARCHES then
-			return i // 4 -- 0: ground -> storey 2, 1: -> storey 3, 2: -> top gallery
-		end
-	end
-	return nil
+-- A small wall lamp (decoration) with a warm light.
+local function lamp(parent: Instance, cframe: CFrame)
+	local flame = makePart("Lamp", Vector3.new(0.8, 1.2, 0.8), cframe, Color3.fromRGB(255, 180, 90), Enum.Material.Neon, parent, DECOR)
+	local light = Instance.new("PointLight")
+	light.Range = 24
+	light.Brightness = 0.9
+	light.Color = Color3.fromRGB(255, 205, 150)
+	light.Parent = flame
+end
+
+-- Behind the top tier: an ambulatory on every storey (the ground one open to the hall under the
+-- stands), the top one level with the top tier and roofed, open to the seats. Nothing stands in
+-- them: the stairs climb in the stair houses beside them. Over the open substructure the
+-- ambulatories of storeys 2 and 3 have a railing, broken only by the vomitoria and stair houses.
+local function towerFrame(degrees: number): CFrame
+	return frameAt(math.rad(degrees), TOWER_INNER + TOWER_HALF_DEPTH, FLOOR_TOP)
 end
 
 local function buildGalleries(folder: Folder)
 	local galleries = Instance.new("Model")
 	galleries.Name = "Galleries"
 	local inner = SEATS_END
-	local half = (GALLERY_END - SEATS_END) / 2
 	ring(galleries, "GalleryFloor", FACADE_ARCHES, inner - 0.5, OUTER_OFFSET - inner + 0.5, FLOOR_TOP - 1, FLOOR_TOP, TRAVERTINE, Enum.Material.Pavement)
-	for level = 1, 2 do
+	for level = 1, 3 do
 		local y = FLOOR_TOP + level * STOREY
-		ring(galleries, "Balcony", FACADE_ARCHES, inner + half, GALLERY_END - inner - half + 0.5, y - 1, y, TRAVERTINE, Enum.Material.Limestone)
-	end
-	-- Top gallery: the inner half stays open above the last flight of each stair set
-	for i = 0, FACADE_ARCHES - 1 do
-		local outerFrame, outerChord = segmentFrame(i, FACADE_ARCHES, inner + half * 1.5, GALLERY_TOP - 0.5)
-		makePart("GalleryFloor", Vector3.new(outerChord + 1, 1, half + 0.5), outerFrame, TRAVERTINE, Enum.Material.Pavement, galleries)
-		if flightOf(i) ~= 2 then
-			local innerFrame, innerChord = segmentFrame(i, FACADE_ARCHES, inner + half * 0.5, GALLERY_TOP - 0.5)
-			makePart("GalleryFloor", Vector3.new(innerChord + 1, 1, half + 0.5), innerFrame, TRAVERTINE, Enum.Material.Pavement, galleries)
-		end
+		ring(galleries, if level == 3 then "GalleryFloor" else "Ambulatory", FACADE_ARCHES, inner - 0.5, GALLERY_END - inner + 1, y - 1, y, TRAVERTINE, if level == 3 then Enum.Material.Pavement else Enum.Material.Limestone)
 	end
 	ring(galleries, "GalleryVault", FACADE_ARCHES, inner, GALLERY_END - inner, GALLERY_TOP + 14, GALLERY_TOP + 16, STONE_DARK, Enum.Material.Limestone)
-	-- Railings against the open stairwell: along the inner edge of both balconies (except the arch
-	-- where a flight arrives or leaves, and beside the vomitorium bridges only) and around the
-	-- opening the last flight climbs through into the top gallery
-	local function rail(i: number, offset: number, y: number, bridge: number?)
-		local frame, chord = segmentFrame(i, FACADE_ARCHES, offset, y + 1.75)
+	-- holes in the railing: { theta, half width along the ring }
+	local holes: { { number } } = {}
+	for _, degrees in TOWER_ANGLES do
+		table.insert(holes, { math.rad(degrees), TOWER_LENGTH / 2 - 0.5 })
+	end
+	local function rail(i: number, y: number)
+		local frame, chord = segmentFrame(i, FACADE_ARCHES, inner + 0.3, y + 1.75)
 		local spans = { { -(chord + 0.4) / 2, (chord + 0.4) / 2 } }
-		if bridge then
-			local axis = frame:PointToObjectSpace(ellipsePoint(bridge, offset) + Vector3.new(0, y + 1.75, 0)).X
-			spans = { { spans[1][1], axis - VOMITORIUM_HALF }, { axis + VOMITORIUM_HALF, spans[1][2] } }
+		local function open(theta: number, half: number)
+			local axis = frame:PointToObjectSpace(ellipsePoint(theta, inner + 0.3) + Vector3.new(0, y + 1.75, 0))
+			if math.abs(axis.Z) > 10 then
+				return
+			end
+			local kept = {}
+			for _, span in spans do
+				table.insert(kept, { span[1], math.min(span[2], axis.X - half) })
+				table.insert(kept, { math.max(span[1], axis.X + half), span[2] })
+			end
+			spans = kept
+		end
+		for _, hole in holes do
+			open(hole[1], hole[2])
+		end
+		for _, v in VOMITORIA do
+			if math.abs(v.from - y) < 0.1 then
+				open(v.theta, VOMITORIUM_HALF)
+			end
 		end
 		for _, span in spans do
 			if span[2] - span[1] > 0.1 then
@@ -355,121 +435,139 @@ local function buildGalleries(folder: Folder)
 	end
 	for i = 0, FACADE_ARCHES - 1 do
 		for level = 1, 2 do
-			local y = FLOOR_TOP + level * STOREY
-			local open = false
-			for _, first in STAIR_SETS do
-				local k = (i - first) % FACADE_ARCHES
-				open = open or k == 4 * (level - 1) + 2 or k == 4 * level
-			end
-			local bridge = nil
-			for _, v in VOMITORIA do
-				if v.arch == i and v.from == y then
-					bridge = archTheta(v.arch)
-				end
-			end
-			if not open then
-				rail(i, inner + half + 0.3, y, bridge)
-			end
-		end
-		if flightOf(i) == 2 then
-			rail(i, inner + half + 0.3, GALLERY_TOP)
-			rail(i, inner - 0.3, GALLERY_TOP)
-		end
-	end
-	for _, first in STAIR_SETS do
-		local theta = (first + 8) / FACADE_ARCHES * 2 * math.pi
-		guardAbove(galleries, makePart("GalleryRail", Vector3.new(0.6, 3.5, half + 0.6), frameAt(theta, inner + half / 2, GALLERY_TOP + 1.75), TRAVERTINE, Enum.Material.Limestone, galleries), GALLERY_TOP)
-	end
-	-- Flights: one riser per step, each a column from the ground so the flight is solid masonry.
-	-- A parapet on the open (outer) side of every step, except where it is level with a landing
-	-- (players step off sideways there), and across the open stairwell beyond a flight's ends.
-	local stepWidth = half - 0.6
-	local function across(stair: Model, theta: number, y: number)
-		guardAbove(stair, makePart("StairGuard", Vector3.new(0.6, 3.5, half + 0.6), frameAt(theta, inner + half / 2, y + 1.75), TRAVERTINE, Enum.Material.Limestone, stair), y)
-	end
-	for _, firstArch in STAIR_SETS do
-		for flight = 0, 2 do
-			local from = (firstArch + flight * 4) / FACADE_ARCHES * 2 * math.pi
-			local span = FLIGHT_ARCHES / FACADE_ARCHES * 2 * math.pi
-			local stair = Instance.new("Model")
-			stair.Name = "GalleryStair"
-			local startY, endY = FLOOR_TOP + flight * STOREY, FLOOR_TOP + (flight + 1) * STOREY
-			for k = 1, FLIGHT_STEPS do
-				local a = from + (k - 1) / FLIGHT_STEPS * span
-				local b = from + k / FLIGHT_STEPS * span
-				local offset = inner + 0.3 + stepWidth / 2
-				local top = startY + k * STOREY / FLIGHT_STEPS
-				local run = (ellipsePoint(b, offset) - ellipsePoint(a, offset)).Magnitude
-				makePart("Step", Vector3.new(run + 0.2, top - FLOOR_TOP, stepWidth), frameAt((a + b) / 2, offset, (top + FLOOR_TOP) / 2), if k % 2 == 0 then TRAVERTINE else SANDSTONE, Enum.Material.Limestone, stair)
-				if top - startY > 4.5 and endY - top > 4.5 then
-					guardAbove(stair, makePart("StairGuard", Vector3.new(run + 0.2, 3.5, 0.6), frameAt((a + b) / 2, inner + 0.3 + stepWidth + 0.3, top + 1.75), TRAVERTINE, Enum.Material.Limestone, stair), top)
-				end
-			end
-			if flight > 0 then
-				across(stair, from, startY)
-			end
-			if flight < 2 then
-				across(stair, from + span, endY)
-			end
-			stair.Parent = galleries
+			rail(i, FLOOR_TOP + level * STOREY)
 		end
 	end
 	galleries.Parent = folder
 end
 
--- The vomitoria themselves: treads inside the slots ring() cut through the tiers (flat at both
--- ends, risers of at most one stud between), a bridge from each balcony across the stairwell,
--- parapets where a slot opens through the top of a terrace, and a lamp in every passage.
+-- The stair houses. Per storey: a flight of ten steps along the outer lane to the half landing
+-- at the far end, a flight back along the inner lane to the next main landing. The main landings
+-- open through the outer wall onto the ambulatory of their storey (on the ground also through the
+-- inner wall into the hall); the top one comes out on the top tier. A spine wall parts the lanes,
+-- a railing guards the stairwell up there, the walls stand as a parapet above tier 7.
+local function buildStairHouses(folder: Folder)
+	table.clear(Arena.Layout.StairFlights)
+	local model = Instance.new("Model")
+	model.Name = "StairHouses"
+	local L, D = TOWER_LENGTH / 2, TOWER_HALF_DEPTH
+	local inside = L - TOWER_END_WALL -- the landings' far edges
+	local flightStart = inside - TOWER_LANDING -- flights run between -flightStart and flightStart
+	local steps = TOWER_RISERS - 1
+	local run = 2 * flightStart / steps
+	local rise = STOREY / 2 / TOWER_RISERS
+	local top = GALLERY_TOP
+	local door = { x0 = -inside + 0.5, x1 = -flightStart - 0.5, height = 8 }
+	for _, degrees in TOWER_ANGLES do
+		local base = towerFrame(degrees)
+		local house = Instance.new("Model")
+		house.Name = "StairHouse"
+		local function box(name: string, x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, color: Color3, options: PartOptions?): Part?
+			if x1 - x0 < 0.05 or y1 - y0 < 0.05 or z1 - z0 < 0.05 then
+				return nil
+			end
+			return makePart(name, Vector3.new(x1 - x0, y1 - y0, z1 - z0), base * CFrame.new((x0 + x1) / 2, (y0 + y1) / 2 - FLOOR_TOP, (z0 + z1) / 2), color, Enum.Material.Limestone, house, options)
+		end
+		for storey = 0, 2 do
+			local y0 = FLOOR_TOP + storey * STOREY
+			local half = y0 + STOREY / 2
+			-- landings: the main one at the near end (not on the ground), the half one at the far end
+			if storey > 0 then
+				box("Landing", -inside, -flightStart, y0 - 1, y0, -D + 1, D - 0.4, TRAVERTINE)
+			end
+			box("Landing", flightStart, inside, half - 1, half, -D + 1, D - 1, TRAVERTINE)
+			for k = 1, steps do
+				local up = box("Step", -flightStart + (k - 1) * run - 0.05, -flightStart + k * run, y0 + k * rise - 1.2, y0 + k * rise, 0.5, D - 1, if k % 2 == 0 then TRAVERTINE else SANDSTONE)
+				local back = box("Step", flightStart - k * run, flightStart - (k - 1) * run + 0.05, half + k * rise - 1.2, half + k * rise, -D + 1, -0.5, if k % 2 == 0 then TRAVERTINE else SANDSTONE)
+				assert(up and back, "stair house step")
+			end
+			table.insert(Arena.Layout.StairFlights, { cf = base * CFrame.new(-flightStart, y0 - FLOOR_TOP, (D - 0.5) / 2) * CFrame.Angles(0, math.pi / 2, 0), rise = steps * rise, run = 2 * flightStart, count = steps })
+			table.insert(Arena.Layout.StairFlights, { cf = base * CFrame.new(flightStart, half - FLOOR_TOP, -(D - 0.5) / 2) * CFrame.Angles(0, -math.pi / 2, 0), rise = steps * rise, run = 2 * flightStart, count = steps })
+			lamp(house, base * CFrame.new(inside - 1, half + 6 - FLOOR_TOP, 0))
+			lamp(house, base * CFrame.new(-inside + 1, y0 + 6 - FLOOR_TOP, -D + 2.5))
+		end
+		-- top: the main landing, the lid over the outer lane and the half landing below it
+		box("Landing", -inside, -flightStart, top - 1, top, -D + 1, D - 0.4, TRAVERTINE)
+		box("Lid", -flightStart, inside, top - 1, top, -0.5, D - 0.4, TRAVERTINE)
+		local railing = box("StairwellRail", -flightStart, inside, top, top + 3.5, -0.8, -0.2, TRAVERTINE)
+		if railing then
+			guardAbove(house, railing, top)
+		end
+		-- walls: outer (doors at every main landing), inner (door on the ground, parapet on top),
+		-- spine between the flights and the end walls (a parapet beside the stairwell)
+		local doorTops = {}
+		for storey = 0, 2 do
+			table.insert(doorTops, FLOOR_TOP + storey * STOREY)
+		end
+		box("OuterWall", -L, door.x0, FLOOR_TOP, top, D - 1, D + 1, TRAVERTINE)
+		box("OuterWall", door.x1, L, FLOOR_TOP, top, D - 1, D + 1, TRAVERTINE)
+		for storey, y in doorTops do
+			box("OuterWall", door.x0, door.x1, y + door.height, if storey < #doorTops then doorTops[storey + 1] - 1 else top, D - 1, D + 1, TRAVERTINE)
+		end
+		box("InnerWall", -L, door.x0, FLOOR_TOP, top + 3, -D - 1.5, -D + 1, SANDSTONE)
+		box("InnerWall", door.x1, L, FLOOR_TOP, top + 3, -D - 1.5, -D + 1, SANDSTONE)
+		box("InnerWall", door.x0, door.x1, FLOOR_TOP + door.height, top + 3, -D - 1.5, -D + 1, SANDSTONE)
+		box("SpineWall", -flightStart, flightStart, FLOOR_TOP, top, -0.5, 0.5, SANDSTONE)
+		for _, side in { -1, 1 } do
+			local x0, x1 = if side < 0 then -L else inside, if side < 0 then -inside else L
+			box("EndWall", x0, x1, FLOOR_TOP, top + 3, -D - 1.5, -0.5, SANDSTONE)
+			box("EndWall", x0, x1, FLOOR_TOP, top, -0.5, D + 1, SANDSTONE)
+		end
+		for _, part in house:GetChildren() do
+			if part:IsA("BasePart") and (part.Name == "InnerWall" or part.Name == "EndWall") and part.Position.Y + part.Size.Y / 2 > top + 1 then
+				guardAbove(house, part, top)
+			end
+		end
+		house.Parent = model
+	end
+	model.Parent = folder
+end
+
+-- The vomitoria themselves: a level floor inside the slot ring() cut through the tiers, on from
+-- the ambulatory across the open substructure (with railings there), parapets where a slot opens
+-- through the top of a terrace, and a lamp in every passage.
 local function buildVomitoria(folder: Folder)
 	local model = Instance.new("Model")
 	model.Name = "Vomitoria"
 	local width = VOMITORIUM_HALF * 2 - 0.2
-	local half = (GALLERY_END - SEATS_END) / 2
 	table.clear(Arena.Layout.Vomitoria)
 	for _, v in VOMITORIA do
-		local theta = archTheta(v.arch)
+		local theta = v.theta
 		table.insert(Arena.Layout.Vomitoria, { theta = theta, from = v.from, to = v.to, exit = v.exit })
-		local base = math.min(v.from, v.to) - 1
-		local function tread(o0: number, o1: number, top: number)
-			makePart("VomitoriumStep", Vector3.new(width, top - base, o1 - o0 + 0.05), frameAt(theta, (o0 + o1) / 2, (top + base) / 2), TRAVERTINE, Enum.Material.Limestone, model)
-		end
-		local flatIn, flatOut = 4, 6
-		local run = SEATS_END - v.exit - flatIn - flatOut
-		local steps = math.max(1, math.ceil(math.abs(v.to - v.from)))
-		tread(SEATS_END - flatIn, SEATS_END, v.from)
-		for k = 1, steps do
-			tread(SEATS_END - flatIn - k * run / steps, SEATS_END - flatIn - (k - 1) * run / steps, v.from + (v.to - v.from) * k / steps)
-		end
-		tread(v.exit, v.exit + flatOut, v.to)
-		if v.from > FLOOR_TOP then
-			local bridge = frameAt(theta, SEATS_END + half / 2 + 0.25, v.from - 0.5)
-			makePart("VomitoriumBridge", Vector3.new(width, 1, half + 0.5), bridge, TRAVERTINE, Enum.Material.Limestone, model)
-			for _, side in { -1, 1 } do
-				guardAbove(model, makePart("BridgeGuard", Vector3.new(0.6, 3.5, half + 0.5), bridge * CFrame.new(side * (VOMITORIUM_HALF - 0.3), 2.25, 0), TRAVERTINE, Enum.Material.Limestone, model), v.from)
+		makePart("VomitoriumFloor", Vector3.new(width, 1, SEATS_END + 0.5 - v.exit), frameAt(theta, (v.exit + SEATS_END + 0.5) / 2, v.to - 0.5), TRAVERTINE, Enum.Material.Limestone, model)
+		-- railings from the first tier whose slab starts above the floor out to the ambulatory
+		local open = SEATS_END
+		for tier = SEAT_TIERS, 1, -1 do
+			if tierFront(tier) >= v.exit - 0.01 and tierBottom(tier) > v.to + 0.5 then
+				open = tierFront(tier)
 			end
+		end
+		for _, side in { -1, 1 } do
+			local railing = makePart("VomitoriumRail", Vector3.new(0.6, 3.5, SEATS_END - open), frameAt(theta, (open + SEATS_END) / 2, v.to + 1.75) * CFrame.new(side * (VOMITORIUM_HALF - 0.3), 0, 0), TRAVERTINE, Enum.Material.Limestone, model)
+			guardAbove(model, railing, v.to)
 		end
 		-- Parapets beside the slot where it is open to the sky, and across the front of the first
 		-- terrace it runs under (that terrace's edge stands high above the open slot)
 		local opened, covered = false, false
 		for tier = 1, SEAT_TIERS do
-			local front = PODIUM_THICKNESS + (tier - 1) * SEAT_DEPTH
-			local top = Architecture.tierTop(tier)
+			local front, depth = tierFront(tier), tierDepth(tier)
+			local top = tierTop(tier)
 			if front >= v.exit - 0.01 and top < v.to + VOMITORIUM_CLEAR then
 				opened = true
 				for _, side in { -1, 1 } do
-					guardAbove(model, makePart("SlotParapet", Vector3.new(0.8, 3, SEAT_DEPTH), frameAt(theta, front + SEAT_DEPTH / 2, top + 1.5) * CFrame.new(side * (VOMITORIUM_HALF + 0.4), 0, 0), SANDSTONE, Enum.Material.Limestone, model), top)
+					guardAbove(model, makePart("SlotParapet", Vector3.new(0.8, 3, depth), frameAt(theta, front + depth / 2, top + 1.5) * CFrame.new(side * (VOMITORIUM_HALF + 0.4), 0, 0), SANDSTONE, Enum.Material.Limestone, model), top)
 				end
 			elseif front >= v.exit - 0.01 and opened and not covered then
 				covered = true
 				guardAbove(model, makePart("SlotParapet", Vector3.new(2 * VOMITORIUM_HALF + 1.6, 3, 0.8), frameAt(theta, front + 0.4, top + 1.5), SANDSTONE, Enum.Material.Limestone, model), top)
 			end
 		end
-		local lamp = makePart("VomitoriumLamp", Vector3.new(0.8, 0.8, 0.8), frameAt(theta, (v.exit + SEATS_END) / 2, v.to + VOMITORIUM_CLEAR - 1), Color3.fromRGB(255, 180, 90), Enum.Material.Neon, model, DECOR)
-		local light = Instance.new("PointLight")
-		light.Range = 22
-		light.Brightness = 0.8
-		light.Color = Color3.fromRGB(255, 205, 150)
-		light.Parent = lamp
+		local light = makePart("VomitoriumLamp", Vector3.new(0.8, 0.8, 0.8), frameAt(theta, (v.exit + open) / 2, v.to + VOMITORIUM_CLEAR - 1), Color3.fromRGB(255, 180, 90), Enum.Material.Neon, model, DECOR)
+		local glow = Instance.new("PointLight")
+		glow.Range = 22
+		glow.Brightness = 0.8
+		glow.Color = Color3.fromRGB(255, 205, 150)
+		glow.Parent = light
 	end
 	model.Parent = folder
 end
@@ -486,7 +584,7 @@ local function buildFacade(folder: Folder)
 	local attic = OUTER_TOP - GALLERY_TOP
 	local CYL = Enum.PartType.Cylinder
 	for i = 0, FACADE_ARCHES - 1 do
-		local frame, chord = segmentFrame(i, FACADE_ARCHES, GALLERY_END + thickness / 2, FLOOR_TOP)
+		local frame, chord = segmentFrame(i - 0.5, FACADE_ARCHES, GALLERY_END + thickness / 2, FLOOR_TOP) -- arch i centred on i / FACADE_ARCHES
 		local function at(x: number, y: number, z: number): CFrame
 			return frame * CFrame.new(x, y, z)
 		end
@@ -537,81 +635,22 @@ local function buildFacade(folder: Folder)
 	facade.Parent = folder
 end
 
--- The ground outside the Colosseum: an endless granite plate. Up to PLAZA_END it is a ring of
--- slabs in bands (Arena.cutGround opens stairwells in it); the ring covers a square, and big tiles
--- carry the plate on from there to GROUND_FAR. Its top sits a hair below the gallery floor, and the
--- tiles a little lower again, so overlapping slabs never flicker.
+-- The ground outside the Colosseum: an endless granite plate of big tiles. Its top sits a hair
+-- below the paved floors, so overlapping slabs never flicker.
 local GRANITE = Color3.fromRGB(128, 126, 122)
 local GROUND_TOP = FLOOR_TOP - 0.05
-local GROUND_SEGMENTS, GROUND_BAND = 80, 40
-local GROUND_SQUARE, GROUND_FAR = 340, 4096
-local groundPieces: { BasePart } = {}
-local groundModel: Model? = nil
+local GROUND_FAR = 4096
 local function buildGround(folder: Folder)
-	table.clear(groundPieces)
 	local ground = Instance.new("Model")
 	ground.Name = "Ground"
-	local depth = PLAZA_END - OUTER_OFFSET + 0.5
-	local bands = math.ceil(depth / GROUND_BAND)
-	local width = depth / bands
-	for band = 0, bands - 1 do
-		local o0 = OUTER_OFFSET - 0.5 + band * width
-		for i = 0, GROUND_SEGMENTS - 1 do
-			local frame = segmentFrame(i, GROUND_SEGMENTS, o0 + width / 2, GROUND_TOP - 0.5)
-			local a, b = i / GROUND_SEGMENTS * 2 * math.pi, (i + 1) / GROUND_SEGMENTS * 2 * math.pi
-			local chord = (ellipsePoint(b, o0 + width) - ellipsePoint(a, o0 + width)).Magnitude
-			table.insert(groundPieces, makePart("Ground", Vector3.new(chord + 0.5, 1, width + 0.5), frame, GRANITE, Enum.Material.Granite, ground))
+	local n = 5 -- tiles up to 2048 wide, with no seam through the arena axes
+	local size = 2 * GROUND_FAR / n
+	for a = 0, n - 1 do
+		for b = 0, n - 1 do
+			makePart("Ground", Vector3.new(size, 1, size), CFrame.new(-GROUND_FAR + (a + 0.5) * size, GROUND_TOP - 0.5, -GROUND_FAR + (b + 0.5) * size), GRANITE, Enum.Material.Granite, ground)
 		end
 	end
-	local function tiles(x0: number, x1: number, z0: number, z1: number)
-		local nx, nz = math.ceil((x1 - x0) / 2048), math.ceil((z1 - z0) / 2048)
-		local w, d = (x1 - x0) / nx, (z1 - z0) / nz
-		for a = 0, nx - 1 do
-			for b = 0, nz - 1 do
-				makePart("Ground", Vector3.new(w, 1, d), CFrame.new(x0 + (a + 0.5) * w, GROUND_TOP - 0.6, z0 + (b + 0.5) * d), GRANITE, Enum.Material.Granite, ground)
-			end
-		end
-	end
-	tiles(-GROUND_FAR, GROUND_FAR, -GROUND_FAR, -GROUND_SQUARE)
-	tiles(-GROUND_FAR, GROUND_FAR, GROUND_SQUARE, GROUND_FAR)
-	tiles(-GROUND_FAR, -GROUND_SQUARE, -GROUND_SQUARE, GROUND_SQUARE)
-	tiles(GROUND_SQUARE, GROUND_FAR, -GROUND_SQUARE, GROUND_SQUARE)
 	ground.Parent = folder
-	groundModel = ground
-end
-
--- Opens a stairwell in the ground ring. `frame` is level, its local Z runs along the stairwell;
--- the hole spans local x -halfWidth..halfWidth and z z0..z1. Ring slabs touching it make way for
--- slabs aligned with the hole that cover everything they covered.
-function Arena.cutGround(frame: CFrame, halfWidth: number, z0: number, z1: number)
-	local parent = groundModel
-	if not parent then
-		return
-	end
-	local reach, zMin, zMax = halfWidth, z0, z1
-	for index = #groundPieces, 1, -1 do
-		local slab = groundPieces[index]
-		local x0, x1, s0, s1 = math.huge, -math.huge, math.huge, -math.huge
-		for _, corner in { { -1, -1 }, { -1, 1 }, { 1, -1 }, { 1, 1 } } do
-			local p = frame:PointToObjectSpace((slab.CFrame * CFrame.new(corner[1] * slab.Size.X / 2, 0, corner[2] * slab.Size.Z / 2)).Position)
-			x0, x1, s0, s1 = math.min(x0, p.X), math.max(x1, p.X), math.min(s0, p.Z), math.max(s1, p.Z)
-		end
-		if x0 < halfWidth + 0.5 and x1 > -halfWidth - 0.5 and s0 < z1 + 0.5 and s1 > z0 - 0.5 then
-			reach, zMin, zMax = math.max(reach, -x0, x1), math.min(zMin, s0), math.max(zMax, s1)
-			slab:Destroy()
-			table.remove(groundPieces, index)
-		end
-	end
-	local y = GROUND_TOP - 0.5 - frame.Position.Y
-	local function slab(xa: number, xb: number, za: number, zb: number)
-		if xb - xa > 0.05 and zb - za > 0.05 then
-			makePart("Ground", Vector3.new(xb - xa, 1, zb - za), frame * CFrame.new((xa + xb) / 2, y, (za + zb) / 2), GRANITE, Enum.Material.Granite, parent)
-		end
-	end
-	slab(-reach, reach, zMin, z0)
-	slab(-reach, reach, z1, zMax)
-	slab(-reach, -halfWidth, z0, z1)
-	slab(halfWidth, reach, z0, z1)
 end
 
 -- The invisible extension above a rail or parapet (see guardAbove), for the Hub's builders.
@@ -698,56 +737,47 @@ local function buildBanners(folder: Folder)
 end
 
 -- Accessible spectator stands, all outside the invisible barrier (zombies can't get there):
--- lower walkway = top of seating tier 1, middle walkway = top of tier 3, two staircases between
--- them, a railing along the front, two viewing platforms and the basement entrance/return door.
+-- lower walkway = top of seating tier 1, middle walkway = top of tier 3, two staircases up the
+-- seats (scalaria) from the lower walkway to the top tier, a railing along the front, a viewing
+-- platform and the return door.
 local function buildTribune(folder: Folder)
 	local tribune = Instance.new("Model")
 	tribune.Name = "Tribune"
-	local lowerY = FLOOR_TOP + PODIUM_HEIGHT + SEAT_RISE
-	local middleY = lowerY + 2 * SEAT_RISE
+	local lowerY = tierTop(1)
+	local middleY = tierTop(3)
 
 	-- Railing along the front edge of the lower walkway
 	ring(tribune, "Railing", 64, PODIUM_THICKNESS, 0.8, lowerY, lowerY + 2.8, TRAVERTINE, Enum.Material.Limestone)
 
-	-- Two staircases from the lower walkway (over tier 2) up to the middle walkway
-	local steps = 14
-	local run = (SEAT_DEPTH * 2 - 0.8) / steps
-	local rise = (middleY - lowerY) / steps
-	-- A parapet on both sides of every step that stands more than a small step above the terrace
-	-- beside it, so the stairs can only be left at their ends or where the terrace is level
-	local function guard(stair: Model, theta: number, offset: number, length: number, top: number)
-		local tier = math.clamp(math.ceil((offset - length / 2 - PODIUM_THICKNESS) / SEAT_DEPTH + 0.001), 1, SEAT_TIERS)
-		if top - Architecture.tierTop(tier) > 2 then
-			for _, side in { -1, 1 } do
-				guardAbove(stair, makePart("StairGuard", Vector3.new(0.6, 3.5, length + 0.05), frameAt(theta, offset, top + 1.75) * CFrame.new(side * 2.8, 0, 0), TRAVERTINE, Enum.Material.Limestone, stair), top)
-			end
-		end
-	end
+	-- Two staircases: across every terrace they climb from its own top to the next terrace's,
+	-- so each flight meets the riser above it level. A parapet on both sides of every step that
+	-- stands more than a small step above the terrace beside it, so the stairs can only be left at
+	-- their ends or where the terrace is level.
 	for _, degrees in { 30, 210 } do
 		local theta = math.rad(degrees)
 		local stair = Instance.new("Model")
 		stair.Name = "Staircase"
-		for k = 1, steps do
-			local height = rise * k
-			local offset = PODIUM_THICKNESS + 0.8 + run * (k - 0.5)
-			makePart("Step", Vector3.new(5, height, run + 0.05), frameAt(theta, offset, lowerY + height / 2), if k % 2 == 0 then TRAVERTINE else SANDSTONE, Enum.Material.Limestone, stair)
-			guard(stair, theta, offset, run, lowerY + height)
+		for tier = 1, SEAT_TIERS - 1 do
+			local front, depth, floor = tierFront(tier), tierDepth(tier), tierTop(tier)
+			local rise = tierTop(tier + 1) - floor
+			local steps = math.ceil(rise)
+			local run = depth / steps
+			for k = 1, steps do
+				local top = floor + k * rise / steps
+				local offset = front + run * (k - 0.5)
+				makePart("Step", Vector3.new(5, top - floor + 0.5, run + 0.05), frameAt(theta, offset, (top + floor - 0.5) / 2), if k % 2 == 0 then TRAVERTINE else SANDSTONE, Enum.Material.Limestone, stair)
+				if top - floor > 2 then
+					for _, side in { -1, 1 } do
+						guardAbove(stair, makePart("StairGuard", Vector3.new(0.6, 3.5, run + 0.05), frameAt(theta, offset, top + 1.75) * CFrame.new(side * 2.8, 0, 0), TRAVERTINE, Enum.Material.Limestone, stair), top)
+					end
+				end
+			end
 		end
 		for _, side in { -1, 1 } do
-			local a = frameAt(theta, PODIUM_THICKNESS + 0.8, lowerY + 3) * CFrame.new(side * 2.7, 0, 0)
-			local b = frameAt(theta, PODIUM_THICKNESS + 0.8 + run * steps, middleY + 3) * CFrame.new(side * 2.7, 0, 0)
+			local a = frameAt(theta, tierFront(1), lowerY + 3) * CFrame.new(side * 2.7, 0, 0)
+			local b = frameAt(theta, tierFront(SEAT_TIERS), GALLERY_TOP + 3) * CFrame.new(side * 2.7, 0, 0)
 			local length = (b.Position - a.Position).Magnitude
 			makePart("Handrail", Vector3.new(0.3, 0.3, length), CFrame.lookAt((a.Position + b.Position) / 2, b.Position), BRONZE, Enum.Material.Metal, stair, DECOR)
-		end
-		-- ...and on up through the upper storey to the top gallery behind the last tier
-		local upperStart = PODIUM_THICKNESS + 2 * SEAT_DEPTH + 0.8
-		local upperSteps = math.ceil(GALLERY_TOP - middleY)
-		local upperRun = (SEATS_END - upperStart) / upperSteps
-		local upperRise = (GALLERY_TOP - middleY) / upperSteps
-		for k = 1, upperSteps do
-			local height = upperRise * k
-			makePart("Step", Vector3.new(5, height, upperRun + 0.05), frameAt(theta, upperStart + upperRun * (k - 0.5), middleY + height / 2), if k % 2 == 0 then TRAVERTINE else SANDSTONE, Enum.Material.Limestone, stair)
-			guard(stair, theta, upperStart + upperRun * (k - 0.5), upperRun, middleY + height)
 		end
 		stair.Parent = tribune
 	end
@@ -755,16 +785,16 @@ local function buildTribune(folder: Folder)
 	-- Viewing platform on the middle walkway, south (the north side holds the imperial box)
 	for _, degrees in { 90 } do
 		local theta = math.rad(degrees)
-		makePart("ViewingPlatform", Vector3.new(14, 1, 5), frameAt(theta, PODIUM_THICKNESS + 2 * SEAT_DEPTH + 2.5, middleY + 0.5), TRAVERTINE, Enum.Material.Marble, tribune)
-		makePart("PlatformRail", Vector3.new(14, 2.5, 0.6), frameAt(theta, PODIUM_THICKNESS + 2 * SEAT_DEPTH + 0.3, middleY + 2.25), SANDSTONE, Enum.Material.Limestone, tribune)
+		makePart("ViewingPlatform", Vector3.new(14, 1, 5), frameAt(theta, tierFront(3) + 2.5, middleY + 0.5), TRAVERTINE, Enum.Material.Marble, tribune)
+		makePart("PlatformRail", Vector3.new(14, 2.5, 0.6), frameAt(theta, tierFront(3) + 0.3, middleY + 2.25), SANDSTONE, Enum.Material.Limestone, tribune)
 		for _, side in { -1, 1 } do
-			makePart("Post", Vector3.new(0.6, 5, 0.6), frameAt(theta, PODIUM_THICKNESS + 2 * SEAT_DEPTH + 0.3, middleY + 3.5) * CFrame.new(side * 6.7, 0, 0), BRONZE, Enum.Material.Metal, tribune, DECOR)
-			makePart("Pennant", Vector3.new(1.6, 2.4, 0.1), frameAt(theta, PODIUM_THICKNESS + 2 * SEAT_DEPTH + 0.3, middleY + 4.6) * CFrame.new(side * 6.7 + side * 0.9, 0, 0), BANNER_RED, Enum.Material.Fabric, tribune, DECOR)
+			makePart("Post", Vector3.new(0.6, 5, 0.6), frameAt(theta, tierFront(3) + 0.3, middleY + 3.5) * CFrame.new(side * 6.7, 0, 0), BRONZE, Enum.Material.Metal, tribune, DECOR)
+			makePart("Pennant", Vector3.new(1.6, 2.4, 0.1), frameAt(theta, tierFront(3) + 0.3, middleY + 4.6) * CFrame.new(side * 6.7 + side * 0.9, 0, 0), BANNER_RED, Enum.Material.Fabric, tribune, DECOR)
 		end
 	end
 
 	-- Basement entrance / RETURN TO LOBBY: a barred door in the riser of tier 2, east side
-	local doorBase = frameAt(0, PODIUM_THICKNESS + SEAT_DEPTH, lowerY)
+	local doorBase = frameAt(0, tierFront(2), lowerY)
 	makePart("DoorFrame", Vector3.new(6.4, 4.4, 0.4), doorBase * CFrame.new(0, 2.2, -0.15), STONE_DARK, Enum.Material.Limestone, tribune, DECOR)
 	local door = makePart("ReturnDoor", Vector3.new(5, 4, 0.4), doorBase * CFrame.new(0, 2, -0.4), OPENING, Enum.Material.Slate, tribune, DECOR)
 	for x = -2, 2, 1 do
@@ -836,7 +866,9 @@ function Arena.build(): Folder
 	folder.Name = Config.ArenaFolderName
 	buildFloor(folder)
 	buildWalls(folder)
+	buildSubstructure(folder)
 	buildGalleries(folder)
+	buildStairHouses(folder)
 	buildVomitoria(folder)
 	buildFacade(folder)
 	buildGround(folder)
@@ -865,8 +897,8 @@ function Arena.buildImperialBox(folder: Folder)
 	local box = Instance.new("Model")
 	box.Name = "ImperialBox"
 	local theta = math.rad(270)
-	local top = FLOOR_TOP + PODIUM_HEIGHT + 2 * SEAT_RISE
-	local base = frameAt(theta, PODIUM_THICKNESS + SEAT_DEPTH + 3, top)
+	local top = tierTop(2)
+	local base = frameAt(theta, tierFront(2) + 3, top)
 	local function at(x: number, y: number, z: number): CFrame
 		return base * CFrame.new(x, y, z)
 	end
@@ -1032,16 +1064,16 @@ end
 local TRIBUNE_SPOTS: { { degrees: number, middle: boolean } } = {
 	{ degrees = 0, middle = false }, { degrees = 60, middle = false }, { degrees = 120, middle = false },
 	{ degrees = 180, middle = false }, { degrees = 150, middle = false }, { degrees = 330, middle = false },
-	{ degrees = 90, middle = true }, { degrees = 0, middle = true }, { degrees = 180, middle = true },
-	{ degrees = 120, middle = true }, { degrees = 60, middle = true }, { degrees = 330, middle = true },
+	{ degrees = 90, middle = true }, { degrees = 15, middle = true }, { degrees = 195, middle = true },
+	{ degrees = 135, middle = true }, { degrees = 75, middle = true }, { degrees = 345, middle = true },
 }
 
 function Arena.getTribuneCFrame(seed: number?): CFrame
 	local spot = TRIBUNE_SPOTS[((seed or 0) % #TRIBUNE_SPOTS) + 1]
 	local theta = math.rad(spot.degrees)
 	if spot.middle then
-		local middleY = Arena.Layout.TribuneWalkwayY + 2 * SEAT_RISE
-		return frameAt(theta, PODIUM_THICKNESS + 2 * SEAT_DEPTH + 2, middleY + 3)
+		local middleY = tierTop(3)
+		return frameAt(theta, tierFront(3) + 2, middleY + 3)
 	end
 	return frameAt(theta, PODIUM_THICKNESS + 3.5, Arena.Layout.TribuneWalkwayY + 3)
 end

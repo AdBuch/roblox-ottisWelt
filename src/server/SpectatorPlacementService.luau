@@ -27,6 +27,7 @@ local Workspace = game:GetService("Workspace")
 local Config = require(ReplicatedStorage.Shared.Config)
 local CrowdQualityConfig = require(ReplicatedStorage.Shared.CrowdQualityConfig)
 local SpectatorZoneDefinitions = require(ReplicatedStorage.Shared.SpectatorZoneDefinitions)
+local ColosseumLayout = require(ReplicatedStorage.Shared.ColosseumLayout)
 local Arena = require(script.Parent.Arena)
 
 type Zone = SpectatorZoneDefinitions.Zone
@@ -154,7 +155,7 @@ local function seatsFor(zone: Zone, taken: { Vector3 }, params: RaycastParams): 
 	local rows: { number } = if zone.Level == "Lower" then { SpectatorZoneDefinitions.FrontRow, SpectatorZoneDefinitions.BackRow }
 		elseif zone.Level == "Middle" then { SpectatorZoneDefinitions.FrontRow }
 		else { SpectatorZoneDefinitions.BackRow }
-	local seatTop = layout.FloorTop + layout.PodiumHeight + tier * layout.SeatRise
+	local seatTop = ColosseumLayout.tierTop(tier)
 	local result: { { Seat } } = {}
 	local realSpots = {}
 	for i = 0, 11 do
@@ -162,7 +163,7 @@ local function seatsFor(zone: Zone, taken: { Vector3 }, params: RaycastParams): 
 	end
 	local imperial = layout.ImperialSeat.Position
 	for rowIndex, share in rows do
-		local offset = layout.PodiumThickness + (tier - 1) * layout.SeatDepth + layout.SeatDepth * share
+		local offset = ColosseumLayout.tierFront(tier) + ColosseumLayout.tierDepth(tier) * share
 		local rowSeats: { Seat } = {}
 		local degrees = zone.CenterDegrees - zone.SpanDegrees / 2
 		local stop = zone.CenterDegrees + zone.SpanDegrees / 2

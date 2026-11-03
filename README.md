@@ -12,7 +12,7 @@ Plain Luau (strict), no packages, no Toolbox assets, no uploaded asset IDs. Ever
 built-in materials, built-in SpecialMesh shapes, ParticleEmitters and lights. The server decides every
 gameplay outcome (damage, hits, combos, Aura, ownership, scores, victories, boss state, projectiles, AI).
 
-> **Two Places, one Experience.** The **OTTI HUB** (start place) is the Colosseum basement: armory, archive,
+> **Two Places, one Experience.** The **OTTI HUB** (start place) is the three hero lobbies in front of the Colosseum: shops, archive,
 > training, parties, mode selection, matchmaking and the live-battle menu. Every match runs on its **own
 > reserved server of the COLOSSEUM ARENA place**, so any number of matches run at the same time, each with
 > up to 8 fighters and 20 live spectators. See [Multi-place architecture](#multi-place-architecture).
@@ -26,8 +26,8 @@ places/arena.project.json            COLOSSEUM ARENA (shared code + src/arena, P
 scripts/build-places.ps1 / .sh       builds build/OttiHub.rbxlx and build/OttiArena.rbxlx
 src/hub/PlaceRole, src/arena/PlaceRole   -> ReplicatedStorage.Shared.PlaceRole (build-time role)
 src/hub/server/   -> ServerScriptService.Server.Place  (Hub only)
-  Main.server                        builds the basement, starts data, armory, training, Hub matchmaking
-  HubMatchService                    MatchRequest dispatch (rate limited), Solo / Co-op start, basement prompts, live board
+  Main.server                        builds the hero lobbies, starts data, shops, training, Hub matchmaking
+  HubMatchService                    MatchRequest dispatch (rate limited), Solo / Co-op start, lobby prompts, live board
   PartyService                       parties 1-4 (create, invite, accept, ready, lock while queued)
   MatchmakingService                 cross-server queues (Co-op, Time, First to, Elimination), lease, claims, assignments
   ArenaReservationService            match id + ReserveServerAsync + match record + connection record + fighter tickets
@@ -634,7 +634,7 @@ mock data unless `StudioMockData = false`. Loaded data always goes through
 
 ```
 OTTI HUB (start place, public servers)                COLOSSEUM ARENA (one reserved server per match)
- basement, armory, archive, training                    Colosseum, tribunes, imperial box, Otti
+ hero lobbies, shops, archive, training                  Colosseum, tribunes, imperial box, Otti
  parties, PLAY menu, posts                              ArenaAdmissionService (tickets, roles, capacity)
  MatchmakingService ──┐                                 ArenaMatchService (wait -> start -> end)
  HubMatchService ─────┼─ ArenaReservationService ──┐    MatchService / TeamBattleService + rules
@@ -800,7 +800,7 @@ With Place IDs = 0 or in Studio nothing is teleported (and nothing pretends to b
   first to 3 rounds wins.
 * **Friend spectating:** befriend a fighter's account; WATCH LIVE shows FRIENDS IN BATTLE first → WATCH → tribune.
 * **Random spectating:** WATCH RANDOM several times with several matches: different matches are picked.
-* **Returning to the Hub:** after the result everyone is back in the basement (spectators next to the live
+* **Returning to the Hub:** after the result everyone is back in the Hub lobby (spectators next to the live
   board); HUB button / RETURN TO HUB door work any time for spectators.
 * **Persistence after an update:** buy something, leave, change code, publish both places, rejoin: Aura, gear,
   HUD mode and statistics are still there (same `OttiPlayerData_DEV_v1`).

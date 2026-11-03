@@ -1,7 +1,7 @@
 --!strict
--- OTTI HUB (start place) server entry. Builds the circular concourse under the Colosseum:
--- Otti / Schili / Krokero statue halls, three equipment shops, tribune stairs,
--- lower training cages, party meeting point and exits to the granite grounds. Starts the Hub
+-- OTTI HUB (start place) server entry. Builds the three hero lobbies on the ground in front of
+-- the Colosseum: Otti's main hall with the zombie archive, the shop street and the training
+-- yard, and the smaller Schili and Krokero halls with their groups. Starts the Hub
 -- services: persistent data, equipment, training combat, parties, matchmaking, live battles and
 -- the teleports to reserved Arena servers. No arena match ever runs in the Hub.
 
@@ -51,9 +51,9 @@ local function setupLeaderstats(player: Player)
 	leaderstats.Parent = player
 end
 
--- World: complete hero halls and hypogeum, plus the shared playable Colosseum architecture.
+-- World: the three hero lobbies, plus the shared playable Colosseum architecture.
 local lobby = LobbyService.build()
-print(PREFIX, ("Lobby ready: %d pads, three statue halls and shops, training cages, group meeting point, tribunes"):format(#lobby.pads))
+print(PREFIX, ("Lobby ready: %d pads, three hero halls, shop street, training yard, tribunes"):format(#lobby.pads))
 local _ = Remotes
 
 -- Lobby combat rules: only the training dummies can be hit, nobody can be hurt
