@@ -34,6 +34,7 @@ local PvPBalanceConfig = require(ReplicatedStorage.Shared.PvPBalanceConfig)
 local ShieldDefenseConfig = require(ReplicatedStorage.Shared.ShieldDefenseConfig)
 local SlideDefinitions = require(ReplicatedStorage.Shared.SlideDefinitions)
 local SpecialChargeDefinitions = require(ReplicatedStorage.Shared.SpecialChargeDefinitions)
+local EnvironmentConfig = require(ReplicatedStorage.Shared.EnvironmentConfig)
 local SpecialMoveDefinitions = require(ReplicatedStorage.Shared.SpecialMoveDefinitions)
 local AttackSequenceService = require(script.Parent.AttackSequenceService)
 local CombatEffects = require(script.Parent.CombatEffects)
@@ -1136,6 +1137,7 @@ type RunOptions = {
 	slot: string, -- contextual attack slot
 	tier: number?, -- Specials: 1-3, 4 = Ultimate
 	damageMultiplier: number?, -- Specials: the charge tier's PvE multiplier
+	impactMultiplier: number?, -- Specials: stagger and knockback scale (Perfect executions)
 	pvpScale: number?,
 	cooldownKey: string?,
 	cooldown: number?,
@@ -1199,6 +1201,7 @@ local function runMove(player: Player, state: PlayerState, context: CombatRules.
 		root = root,
 		aimPoint = aimPoint,
 		comboMultiplier = options.damageMultiplier or 1,
+		impactMultiplier = options.impactMultiplier or 1,
 		pvpScale = options.pvpScale,
 		bonusStagger = 0,
 		bashMultiplier = if shield then shield.BashMultiplier else 1,
@@ -1340,8 +1343,10 @@ local function releaseSpecial(player: Player, state: PlayerState, context: Comba
 		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.SpecialCharge, "cancel", "SPECIAL RECHARGING")
 		return
 	end
-	local failure = InventoryService.practiceSpecial(player, weapon.Id, move.Id)
-	if specialRng:NextNumber() < failure then
+	local source = if EnvironmentConfig.role() == "Arena" then "Arena" else "Training"
+	local failure, perfectChance = InventoryService.practiceSpecial(player, weapon.Id, move.Id, source)
+	local outcome = SpecialPracticeDefinitions.outcome(failure, perfectChance, specialRng:NextNumber())
+	if outcome == "Fail" then
 		setBlocking(player, false)
 		state.actionToken += 1
 		state.busyUntil = now + SpecialPracticeDefinitions.FallSeconds
@@ -1359,17 +1364,22 @@ local function releaseSpecial(player: Player, state: PlayerState, context: Comba
 		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.SpecialCharge, "cancel", move.Name .. " · FAILED · practice improved")
 		return
 	end
+	local perfect = outcome == "Perfect"
 	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.SpecialCharge, "fire", tier)
+	if perfect then
+		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.SpecialCharge, "perfect", move.Name .. " · PERFEKT")
+	end
 	runMove(player, state, context, weapon, move, aim, {
 		kind = "Special",
 		slot = "Special" .. tierDef.Name,
 		tier = if ultimate then 4 else tier,
-		damageMultiplier = if ultimate then 1 else tierDef.DamageMultiplier,
+		damageMultiplier = (if ultimate then 1 else tierDef.DamageMultiplier) * (if perfect then SpecialPracticeDefinitions.PerfectDamage else 1),
+		impactMultiplier = if perfect then SpecialPracticeDefinitions.PerfectImpact else 1,
 		pvpScale = if ultimate then 1 else tierDef.PvPMultiplier,
 		cooldownKey = SPECIAL_COOLDOWN_KEY,
 		cooldown = if ultimate then SpecialChargeDefinitions.UltimateCooldown else tierDef.Cooldown,
 		extraRecovery = if ultimate then 0 else tierDef.Recovery,
-		label = ("%s · %s · fail %.0f%%"):format(move.Name, family, failure * 100),
+		label = ("%s · %s · %s"):format(move.Name, family, if perfect then "PERFECT" else "normal"),
 	})
 end
 

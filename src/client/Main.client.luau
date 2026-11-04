@@ -301,6 +301,8 @@ if feedback and feedback:IsA("RemoteEvent") then
 				end
 			elseif a == "fire" then
 				chargeHud.stop()
+			elseif a == "perfect" then
+				notify("Info", if typeof(b) == "string" then b else "PERFEKT")
 			end
 		elseif kind == F.Parry then
 			notify("Info", "PARRY!")

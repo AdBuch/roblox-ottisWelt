@@ -45,6 +45,7 @@ export type Attacker = {
 	root: BasePart,
 	aimPoint: Vector3,
 	comboMultiplier: number,
+	impactMultiplier: number, -- stagger and knockback scale (Perfect specials)
 	bonusStagger: number,
 	bashMultiplier: number,
 	basicDamage: number, -- universal combos scale with the equipped basic attack
@@ -111,8 +112,8 @@ local function hitInfo(execution: Execution, damage: number, target: Target?): C
 			elseif move.Line then "THRUST"
 			else nil,
 		fromPosition = attacker.root.Position,
-		stagger = (move.Stagger + attacker.bonusStagger) * bash,
-		knockback = move.Knockback * bash,
+		stagger = (move.Stagger + attacker.bonusStagger) * bash * attacker.impactMultiplier,
+		knockback = move.Knockback * bash * attacker.impactMultiplier,
 		isProjectile = move.Kind == "Projectile" or move.Kind == "Volley",
 		executeThreshold = move.ExecuteThreshold,
 		executeMultiplier = move.ExecuteMultiplier,
