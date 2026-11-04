@@ -2,12 +2,18 @@ local count = 0
 local function check(ok, label) assert(ok, label); count += 1 end
 local Practice = modules.SpecialPracticeDefinitions
 local Levels = modules.GladiatorLevelDefinitions
-check(Practice.family("Right", false, true, true, 4) == "Right", "locked context falls back")
-check(Practice.family("Left", false, true, false, 5) == "Up", "air unlock at 5")
-check(Practice.family("Down", false, false, true, 8) == "Down", "block locked until 9")
-check(Practice.family("Down", false, false, true, 9) == "Circle", "block unlock at 9")
-check(Practice.family("Right", true, true, true, 9) == "Ultimate", "ultimate precedence")
-check(Practice.family("Right", false, true, true, 9) == "Up", "air precedence")
+check(Practice.family("Right", false, true, true, 1) == "Right", "locked context falls back")
+check(Practice.family("Left", false, true, false, 2) == "Up", "air unlock at stage 2")
+check(Practice.family("Down", false, false, false, 2) == "Left", "Down locked until stage 3")
+check(Practice.family("Down", false, false, false, 3) == "Down", "Down unlock at stage 3")
+check(Practice.family("Down", false, false, true, 3) == "Down", "block locked until stage 4")
+check(Practice.family("Down", false, false, true, 4) == "Circle", "block unlock at stage 4")
+check(Practice.family("Right", true, false, false, 5) == "Right", "ultimate locked until stage 6")
+check(Practice.family("Right", true, false, false, 6) == "Ultimate", "ultimate unlock at stage 6")
+check(Practice.family("Right", false, true, true, 4) == "Up", "air precedence over block")
+check(Practice.unlocked(4, "Counter") == false and Practice.unlocked(5, "Counter") == true, "parry counter unlocks at stage 5")
+check(Practice.unlocked(1, "Left") and Practice.unlocked(1, "Right"), "Left and Right always open")
+check(Practice.weaponStage({ 0, 56 }) == 2 and Practice.weaponStage({}) == 1, "weapon stage is its best move")
 check(Levels.levelFor(6999).Level == 8 and Levels.levelFor(7000).Level == 9, "elite reachable")
 local function near(a: number, b: number): boolean return math.abs(a - b) < 1e-9 end
 check(Practice.MaxSteps == 296, "74 points of Perfect at 0.25 per step")
@@ -40,6 +46,7 @@ f, p = Inventory.practiceSpecial(player, "RustyGladius", "RebellionCombo", "Trai
 check(near(f, 0.2470) and near(p, 0.015), "progress survives save/load")
 f, p = Inventory.practiceSpecial(player, "LegionSword", "Legion_SpecCleave", "Training")
 check(near(f, 0.25) and near(p, 0.01), "weapons train independently")
+check(Inventory.weaponStage(player, "RustyGladius") == 1, "two steps keep the weapon in stage 1")
 -- Daily allowance: 5 points in the training yard = 20 steps a day, arena 15 points = 60 steps
 Inventory.forget(player)
 Inventory.load(player, nil, 0, 0)

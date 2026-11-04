@@ -573,6 +573,19 @@ function InventoryService.practiceSpecial(player: Player, weaponId: string, move
 	return failure, perfect
 end
 
+-- Mastery stage of a weapon: the highest stage reached by any of its moves.
+function InventoryService.weaponStage(player: Player, weaponId: string): number
+	local profile = getProfile(player)
+	local prefix = weaponId .. ":"
+	local steps = {}
+	for key, value in profile.specialAttempts do
+		if key:sub(1, #prefix) == prefix then
+			table.insert(steps, value)
+		end
+	end
+	return SpecialPracticeDefinitions.weaponStage(steps)
+end
+
 function InventoryService.serialize(player: Player): { [string]: any }
 	local profile = getProfile(player)
 	return {

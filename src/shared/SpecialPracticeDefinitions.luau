@@ -6,7 +6,8 @@
 --   Fail     starts at 25 % and falls 0.15 points per step down to 5 %
 --   Perfect  starts at 1 % and rises 0.25 points per step up to 75 %
 -- Perfect executions deal more damage and impact (PerfectDamage / PerfectImpact).
--- Six mastery stages follow the Perfect chance; each stage unlocks its attacks (Stages.Unlocks).
+-- Six mastery stages follow the Perfect chance. A weapon's stage is the highest stage reached by
+-- any of its moves; each stage unlocks attacks for that weapon (Stages.Unlocks).
 local Practice = {
 	StartFail = 0.25,
 	MinFail = 0.05,
@@ -18,22 +19,21 @@ local Practice = {
 	PerfectDamage = 1.25,
 	PerfectImpact = 1.25,
 	FallSeconds = 1.1,
-	UpLevel = 5,
-	CircleLevel = 9,
 }
 
 -- Steps until the Perfect chance reaches its ceiling (also the cap of stored progress).
 Practice.MaxSteps = math.floor((Practice.MaxPerfect - Practice.StartPerfect) / Practice.PerfectStep + 1e-9)
 
--- Mastery stages by Perfect chance (the first one starts at 1 %). Unlocks: attack ids that a
--- stage makes available for this weapon; empty until the attacks are designed.
+-- Mastery stages by Perfect chance (the first one starts at 1 %). Unlocks: the attack families
+-- (or the parry counter) that a weapon gains when it reaches the stage. Left and Right are always
+-- available.
 Practice.Stages = table.freeze({
 	{ Name = "Ungeübt", Perfect = 0.01, Unlocks = table.freeze({}) :: { string } },
-	{ Name = "Geübt", Perfect = 0.15, Unlocks = table.freeze({}) :: { string } },
-	{ Name = "Erfahren", Perfect = 0.30, Unlocks = table.freeze({}) :: { string } },
-	{ Name = "Sicher", Perfect = 0.45, Unlocks = table.freeze({}) :: { string } },
-	{ Name = "Virtuos", Perfect = 0.60, Unlocks = table.freeze({}) :: { string } },
-	{ Name = "Meister", Perfect = 0.75, Unlocks = table.freeze({}) :: { string } },
+	{ Name = "Geübt", Perfect = 0.15, Unlocks = table.freeze({ "Up" }) :: { string } },
+	{ Name = "Erfahren", Perfect = 0.30, Unlocks = table.freeze({ "Down" }) :: { string } },
+	{ Name = "Sicher", Perfect = 0.45, Unlocks = table.freeze({ "Circle" }) :: { string } },
+	{ Name = "Virtuos", Perfect = 0.60, Unlocks = table.freeze({ "Counter" }) :: { string } },
+	{ Name = "Meister", Perfect = 0.75, Unlocks = table.freeze({ "Ultimate" }) :: { string } },
 })
 
 -- Saved progress is keyed by weapon AND move.
@@ -44,6 +44,11 @@ end
 -- Player attribute holding a key's steps (attribute names allow only letters, digits and _).
 function Practice.attribute(key: string): string
 	return "SpecialAttempts_" .. (key:gsub(":", "_"))
+end
+
+-- Prefix of the attributes of every move of one weapon.
+function Practice.attributePrefix(weaponId: string): string
+	return "SpecialAttempts_" .. weaponId .. "_"
 end
 
 -- Clamps saved progress to the valid step range.
@@ -71,6 +76,24 @@ function Practice.stage(steps: number): number
 	return index
 end
 
+-- Stage of a weapon: the highest stage reached by any of its moves (given their steps).
+function Practice.weaponStage(stepsOfMoves: { number }): number
+	local index = 1
+	for _, steps in stepsOfMoves do
+		index = math.max(index, Practice.stage(steps))
+	end
+	return index
+end
+
+-- Whether a weapon at this stage has the attack family (or "Counter") unlocked.
+function Practice.unlocked(stage: number, family: string): boolean
+	if family == "Left" or family == "Right" then return true end
+	for i = 1, math.min(stage, #Practice.Stages) do
+		if table.find(Practice.Stages[i].Unlocks, family) then return true end
+	end
+	return false
+end
+
 -- Outcome of one execution for a roll in [0, 1): Fail, Perfect or Normal.
 function Practice.outcome(failure: number, perfect: number, roll: number): string
 	if roll < failure then return "Fail" end
@@ -89,12 +112,15 @@ function Practice.label(player: Player, weaponId: string, moveId: string): strin
 	return Practice.describe(steps)
 end
 
--- Ultimate takes priority. Locked context variants fall back to the ordinary charge tier.
-function Practice.family(base: string, ultimate: boolean, airborne: boolean, blocking: boolean, level: number): string
-	if ultimate then return "Ultimate" end
-	if airborne and level >= Practice.UpLevel then return "Up" end
-	if blocking and level >= Practice.CircleLevel then return "Circle" end
-	return base
+-- The attack family for a charge at this weapon stage. Ultimate takes priority, then the air
+-- and block variants. A locked family falls back to the charge tier's own family, and a locked
+-- Down falls back to Left.
+function Practice.family(base: string, ultimate: boolean, airborne: boolean, blocking: boolean, stage: number): string
+	if ultimate and Practice.unlocked(stage, "Ultimate") then return "Ultimate" end
+	if airborne and Practice.unlocked(stage, "Up") then return "Up" end
+	if blocking and Practice.unlocked(stage, "Circle") then return "Circle" end
+	if Practice.unlocked(stage, base) then return base end
+	return "Left"
 end
 
 return table.freeze(Practice)

@@ -3,7 +3,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
-local Levels = require(Shared.GladiatorLevelDefinitions)
 local Charge = require(Shared.SpecialChargeDefinitions)
 local Practice = require(Shared.SpecialPracticeDefinitions)
 local Weapons = require(Shared.WeaponDefinitions)
@@ -19,8 +18,14 @@ function Preview.text(player: Player, seconds: number, momentum: number): string
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	local air = humanoid ~= nil and humanoid.FloorMaterial == Enum.Material.Air
 	local block = character ~= nil and (character:GetAttribute("Blocking") == true or character:GetAttribute("SpecialBlockHeld") == true)
-	local level = Levels.levelFor(tonumber(player:GetAttribute(Config.AuraAttribute)) or 0).Level
-	local family = Practice.family(tier.Family, ultimate, air, block, level)
+	local prefix = Practice.attributePrefix(weapon.Id)
+	local steps = {}
+	for name, value in player:GetAttributes() do
+		if typeof(name) == "string" and name:sub(1, #prefix) == prefix and type(value) == "number" then
+			table.insert(steps, value)
+		end
+	end
+	local family = Practice.family(tier.Family, ultimate, air, block, Practice.weaponStage(steps))
 	local id = Charge.specialFor(nil, weapon.Basic, family)
 	local move = id and (Moves :: any)[id]
 	if not move or not id then return "" end
