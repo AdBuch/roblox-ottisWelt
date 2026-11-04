@@ -36,3 +36,12 @@ Its editable Blender source, reference sheet, textures, FBXs and validation
 reports are in `art/schili`. It shares only the minimal server physics adapter
 with Kroko and uses its own `SkinnedSchiliAnimator` choreography.
 Build a preselected local test with `scripts/build-hero-test.ps1 -Hero Schili`.
+
+The updated boss color atlases are in `art/otti/textures`,
+`art/krokero/textures` and `art/schili/textures` and are packed into the
+matching Blender sources. The bake uses the existing mesh UVs. The existing
+FBX exports and Studio models still carry the previous texture references.
+To install the update, import the three new `*_BaseColor.png` files as Roblox
+image assets for the experience owner and assign their image IDs as the color
+maps of the matching boss `SurfaceAppearance` instances. Preserve the existing
+roughness and metalness maps and verify the result in Studio and in the experience.
