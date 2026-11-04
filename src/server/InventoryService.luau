@@ -69,7 +69,8 @@ export type Profile = {
 	equippedArmor: string,
 	preferences: { [string]: string },
 	stats: { [string]: number },
-	specialAttempts: { [string]: number },
+	specialAttempts: { [string]: number }, -- practice steps per weapon:move (SpecialPracticeDefinitions)
+	specialDaily: { [string]: { day: number, Training: number, Arena: number } }, -- today's gained points
 	resetToken: string?, -- the last controlled test-data reset applied (PlayerDataResetConfig)
 	earnings: Earnings,
 	session: Session,
@@ -114,6 +115,7 @@ local function newProfile(): Profile
 		preferences = {},
 		stats = {},
 		specialAttempts = {},
+		specialDaily = {},
 		earnings = { aura = 0, denarii = 0, since = os.time(), complete = true },
 		session = { aura = 0, denarii = 0, startedAt = os.time(), lastSeen = os.time() },
 		lastBattle = nil,
@@ -207,15 +209,26 @@ function InventoryService.migrateProfile(profile: Profile): Profile
 		stats[key] = if value and value == value then math.max(0, math.floor(value)) else 0
 	end
 	profile.stats = stats
+	-- Stored steps are kept as they are (version 6 counted attempts; each attempt is one step)
 	local attempts: { [string]: number } = {}
 	local savedAttempts: any = profile.specialAttempts
+	local daily: { [string]: { day: number, Training: number, Arena: number } } = {}
+	local savedDaily: any = profile.specialDaily
 	for key in practiceKeys do
 		local value = if typeof(savedAttempts) == "table" then tonumber(savedAttempts[key]) else nil
 		if value and value == value then
-			attempts[key] = math.clamp(math.floor(value), 0, SpecialPracticeDefinitions.MaxAttempts)
+			attempts[key] = SpecialPracticeDefinitions.clampSteps(value)
+		end
+		local entry: any = if typeof(savedDaily) == "table" then savedDaily[key] else nil
+		if typeof(entry) == "table" then
+			local day, training, arena = tonumber(entry.day), tonumber(entry.Training), tonumber(entry.Arena)
+			if day and training and arena then
+				daily[key] = { day = math.floor(day), Training = math.max(0, training), Arena = math.max(0, arena) }
+			end
 		end
 	end
 	profile.specialAttempts = attempts
+	profile.specialDaily = daily
 	if typeof(profile.resetToken) ~= "string" then
 		profile.resetToken = nil
 	end
@@ -667,16 +680,46 @@ function InventoryService.getPreference(player: Player, key: string): string?
 end
 
 -- Plain table for the DataStore (only JSON-safe values).
-function InventoryService.practiceSpecial(player: Player, weaponId: string, moveId: string): number
+-- Day number in UTC; the daily allowance resets when it changes.
+local function currentDay(): number
+	return math.floor(os.time() / 86400)
+end
+
+-- One execution of a special move. Returns the odds BEFORE this execution (Fail chance, Perfect
+-- chance; the caller rolls the outcome), then counts one step of progress while the place's
+-- daily allowance (`source`: "Training" or "Arena") lasts.
+function InventoryService.practiceSpecial(player: Player, weaponId: string, moveId: string, source: string): (number, number)
 	local key = SpecialPracticeDefinitions.key(weaponId, moveId)
 	assert(practiceKeys[key], "Unknown special practice key")
+	local allowance = SpecialPracticeDefinitions.DailyAllowance[source]
+	assert(allowance ~= nil, "Unknown practice source")
 	local profile = getProfile(player)
-	local previous = profile.specialAttempts[key] or 0
-	local attempts = math.min(SpecialPracticeDefinitions.MaxAttempts, previous + 1)
-	profile.specialAttempts[key] = attempts
-	player:SetAttribute(SpecialPracticeDefinitions.attribute(key), attempts)
-	if attempts ~= previous then changed(player) end
-	return SpecialPracticeDefinitions.failure(previous) -- roll with the odds BEFORE this attempt
+	local steps = SpecialPracticeDefinitions.clampSteps(profile.specialAttempts[key] or 0)
+	local failure = SpecialPracticeDefinitions.failure(steps)
+	local perfect = SpecialPracticeDefinitions.perfect(steps)
+	local today = currentDay()
+	local stored = profile.specialDaily[key]
+	local daily: { day: number, Training: number, Arena: number }
+	if stored and stored.day == today then
+		daily = stored
+	else
+		daily = { day = today, Training = 0, Arena = 0 }
+		profile.specialDaily[key] = daily
+	end
+	local step = SpecialPracticeDefinitions.PerfectStep
+	local used = if source == "Training" then daily.Training else daily.Arena
+	if steps < SpecialPracticeDefinitions.MaxSteps and used + step <= allowance + 1e-9 then
+		if source == "Training" then
+			daily.Training += step
+		else
+			daily.Arena += step
+		end
+		steps += 1
+		profile.specialAttempts[key] = steps
+		player:SetAttribute(SpecialPracticeDefinitions.attribute(key), steps)
+		changed(player)
+	end
+	return failure, perfect
 end
 
 function InventoryService.serialize(player: Player): { [string]: any }
@@ -694,6 +737,13 @@ function InventoryService.serialize(player: Player): { [string]: any }
 		preferences = table.clone(profile.preferences),
 		stats = table.clone(profile.stats),
 		specialAttempts = table.clone(profile.specialAttempts),
+		specialDaily = (function()
+			local copy = {}
+			for key, entry in profile.specialDaily do
+				copy[key] = table.clone(entry)
+			end
+			return copy
+		end)(),
 		resetToken = profile.resetToken,
 		earnings = table.clone(profile.earnings),
 		session = { aura = profile.session.aura, denarii = profile.session.denarii, startedAt = profile.session.startedAt, lastSeen = os.time() },

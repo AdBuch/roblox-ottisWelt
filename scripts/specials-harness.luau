@@ -10,7 +10,13 @@ check(Practice.family("Right", true, true, true, 9) == "Ultimate", "ultimate pre
 check(Practice.family("Right", false, true, true, 9) == "Up", "air precedence")
 local circleAura = Levels.Levels[Practice.CircleLevel].Aura
 check(Levels.levelFor(circleAura - 1).Level == Practice.CircleLevel - 1 and Levels.levelFor(circleAura).Level == Practice.CircleLevel, "block special level threshold is reachable")
-check(Practice.failure(0) == 0.5 and Practice.failure(50) == 0 and Practice.failure(500) == 0, "practice bounds")
+local function near(a: number, b: number): boolean return math.abs(a - b) < 1e-9 end
+check(Practice.MaxSteps == 296, "74 points of Perfect at 0.25 per step")
+check(near(Practice.failure(0), 0.25) and near(Practice.failure(134), 0.05) and near(Practice.failure(5000), 0.05), "fail: 25 % start, 5 % floor")
+check(near(Practice.perfect(0), 0.01) and near(Practice.perfect(296), 0.75) and near(Practice.perfect(5000), 0.75), "perfect: 1 % start, 75 % ceiling")
+check(Practice.stage(0) == 1 and Practice.stage(55) == 1 and Practice.stage(56) == 2, "stage 2 from 15 % Perfect")
+check(Practice.stage(296) == 6 and #Practice.Stages == 6, "six stages, Meister at 75 %")
+check(Practice.outcome(0.25, 0.01, 0.1) == "Fail" and Practice.outcome(0.25, 0.01, 0.255) == "Perfect" and Practice.outcome(0.25, 0.01, 0.9) == "Normal", "outcome bands")
 local attrs = {}
 -- Like Roblox: attribute names allow only letters, digits and _ (at most 100 characters)
 local player = { UserId = 42, SetAttribute = function(_, k, v)
@@ -20,25 +26,44 @@ end, GetAttribute = function(_, k) return attrs[k] end }
 local dirty = 0
 Inventory.onChanged(function() dirty += 1 end)
 Inventory.load(player, nil, 0, 0)
-check(Inventory.practiceSpecial(player, "RustyGladius", "RebellionCombo") == 0.5, "first roll uses 50 percent")
-check(Inventory.practiceSpecial(player, "RustyGladius", "RebellionCombo") == 0.49, "next roll improves")
+local key = Practice.key("RustyGladius", "RebellionCombo")
+local f, p = Inventory.practiceSpecial(player, "RustyGladius", "RebellionCombo", "Training")
+check(near(f, 0.25) and near(p, 0.01), "first execution uses the start odds")
+f, p = Inventory.practiceSpecial(player, "RustyGladius", "RebellionCombo", "Training")
+check(near(f, 0.2485) and near(p, 0.0125), "next execution already improved by one step")
 check(dirty == 2, "practice marks profile dirty")
-check(attrs[Practice.attribute(Practice.key("RustyGladius", "RebellionCombo"))] == 2, "attempts published under a valid attribute name")
-check(Practice.label(player :: any, "RustyGladius", "RebellionCombo") == "fail 48%", "label reads the published attempts")
+check(attrs[Practice.attribute(key)] == 2, "steps published under a valid attribute name")
+check(Practice.label(player :: any, "RustyGladius", "RebellionCombo") == "Ungeübt 1/6 · Fehl 24.7% · Perfekt 1.50%", "label shows stage, fail and perfect")
 local saved = Inventory.serialize(player)
 Inventory.forget(player)
 Inventory.load(player, saved, 0, 0)
-check(Inventory.practiceSpecial(player, "RustyGladius", "RebellionCombo") == 0.48, "practice survives save/load")
-check(Inventory.practiceSpecial(player, "LegionSword", "Legion_SpecCleave") == 0.5, "weapons train independently")
+f, p = Inventory.practiceSpecial(player, "RustyGladius", "RebellionCombo", "Training")
+check(near(f, 0.2470) and near(p, 0.015), "progress survives save/load")
+f, p = Inventory.practiceSpecial(player, "LegionSword", "Legion_SpecCleave", "Training")
+check(near(f, 0.25) and near(p, 0.01), "weapons train independently")
+-- Daily allowance: 5 points in the training yard = 20 steps a day, arena 15 points = 60 steps
+Inventory.forget(player)
+Inventory.load(player, nil, 0, 0)
+for _ = 1, 25 do Inventory.practiceSpecial(player, "RustyGladius", "RebellionCombo", "Training") end
+check(attrs[Practice.attribute(key)] == 20, "training stops at 5 points a day")
+for _ = 1, 25 do Inventory.practiceSpecial(player, "RustyGladius", "RebellionCombo", "Arena") end
+check(attrs[Practice.attribute(key)] == 45, "arena has its own 15 point allowance")
+local day = Inventory.serialize(player)
+day.specialDaily[key].day -= 1
+Inventory.forget(player)
+Inventory.load(player, day, 0, 0)
+Inventory.practiceSpecial(player, "RustyGladius", "RebellionCombo", "Training")
+check(attrs[Practice.attribute(key)] == 46, "the allowance resets on a new day")
 local malformed = table.clone(saved)
-malformed.specialAttempts = { [Practice.key("RustyGladius", "RebellionCombo")] = 9999, bogus = 12 }
+malformed.specialAttempts = { [key] = 9999, bogus = 12 }
 Inventory.load(player, malformed, 0, 0)
 local clean = Inventory.serialize(player).specialAttempts
-check(clean.bogus == nil and clean[Practice.key("RustyGladius", "RebellionCombo")] == 50, "migration caps and validates ids")
+check(clean.bogus == nil and clean[key] == 296, "migration caps and validates ids")
 malformed.specialAttempts = nil
 malformed.version = 6
 Inventory.load(player, malformed, 0, 0)
-check(Inventory.practiceSpecial(player, "RustyGladius", "RebellionCombo") == 0.5, "v6 migration grants no mastery")
+f, p = Inventory.practiceSpecial(player, "RustyGladius", "RebellionCombo", "Training")
+check(near(f, 0.25) and near(p, 0.01), "v6 migration grants no mastery")
 -- Studio test switch: everything owned, top level (Up and Circle unlocked)
 Inventory.forget(player)
 Inventory.load(player, nil, 0, 0)
