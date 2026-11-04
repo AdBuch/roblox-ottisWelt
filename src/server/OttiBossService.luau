@@ -37,6 +37,7 @@ local CompanionModel = require(script.Parent.CompanionModel)
 local HeroCombatDefinitions = require(ReplicatedStorage.Shared.HeroCombatDefinitions)
 local BossAttackService = require(script.Parent.BossAttackService)
 local CompanionBossDefinitions = require(ReplicatedStorage.Shared.CompanionBossDefinitions)
+local EquipmentModels = require(script.Parent.EquipmentModels)
 
 type Boss = OttiAnimationService.Boss
 type BossContext = OttiAnimationService.BossContext
@@ -44,6 +45,7 @@ type BossHit = OttiAnimationService.BossHit
 
 export type Handlers = {
 	hitPlayer: (player: Player, hit: BossHit) -> (number, boolean),
+	snarePlayer: ((player: Player, seconds: number) -> (() -> ()))?,
 	setControlLocked: (player: Player, locked: boolean) -> (),
 	grantImmunity: (player: Player, seconds: number) -> (),
 	knockdown: (player: Player, seconds: number) -> (),
@@ -125,6 +127,7 @@ local function makeContext(myToken: number): BossContext
 	local h = handlers :: Handlers
 	return {
 		hitPlayer = h.hitPlayer,
+		snarePlayer = h.snarePlayer,
 		setControlLocked = h.setControlLocked,
 		grantImmunity = h.grantImmunity,
 		knockdown = h.knockdown,
@@ -325,18 +328,25 @@ local function defeat(current: Boss)
 	local blade = current.rig.swordParts
 	local dropped = Instance.new("Model")
 	dropped.Name = "DroppedGladius"
+	local hasGripSkin=current.model:GetAttribute("HeroId")=="Otti" and current.model:GetAttribute("SkinnedRig")==true
 	for _, part in blade do
-		local copy = part:Clone()
-		for _, child in copy:GetChildren() do
-			if not child:IsA("SpecialMesh") and not child:IsA("SurfaceAppearance") then
-				child:Destroy()
+		if not hasGripSkin and part.Transparency<1 then
+			local copy = part:Clone()
+			for _, child in copy:GetChildren() do
+				if not child:IsA("SpecialMesh") and not child:IsA("SurfaceAppearance") then child:Destroy() end
 			end
+			copy.Anchored=true;copy.CanCollide=false;copy.CanQuery=false;copy.Parent=dropped
 		end
-		copy.Anchored = true
-		copy.CanCollide = false
-		copy.CanQuery = false
-		copy.Parent = dropped
 		part.Transparency = 1
+	end
+	if hasGripSkin then
+		-- Equipped meshes include the curled grip fingers; never drop that skin.
+		local weapon=EquipmentModels.buildWeapon(if current.model:GetAttribute("WeaponMode")=="Retiarius" then "Trident" else "RustyGladius")
+		weapon:ScaleTo(1.2)
+		for _,p in weapon:GetDescendants() do
+			if p:IsA("BasePart") then p.Anchored=true;p.CanCollide=false;p.CanQuery=false;p.CanTouch=false end
+		end
+		weapon.Parent=dropped
 	end
 	dropped.Parent = current.model
 	local front = current.root.Position + CombatUtil.flat(current.root.CFrame.LookVector) * 3.5

@@ -3,6 +3,16 @@ local Players = game:GetService("Players")
 local player = Players.LocalPlayer
 local controls = require(player:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule")):GetControls()
 controls:Disable()
+workspace:GetAttributeChangedSignal("HeroQAStage"):Connect(function()
+	if workspace:GetAttribute("HeroQAStage")=="NetPreview" then
+		local model=workspace:FindFirstChild(tostring(workspace:GetAttribute("HeroQANetBoss")),true)
+		if model and model:IsA("Model") and model.PrimaryPart then
+			local p=model.PrimaryPart.Position
+			workspace.CurrentCamera.CameraType=Enum.CameraType.Scriptable
+			workspace.CurrentCamera.CFrame=CFrame.lookAt(p+Vector3.new(14,8,-20),p+Vector3.new(0,0,-6))
+		end
+	end
+end)
 repeat task.wait(0.2) until workspace:GetAttribute("HeroQAStage") == "Lineup"
 local camera = workspace.CurrentCamera :: Camera
 local center = workspace:GetAttribute("HeroQACenter") :: Vector3

@@ -28,6 +28,8 @@ local CombatEffects = require(script.Parent.CombatEffects)
 local CombatUtil = require(script.Parent.CombatUtil)
 local OttiAnimationService = require(script.Parent.OttiAnimationService)
 local OttiTailService = require(script.Parent.OttiTailService)
+local BossNetService = require(script.Parent.BossNetService)
+local OttiEquipment = require(script.Parent.OttiEquipment)
 
 type Boss = OttiAnimationService.Boss
 type BossContext = OttiAnimationService.BossContext
@@ -424,10 +426,14 @@ function BossAttackService.execute(boss: Boss, ctx: BossContext, move: OttiMove,
 	boss.model:SetAttribute("Attack", move.Id)
 	boss.model:SetAttribute("AttackWindDuration", move.WindUp)
 	boss.model:SetAttribute("AttackActiveDuration", move.Active)
+	if not boss.companion then
+		OttiEquipment.select(boss.model,if move.Id=="TridentThrust" or move.Kind=="NetThrow" then "Retiarius" else "Gladius")
+	end
 
 	if move.Stance ~= "Any" and boss.stance ~= move.Stance then
 		OttiAnimationService.setStance(boss, move.Stance)
 	end
+	if not boss.companion and boss.stance=="Biped" then OttiAnimationService.setSwordDrawn(boss,true) end
 	if move.Warning and move.Kind ~= "Grapple" then
 		ctx.warn(move.Warning, move.WindUp + move.Active)
 	end
@@ -450,6 +456,8 @@ function BossAttackService.execute(boss: Boss, ctx: BossContext, move: OttiMove,
 			result.landed = executeDash(boss, ctx, move, target)
 		elseif move.Kind == "Roar" then
 			executeRoar(boss, ctx, move)
+		elseif move.Kind == "NetThrow" then
+			result.landed=BossNetService.execute(boss,ctx,move,target,losIgnore(boss))
 		end
 	end)
 	if not ok then
@@ -475,6 +483,10 @@ function BossAttackService.execute(boss: Boss, ctx: BossContext, move: OttiMove,
 	end
 	result.damaged = boss.model:GetAttribute("AttackDamaged") == true or result.damaged
 	boss.model:SetAttribute("Attack", "")
+	if move.Kind=="NetThrow" then
+		boss.model:SetAttribute("NetReleased",false)
+		OttiEquipment.refresh(boss.model)
+	end
 	boss.humanoid.AutoRotate = true
 	boss.attackId = nil
 	boss.busy = false

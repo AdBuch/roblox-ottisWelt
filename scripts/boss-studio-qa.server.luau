@@ -63,6 +63,7 @@ for index, id in { "Otti", "Kroko", "Schili" } do
 		stillValid = function() return enabled end,
 		fighters = function() return { player } end,
 		hitPlayer = Combat.applyBossHit,
+		snarePlayer = Combat.applyNetSnare,
 		warn = function() end, crowd = function() end,
 		setControlLocked = function() end, grantImmunity = function() end, knockdown = function() end,
 	}
@@ -117,6 +118,57 @@ for index, id in { "Otti", "Kroko", "Schili" } do
 		check(humanoid.Health < before, id .. " " .. role .. " damages stationary fighter")
 	end
 	rig.root.CFrame = home
+	if id=="Otti" then
+		local trident=table.clone(Moves.TridentThrust)
+		trident.Knockback=0
+		placeFighter(rig.root,9)
+		before=humanoid.Health
+		Attack.execute(boss,ctx,trident,player)
+		check(humanoid.Health<before,"Otti trident reaches beyond sword range")
+		check(rig.model.Otti_Trident.Transparency==0 and rig.model.Otti_Sword.Transparency==1 and rig.model.Otti_Shield.Transparency==1,"Otti equips exactly one weapon loadout")
+		local net=table.clone(Moves.NetCast)
+		local function cast()
+			boss.cooldowns[net.Id]=0;boss.interrupted=false
+			return Attack.execute(boss,ctx,net,player)
+		end
+		placeFighter(rig.root,12)
+		workspace:SetAttribute("HeroQANetBoss",rig.model.Name)
+		workspace:SetAttribute("HeroQAStage","NetPreview")
+		local freeSpeed=humanoid.WalkSpeed
+		before=humanoid.Health
+		cast()
+		check(humanoid.Health<before and rig.model:GetAttribute("NetVictim")==player.UserId,"Otti net catches the committed target")
+		check(humanoid.WalkSpeed<freeSpeed*.5,"Otti net limits movement temporarily")
+		check(rig.model.Otti_NetHeld.Transparency==0,"Otti readies the next net after recovery")
+		enabled=false;task.wait(.12)
+		check(humanoid.WalkSpeed==freeSpeed,"Otti cancelled encounter releases caught player")
+		enabled=true
+		Combat.applySlow(player,.7,3)
+		local otherSlow=humanoid.WalkSpeed
+		local release=Combat.applyNetSnare(player,2.4)
+		release()
+		check(humanoid.WalkSpeed==otherSlow,"Net release preserves an unrelated slow")
+		Combat.resetCombatState(player)
+		placeFighter(rig.root,12)
+		cast();task.wait(2.5)
+		check(humanoid.WalkSpeed==freeSpeed and character:GetAttribute("NetSnaredUntil")==nil,"Otti net expires without a permanent movement lock")
+		placeFighter(rig.root,12)
+		before=humanoid.Health
+		task.delay(.2,function() root.CFrame+=Vector3.new(8,0,0) end)
+		cast()
+		check(humanoid.Health==before,"Otti net can be dodged after its target commits")
+		placeFighter(rig.root,12)
+		local cover=Instance.new("Part");cover.Anchored=true;cover.Size=Vector3.new(10,15,.5);cover.CFrame=rig.root.CFrame*CFrame.new(0,2,-5);cover.Parent=workspace
+		before=humanoid.Health;cast()
+		check(humanoid.Health==before,"Otti cannot cast a net through solid cover")
+		cover:Destroy()
+		placeFighter(rig.root,12)
+		before=humanoid.Health;task.delay(.15,function() enabled=false end);cast()
+		check(humanoid.Health==before,"Interrupted net wind-up cannot catch or damage")
+		enabled=true
+		rig.root.CFrame=home
+		workspace:SetAttribute("HeroQAStage","Testing")
+	end
 	if id ~= "Otti" then
 		placeFighter(rig.root, 5)
 		for _, forced in { "Guard", "Retreat" } do

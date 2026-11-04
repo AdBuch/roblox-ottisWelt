@@ -13,7 +13,7 @@
 --   RiverDash  curved four-legged run; contact damage only during the active window
 --   Roar       battle cry: no damage, crowd reaction
 
-export type MoveKind = "Melee" | "TailSweep" | "TailSlam" | "Bite" | "Grapple" | "RiverDash" | "Roar"
+export type MoveKind = "Melee" | "TailSweep" | "TailSlam" | "Bite" | "Grapple" | "RiverDash" | "Roar" | "NetThrow"
 export type Stance = "Biped" | "Quad" | "Any"
 
 export type MoveStep = {
@@ -68,6 +68,18 @@ local function move(def: OttiMove): OttiMove
 end
 
 local Moves: { [string]: OttiMove } = {
+	TridentThrust = move({
+		Id="TridentThrust",Name="TRIDENT THRUST",Pose="Trident",Kind="Melee",Stance="Biped",
+		WindUp=.42,Active=.14,Recovery=.5,Cooldown=3.5,StartRange=10.5,
+		Damage=14,Range=10.5,ArcDot=.80,Knockback=8,Blockable=true,
+	}),
+	NetCast = move({
+		Id="NetCast",Name="CASTING NET",Kind="NetThrow",Stance="Biped",
+		WindUp=.9,Active=.55,Recovery=.65,Cooldown=12,MinRange=6,StartRange=23,
+		Damage=3,Range=23,Radius=2.8,ArcDot=.5,Knockback=0,Blockable=true,BlockStops=true,
+		Warning="NET! DODGE SIDEWAYS!",
+		FollowUp={Move="TridentThrust",Chance=.65,MinPhase=1,OnlyIfHit=true},
+	}),
 	GladiusSlash = move({
 		Id = "GladiusSlash", Name = "GLADIUS SLASH", Kind = "Melee", Stance = "Biped",
 		WindUp = 0.28, Active = 0.12, Recovery = 0.28, Cooldown = 2.2, StartRange = 7.5,

@@ -37,22 +37,32 @@
     },
     "Otti_Details": {
       "triangles": 8999,
-      "vertices": 4811,
+      "vertices": 4810,
       "max_influences": 4
     },
     "Otti_Shield": {
-      "triangles": 2320,
-      "vertices": 1200,
+      "triangles": 9372,
+      "vertices": 4768,
       "max_influences": 1
     },
     "Otti_Sword": {
-      "triangles": 772,
-      "vertices": 400,
+      "triangles": 7684,
+      "vertices": 3896,
       "max_influences": 1
     },
     "Otti_Sheathed": {
       "triangles": 1068,
       "vertices": 540,
+      "max_influences": 1
+    },
+    "Otti_Trident": {
+      "triangles": 9000,
+      "vertices": 4578,
+      "max_influences": 1
+    },
+    "Otti_NetHeld": {
+      "triangles": 9000,
+      "vertices": 4644,
       "max_influences": 1
     }
   },
@@ -155,6 +165,18 @@
     },
     "Otti_Draw": {
       "frames": 43,
+      "fps": 60
+    },
+    "Otti_TridentIdle": {
+      "frames": 121,
+      "fps": 60
+    },
+    "Otti_TridentThrust": {
+      "frames": 55,
+      "fps": 60
+    },
+    "Otti_NetThrow": {
+      "frames": 79,
       "fps": 60
     }
   }

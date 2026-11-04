@@ -32,7 +32,7 @@ local BossPhaseDefinitions: { BossPhase } = {
 		QuadChance = 0,
 		GuardChance = 0.7,
 		CounterEnabled = false,
-		MoveWeights = { GladiusSlash = 4, GladiatorCombination = 2, ShieldBash = 2, TailSweep = 1.5 },
+		MoveWeights = { GladiusSlash = 3, GladiatorCombination = 2, ShieldBash = 2, TailSweep = 1.5,TridentThrust=3,NetCast=2 },
 	}),
 	phase({
 		Index = 2,
@@ -47,7 +47,7 @@ local BossPhaseDefinitions: { BossPhase } = {
 		CounterEnabled = false,
 		MoveWeights = {
 			GladiusSlash = 2, GladiatorCombination = 2, ShieldBash = 1.5, TailSweep = 1.5, TailTrip = 2.5,
-			OtterBite = 2.5, GrappleThrow = 1.2, RiverDash = 2.5, TailSlam = 1,
+			OtterBite = 2.5, GrappleThrow = 1.2, RiverDash = 2.5, TailSlam = 1,TridentThrust=2.5,NetCast=2,
 		},
 	}),
 	phase({
@@ -63,7 +63,7 @@ local BossPhaseDefinitions: { BossPhase } = {
 		CounterEnabled = true,
 		MoveWeights = {
 			GladiusSlash = 2, GladiatorCombination = 2.5, ShieldBash = 1.8, TailSweep = 2, TailTrip = 2,
-			OtterBite = 2, GrappleThrow = 1, RiverDash = 2, TailSlam = 2.5, BattleCry = 0.4,
+			OtterBite = 2, GrappleThrow = 1, RiverDash = 2, TailSlam = 2.5, BattleCry = 0.4,TridentThrust=3,NetCast=2.5,
 		},
 	}),
 }

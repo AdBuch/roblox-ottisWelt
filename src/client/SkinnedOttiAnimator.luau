@@ -4,11 +4,12 @@ local RS=game:GetService("ReplicatedStorage")
 local Workspace=game:GetService("Workspace")
 local source=require(RS.Shared.OttiMotion)
 local Player=require(script.Parent.BakedBoneClips)
+local NetEffects=require(script.Parent.OttiNetEffects)
 local clips=Player.decode(source)
 local states: {[Model]: any}=setmetatable({}, {__mode="k"}) :: any
 local Animator={}
 local attacks={SlashH="Slash",SlashH2="Backslash",Thrust="Thrust",Slash="Slash",Bash="Bash",
-	Sweep="Sweep",Trip="Trip",Counter="Sweep",Slam="Slam",Bite="Bite",Grab="Grapple"}
+	Sweep="Sweep",Trip="Trip",Counter="Sweep",Slam="Slam",Bite="Bite",Grab="Grapple",Trident="TridentThrust",Net="NetThrow"}
 local function duration(name: string): number return clips["Otti_"..name].duration end
 local function attackEdges(name: string): (number, number)
 	if name=="Sweep" or name=="Trip" then return .48,.7 end
@@ -35,9 +36,13 @@ function Animator.update(model: Model,dt: number)
 	local elapsed=math.max(0,now-(tonumber(model:GetAttribute("PoseStart")) or now))
 	local speed=Vector3.new(root.AssemblyLinearVelocity.X,0,root.AssemblyLinearVelocity.Z).Magnitude
 	local quad=model:GetAttribute("Stance")=="Quad"
+	local retiarius=model:GetAttribute("WeaponMode")=="Retiarius"
 	state.phase+=dt*math.clamp(speed/(if quad then 24 else 9),.2,2)
 	local name=if quad then (if speed>18 then "QuadRun" elseif speed>1 then "QuadWalk" else "QuadIdle") else (if speed>1 then "BipedWalk" else "BipedIdle")
 	local t=if speed>1 then state.phase%duration(name) else now%duration(name)
+	local walking=not quad and speed>1
+	local walkGoals=if walking and retiarius then Player.sample(clips.Otti_BipedWalk,state.phase%duration("BipedWalk")) else nil
+	if not quad and retiarius then name="TridentIdle";t=now%duration(name) end
 	local wind=math.max(.01,tonumber(model:GetAttribute("AttackWindDuration")) or .3)
 	local active=math.max(.01,tonumber(model:GetAttribute("AttackActiveDuration")) or .12)
 	local recovery=math.max(.01,tonumber(model:GetAttribute("AttackRecoveryDuration")) or .6)
@@ -50,7 +55,9 @@ function Animator.update(model: Model,dt: number)
 			break
 		end
 	end
-	if pose=="SweepExtend" or pose=="TripSweep" or pose=="SlamRaise" or pose=="BiteLunge" then
+	if pose=="NetRelease" then
+		name="NetThrow";state.lastStrike=name;owns=true;t=duration(name)*(.4+.16*math.clamp(elapsed/.14,0,1))
+	elseif pose=="SweepExtend" or pose=="TripSweep" or pose=="SlamRaise" or pose=="BiteLunge" then
 		name=if pose=="TripSweep" then "Trip" elseif pose=="SlamRaise" then "Slam" elseif pose=="BiteLunge" then "Bite" else "Sweep"
 		state.lastStrike=name;owns=true
 		local a,b=attackEdges(name)
@@ -73,14 +80,14 @@ function Animator.update(model: Model,dt: number)
 	elseif pose=="Surrender" or loco=="DEFEATED" then name="Surrender";t=math.min(elapsed,duration(name))
 	elseif pose=="Leap" or pose=="ClimbRail" then name="Leap";t=math.min(elapsed,duration(name))
 	elseif pose=="Land" then name="Land";t=math.min(elapsed,duration(name))
-	elseif pose=="DrawSword" then name="Draw";t=math.min(elapsed,duration(name))
+	elseif pose=="DrawSword" then name=if retiarius then "TridentIdle" else "Draw";t=math.min(elapsed,duration(name))
 	elseif pose=="StandUp" or loco=="RISE_TO_BIPED" then name="Rise";t=math.min(if pose=="StandUp" then elapsed else now-state.locoStart,.5)
 	elseif loco=="DROP_TO_QUADRUPED" then name="Rise";t=.5*(1-math.clamp((now-state.locoStart)/.4,0,1))
 	elseif loco=="STAGGER" or loco=="KNOCKDOWN" then name="Stagger";t=math.min(now-state.locoStart,duration(name))
 	elseif loco=="SITTING" or model:GetAttribute("OttiState")=="OTTI_SPECTATING" then
 		name=if pose=="Clap" or pose=="PawRaise" or pose=="Surprised" then "Celebrate" else "Sit"
 		t=now%duration(name)
-	elseif model:GetAttribute("Guard")==true and pose=="" then name="Guard";t=duration(name)*.5
+	elseif model:GetAttribute("Guard")==true and pose=="" then name=if retiarius then "TridentIdle" else "Guard";t=duration(name)*.5
 	end
 	local goals=Player.sample(clips["Otti_"..name],t)
 	local yaw=math.atan2(-root.CFrame.LookVector.X,-root.CFrame.LookVector.Z)
@@ -91,6 +98,7 @@ function Animator.update(model: Model,dt: number)
 		local bone=state.bones[boneName]
 		if bone then
 			local goal=goals[i]
+			if walkGoals and name=="TridentIdle" and (boneName=="Pelvis" or boneName:match("^Thigh%.") or boneName:match("^Shin%.") or boneName:match("^Foot%.")) then goal=walkGoals[i] end
 			-- The imported paw padding sits 0.22 studs above the authored contact plane.
 			-- Translate the skeleton, keeping the server's collision capsule unchanged.
 			if boneName=="Root" then
@@ -111,5 +119,6 @@ function Animator.update(model: Model,dt: number)
 			state.current[i]=current;bone.Transform=current
 		end
 	end
+	NetEffects.update(model)
 end
 return Animator

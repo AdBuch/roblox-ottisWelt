@@ -111,6 +111,7 @@ PlayerCombatService.init()
 WaveService.init(arena)
 OttiBossService.init(arena, {
 	hitPlayer = PlayerCombatService.applyBossHit,
+	snarePlayer = PlayerCombatService.applyNetSnare,
 	setControlLocked = PlayerCombatService.setControlLocked,
 	grantImmunity = PlayerCombatService.grantImmunity,
 	knockdown = PlayerCombatService.knockdown,

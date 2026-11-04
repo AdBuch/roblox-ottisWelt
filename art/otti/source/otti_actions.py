@@ -120,7 +120,31 @@ def build_actions(arm,scene):
         biped(0);a=math.sin(t*math.pi);pose('UpperArm.R',(-20*a,0,-20*a));pose('Forearm.R',(-80*a,0,0));pose('Chest',(0,0,-12*a))
     def roar(t):
         biped(t);a=math.sin(t*math.pi);pose('Chest',(-12*a,0,0));pose('Head',(-18*a,0,0));pose('Jaw',(18*a,0,0));pose('UpperArm.R',(-30*a,0,-15*a))
+    def align_trident(direction):
+        bpy.context.view_layer.update();pb=arm.pose.bones['Hand.R']
+        start=pb.head.copy();rest=arm.data.bones['Hand.R'].matrix_local.to_quaternion()
+        q=Vector((0,-.93,.37)).normalized().rotation_difference(Vector(direction).normalized())@rest
+        pb.matrix=Matrix.Translation(start)@q.to_matrix().to_4x4();bpy.context.view_layer.update()
+    def trident_idle(t):
+        biped(t);a=math.sin(t*math.tau)
+        ik('UpperArm.R','Forearm.R','Hand.R',(-.69,-.26,1.17+a*.012),(-.9,.08,1.25))
+        align_trident((0,-.85,.52))
+        pose('UpperArm.L',(-18,0,5));pose('Forearm.L',(-25,0,0))
+    def trident_thrust(t):
+        trident_idle(0)
+        reach,lean,twist=keys(t,[(0,0,0,0),(.4,-.12,-5,-12),(.56,1,11,14),(.72,.8,6,8),(1,0,0,0)])
+        pose('Lumbar',(lean*.4,0,twist*.3));pose('Spine',(lean*.35,0,twist*.4));pose('Chest',(lean*.25,0,twist*.3));pose('Head',(-lean*.5,0,-twist*.7))
+        ik('UpperArm.R','Forearm.R','Hand.R',(-.69+.22*reach,-.26-.39*reach,1.17+.29*reach),(-.95,.05,1.28))
+        align_trident((0,-1,.52-.5*reach));tail(t,1.2)
+    def net_throw(t):
+        trident_idle(0)
+        lift,reach,twist=keys(t,[(0,0,0,0),(.4,1,-.25,22),(.56,.7,1,-18),(.75,.2,.65,-8),(1,0,0,0)])
+        pose('Spine',(0,0,twist*.6));pose('Chest',(0,0,twist*.4));pose('Head',(0,0,-twist*.7))
+        ik('UpperArm.L','Forearm.L','Hand.L',(.67-.12*reach,-.22-.43*reach,1.15+.48*lift),(.95,.1,1.4))
+        # Relax the wrist toward the release, without turning the spear hand inside out.
+        align_trident((-.12,-.86,.5));tail(t,1.1)
     specs=[('BipedIdle',121,biped),('BipedWalk',49,walk),('QuadIdle',91,lambda t:quad(t)),('QuadWalk',61,lambda t:quad(t,False,True)),('QuadRun',37,lambda t:quad(t,True,True)),('Rise',31,rise),('Slash',43,slash),('Backslash',43,lambda t:slash(t,True)),('Thrust',43,lambda t:slash(t,False,True)),('Bash',49,bash),('Sweep',67,sweep),('Trip',61,lambda t:sweep(t,True)),('Slam',73,slam),('Bite',55,bite),('Grapple',73,grapple),('Guard',31,guard),('Stagger',49,stagger),('Sit',121,sit),('Celebrate',91,celebrate),('Leap',61,leap),('Land',37,land),('Surrender',85,surrender),('Roar',79,roar),('Feint',31,feint),('Draw',43,draw)]
+    specs += [('TridentIdle',121,trident_idle),('TridentThrust',55,trident_thrust),('NetThrow',79,net_throw)]
     for name,length,sampler in specs:
         clear();arm.animation_data_create();arm.animation_data.action=None
         act=bpy.data.actions.new('Otti_'+name);act.use_fake_user=True;arm.animation_data.action=act

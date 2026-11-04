@@ -18,6 +18,7 @@ local Workspace = game:GetService("Workspace")
 local OttiBossConfig = require(ReplicatedStorage.Shared.OttiBossConfig)
 local CombatUtil = require(script.Parent.CombatUtil)
 local OttiModel = require(script.Parent.OttiModel)
+local OttiEquipment = require(script.Parent.OttiEquipment)
 
 export type Stance = "Biped" | "Quad"
 
@@ -51,6 +52,7 @@ export type BossHit = {
 -- Everything the boss modules may do to players, injected by OttiBossService (no require cycles).
 export type BossContext = {
 	hitPlayer: (player: Player, hit: BossHit) -> (number, boolean),
+	snarePlayer: ((player: Player, seconds: number) -> (() -> ()))?,
 	fighters: () -> { Player }, -- living arena fighters Otti may target
 	setControlLocked: (player: Player, locked: boolean) -> (),
 	grantImmunity: (player: Player, seconds: number) -> (),
@@ -197,6 +199,10 @@ end
 
 function OttiAnimationService.setSwordDrawn(boss: Boss, drawn: boolean)
 	boss.model:SetAttribute("SwordDrawn", drawn)
+	if boss.model:GetAttribute("HeroId")=="Otti" and boss.model:GetAttribute("SkinnedRig") then
+		OttiEquipment.refresh(boss.model)
+		return
+	end
 	for _, part in boss.rig.swordParts do
 		part.Transparency = if drawn then 0 else 1
 	end

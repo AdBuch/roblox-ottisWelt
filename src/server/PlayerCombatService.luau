@@ -117,6 +117,8 @@ type PlayerState = {
 	trail: Trail?, -- weapon trail during strikes
 	slowFactor: number,
 	slowToken: number,
+	netFactor: number,
+	netToken: number,
 	actionToken: number, -- changes on death/state reset: running moves stop
 	actionBucket: number,
 	blockBucket: number,
@@ -172,6 +174,8 @@ local function getState(player: Player): PlayerState
 			trail = nil,
 			slowFactor = 1,
 			slowToken = 0,
+			netFactor = 1,
+			netToken = 0,
 			actionToken = 0,
 			actionBucket = CombatConfig.ActionRateLimit,
 			blockBucket = CombatConfig.BlockRateLimit,
@@ -256,7 +260,7 @@ local function updateWalkSpeed(player: Player)
 	end
 	local speed = CombatConfig.PlayerWalkSpeed * factor
 	speed *= 1 - math.clamp(InventoryService.getEquippedArmor(player).MovePenalty, 0, 0.5) -- heavier armor, slower steps
-	humanoid.WalkSpeed = if state.controlLocked then 0 else speed * state.slowFactor * state.balanceFactor
+	humanoid.WalkSpeed = if state.controlLocked then 0 else speed * math.min(state.slowFactor,state.netFactor) * state.balanceFactor
 	humanoid.JumpPower = if state.controlLocked then 0 else 50
 	humanoid.UseJumpPower = true
 end
@@ -1090,6 +1094,26 @@ function PlayerCombatService.applySlow(player: Player, factor: number, seconds: 
 	end)
 end
 
+-- Independently cancellable net effect; releasing a net preserves other slows.
+function PlayerCombatService.applyNetSnare(player: Player, seconds: number): () -> ()
+	local state=getState(player)
+	state.netToken+=1
+	local token=state.netToken
+	local character=player.Character
+	state.netFactor=.35
+	if character then character:SetAttribute("NetSnaredUntil",Workspace:GetServerTimeNow()+seconds) end
+	updateWalkSpeed(player)
+	Remotes.CombatFeedback:FireClient(player,CombatConfig.Feedback.Slowed,seconds)
+	local function release()
+		if state.netToken~=token then return end
+		state.netToken+=1;state.netFactor=1
+		if character then character:SetAttribute("NetSnaredUntil",nil) end
+		updateWalkSpeed(player)
+	end
+	task.delay(seconds,release)
+	return release
+end
+
 function PlayerCombatService.setSpawnProtection(player: Player, seconds: number)
 	getState(player).spawnProtectedUntil = os.clock() + seconds
 	local character = player.Character
@@ -1110,6 +1134,9 @@ function PlayerCombatService.resetCombatState(player: Player)
 	cancelCharge(player, nil)
 	state.controlLocked = false
 	state.slowFactor = 1
+	state.netFactor = 1
+	state.netToken += 1
+	if player.Character then player.Character:SetAttribute("NetSnaredUntil",nil) end
 	state.balanceFactor = 1
 	state.balanceToken += 1
 	state.slowToken += 1
@@ -1496,6 +1523,9 @@ local function onCharacterAdded(player: Player, character: Model)
 	state.chargeStart = 0
 	state.chargeToken += 1
 	state.slowFactor = 1
+	state.netFactor = 1
+	state.netToken += 1
+	character:SetAttribute("NetSnaredUntil",nil)
 	state.balanceFactor = 1
 	state.balanceToken += 1
 	state.slowToken += 1

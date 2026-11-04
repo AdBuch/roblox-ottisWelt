@@ -28,7 +28,7 @@ cloth=material('Otti oxblood cloth','943c36',0,.9)
 wood=material('Warm wooden gladius','986a43',0,.65)
 wood_light=material('Wooden blade bevel','c09262',0,.65)
 cord_dark=material('Braided dark necklace','3c3028',0,.7)
-body_sources=[];gear=[];shield_parts=[];sword_parts=[];sheathed_parts=[];rigid_bind={}
+body_sources=[];gear=[];shield_parts=[];sword_parts=[];sheathed_parts=[];trident_parts=[];net_parts=[];rigid_bind={}
 
 # Long-waisted mustelid silhouette: compact legs, broad webbed paws, rounded short muzzle.
 ellipsoid('Otter hips',(0,.03,.92),(.32,.27,.30),skin,body_sources)
@@ -36,8 +36,8 @@ ellipsoid('Supple lower torso',(0,.025,1.20),(.305,.26,.40),skin,body_sources)
 ellipsoid('Narrow flexible ribcage',(0,.0,1.52),(.36,.27,.35),skin,body_sources)
 ellipsoid('Soft shoulders',(0,0,1.67),(.43,.245,.21),skin,body_sources)
 segment('Otter neck',(0,0,1.72),(0,-.03,2.05),.20,skin,body_sources)
-ellipsoid('Rounded otter head',(0,-.04,2.18),(.385,.305,.335),skin,body_sources,segments=28,rings=18)
-ellipsoid('Broad short otter muzzle',(0,-.27,2.09),(.29,.21,.17),skin,body_sources,segments=24)
+ellipsoid('Low broad otter head',(0,-.045,2.15),(.405,.32,.275),skin,body_sources,segments=28,rings=18)
+ellipsoid('Projecting broad otter muzzle',(0,-.32,2.065),(.33,.235,.16),skin,body_sources,segments=24)
 for sign,side in ((1,'L'),(-1,'R')):
     a=(sign*.39,0,1.66);b=(sign*.60,-.005,1.35);c=(sign*.73,-.10,1.06)
     segment('Upper forelimb '+side,a,b,.143,skin,body_sources)
@@ -74,19 +74,19 @@ for loop in body.data.loops:
 vc=skin.node_tree.nodes.new('ShaderNodeVertexColor');vc.layer_name='SkinPaint';skin.node_tree.links.new(vc.outputs[0],skin.node_tree.nodes.get('Principled BSDF').inputs['Base Color'])
 
 # Otter identity: little round ears, full cream whisker pads, broad dark nose, expressive eyes.
-ellipsoid('Cream lower muzzle',(0,-.29,1.995),(.25,.18,.095),cream,gear,'Jaw',segments=24)
+ellipsoid('Cream lower muzzle',(0,-.355,1.985),(.29,.20,.095),cream,gear,'Jaw',segments=24)
 for sign,side in ((1,'L'),(-1,'R')):
-    ellipsoid('Rounded ear '+side,(sign*.32,.005,2.405),(.112,.073,.125),skin,gear,'Head')
-    ellipsoid('Velvet ear inset '+side,(sign*.32,-.055,2.405),(.067,.023,.078),inner,gear,'Head')
-    ellipsoid('Full otter whisker pad '+side,(sign*.12,-.365,2.075),(.16,.13,.105),cream,gear,'Head',segments=24)
-    ellipsoid('Gentle eye rim '+side,(sign*.185,-.277,2.25),(.115,.065,.135),inner,gear,'Head')
-    ellipsoid('Expressive dark eye '+side,(sign*.185,-.327,2.258),(.089,.038,.108),iris,gear,'Head',segments=24)
-    ellipsoid('Eye catchlight '+side,(sign*.185-.025,-.362,2.30),(.023,.012,.026),white,gear,'Head',segments=12,rings=8)
-    curve('Soft brow '+side,[(sign*.09,-.29,2.38),(sign*.19,-.30,2.405+(0.018 if side=='R' else 0)),(sign*.28,-.24,2.375)],.023,dark,gear,'Head')
+    ellipsoid('Small low otter ear '+side,(sign*.355,.025,2.335),(.077,.052,.078),skin,gear,'Head')
+    ellipsoid('Velvet ear inset '+side,(sign*.355,-.018,2.335),(.045,.015,.045),inner,gear,'Head')
+    ellipsoid('Full otter whisker pad '+side,(sign*.13,-.415,2.055),(.198,.145,.115),cream,gear,'Head',segments=24)
+    ellipsoid('Gentle eye rim '+side,(sign*.195,-.291,2.235),(.105,.063,.105),inner,gear,'Head')
+    ellipsoid('Expressive dark eye '+side,(sign*.195,-.340,2.242),(.080,.038,.082),iris,gear,'Head',segments=24)
+    ellipsoid('Eye catchlight '+side,(sign*.195-.025,-.375,2.270),(.021,.012,.023),white,gear,'Head',segments=12,rings=8)
+    curve('Clever otter brow '+side,[(sign*.10,-.315,2.325),(sign*.20,-.315,2.345+(0.012 if side=='R' else 0)),(sign*.28,-.255,2.315)],.016,dark,gear,'Head')
     for i in range(3):
-        curve('Otter whisker '+side,[(sign*.15,-.475,2.07-i*.015),(sign*.31,-.47,2.08+(i-1)*.04),(sign*(.48-i*.02),-.40,2.08+(i-1)*.065)],.0055,white,gear,'Head')
-    curve('Playful otter smile '+side,[(0,-.457,2.01),(sign*.12,-.462,2.005),(sign*.21,-.397,2.025)],.006,dark,gear,'Jaw')
-ellipsoid('Broad rounded dark otter nose',(0,-.468,2.15),(.143,.077,.088),dark,gear,'Head',segments=24)
+        curve('Otter whisker '+side,[(sign*.17,-.545,2.055-i*.015),(sign*.34,-.52,2.06+(i-1)*.04),(sign*(.52-i*.02),-.43,2.06+(i-1)*.065)],.0055,white,gear,'Head')
+    curve('Playful otter smile '+side,[(0,-.542,1.995),(sign*.13,-.535,1.99),(sign*.25,-.455,2.025)],.006,dark,gear,'Jaw')
+ellipsoid('Broad rounded dark otter nose',(0,-.538,2.12),(.15,.072,.073),dark,gear,'Head',segments=24)
 
 # Light Roman equipment allows visible waist and shoulder movement.
 curve('Narrow leather harness',[(-.32,-.16,1.72),(-.18,-.253,1.58),(0,-.284,1.38),(.23,-.20,1.12)],.033,leather,gear,None)
@@ -141,6 +141,43 @@ segment('Leather scabbard',(.33,.02,1.02),(.38,.04,.47),.065,leather,sheathed_pa
 cylinder('Sheathed sword hilt',(.33,.02,1.10),.04,.17,leather,sheathed_parts,'Pelvis',vertices=16)
 ellipsoid('Sheathed bronze guard',(.33,.02,1.025),(.13,.045,.026),bronze,sheathed_parts,'Pelvis')
 
+# Retiarius loadout: shaft passes through the palm; curled fingers and opposing thumb
+# share the hand bone with the weapon. Rounded wooden tines suit the training arena.
+grip=Vector((-.75,-.15,1.005));direction=Vector((0,-.93,.37)).normalized()
+cross=Vector((1,0,0));up=cross.cross(direction).normalized()
+cylinder('Trident wooden shaft',grip+direction*.36,.032,2.18,wood,trident_parts,'Hand.R',axis=direction,vertices=16)
+cylinder('Trident leather hand wrap',grip,.040,.24,leather,trident_parts,'Hand.R',axis=direction,vertices=16)
+for i in range(7):
+    pos=grip+direction*((i-3)*.034)
+    cylinder('Trident grip binding',pos,.043,.009,wood_light,trident_parts,'Hand.R',axis=direction,vertices=12)
+head=grip+direction*1.45
+segment('Bronze trident crossbar',head-cross*.24,head+cross*.24,.035,bronze,trident_parts,'Hand.R')
+for x in (-.23,0,.23):
+    start=head+cross*x
+    end=start+direction*(.40 if x==0 else .33)
+    segment('Rounded wooden trident tine',start,end,.034,wood_light,trident_parts,'Hand.R')
+    ellipsoid('Safe rounded tine tip',end,(.036,.036,.036),wood_light,trident_parts,'Hand.R',segments=12,rings=8)
+    cylinder('Tine bronze collar',start+direction*.05,.041,.09,bronze,trident_parts,'Hand.R',axis=direction,vertices=12)
+def gripping_fingers(centre,axis,group,side):
+    across=Vector((1,0,0));normal=across.cross(axis).normalized()
+    for j in range(4):
+        c=centre+axis*((j-1.5)*.048)
+        path=[c+across*(.059*math.cos(a))+normal*(.059*math.sin(a)) for a in [math.radians(25+k*22) for k in range(14)]]
+        curve('Curled grip digit '+side,path,.022,skin,group,'Hand.'+side)
+    curve('Opposing thumb '+side,[centre+across*.11+axis*.055,centre+across*.065-normal*.065,centre-normal*.063-axis*.045],.038,skin,group,'Hand.'+side)
+gripping_fingers(grip,direction,trident_parts,'R')
+gripping_fingers(Vector((-.75,-.15,1.04)),Vector((0,0,1)),sword_parts,'R')
+gripping_fingers(Vector((.75,-.17,1.005)),Vector((1,0,0)),shield_parts,'L')
+cylinder('Shield interior leather hand grip',(.75,-.17,1.005),.038,.24,leather,shield_parts,'Hand.L',axis=(1,0,0),vertices=12)
+netgrip=Vector((.75,-.17,1.005));netaxis=Vector((0,0,1))
+curve('Net leather carrying loop',[netgrip+Vector((.065*math.cos(i*math.tau/24),.065*math.sin(i*math.tau/24),0)) for i in range(25)],.014,leather,net_parts,'Hand.L')
+for i in range(8):
+    x=(i-3.5)*.025
+    curve('Folded casting net rope',[(.75+x,-.17,1.01),(.75+x*1.4,-.15,.77),(.75-x*.8,-.16,.62),(.75-x,-.19,.77),(.75+x,-.17,1.01)],.008,cream,net_parts,'Hand.L')
+    if i%2==0:ellipsoid('Net rim weight',(.75+x,-.16,.62),(.025,.025,.035),bronze,net_parts,'Hand.L',segments=12,rings=8)
+for z in (.70,.79,.88):curve('Folded net cross cord',[(.64,-.17,z),(.75,-.20,z-.025),(.86,-.17,z)],.008,cream,net_parts,'Hand.L')
+gripping_fingers(netgrip,netaxis,net_parts,'L')
+
 # Flexible otter rig: four body joints, neck/head/jaw, full limbs, six tail joints.
 bpy.ops.object.select_all(action='DESELECT');bpy.ops.object.armature_add(enter_editmode=True)
 arm=bpy.context.object;arm.name='Otti_Rig';eb=arm.data.edit_bones;eb.remove(eb[0]);spec={}
@@ -179,13 +216,14 @@ for v in body.data.vertices:body_tree.insert(v.co,v.index)
 body_tree.balance()
 # Reuse only the skin-weight helper, with this otter's own skeleton and connected skin.
 exec(helper[helper.index('def dist_segment'):helper.index('# Blender\'s bone-heat')])
-for obj in gear+shield_parts+sword_parts+sheathed_parts:
+for obj in gear+shield_parts+sword_parts+sheathed_parts+trident_parts+net_parts:
     if skin in obj.data.materials[:]:
         color=obj.data.color_attributes.new(name='SkinPaint',type='FLOAT_COLOR',domain='CORNER')
         for value in color.data:value.color=(*rgb('70452f'),1)
     skin_object(obj,rigid_bind.get(obj.name))
 details=join(gear,'Otti_Details');shield_obj=join(shield_parts,'Otti_Shield');sword_obj=join(sword_parts,'Otti_Sword');sheathed_obj=join(sheathed_parts,'Otti_Sheathed')
-assets=[body,details,shield_obj,sword_obj,sheathed_obj]
+trident_obj=join(trident_parts,'Otti_Trident');net_obj=join(net_parts,'Otti_NetHeld')
+assets=[body,details,shield_obj,sword_obj,sheathed_obj,trident_obj,net_obj]
 for obj in assets:
     obj.parent=arm;mods=[m for m in obj.modifiers if m.type=='ARMATURE']
     for mod in mods[1:]:obj.modifiers.remove(mod)
@@ -214,7 +252,7 @@ bpy.ops.export_scene.fbx(filepath=str(ROOT/'exports/Otti_Animations.fbx'),bake_a
 report={'character':'Otti / otter gladiator','fps':60,'bones':list(spec),'meshes':{},'animations':{name:{'frames':length,'fps':60} for name,(act,length) in actions.items()}}
 for obj in assets:
     obj.data.calc_loop_triangles();report['meshes'][obj.name]={'triangles':len(obj.data.loop_triangles),'vertices':len(obj.data.vertices),'max_influences':max(len(v.groups) for v in obj.data.vertices)}
-arm.animation_data.action=actions['Otti_BipedIdle'][0];scene.frame_set(1)
+arm.animation_data.action=actions['Otti_TridentIdle'][0];scene.frame_set(1)
 floor_mat=material('Warm neutral backdrop','b8a78b',0,.8)
 bpy.ops.mesh.primitive_plane_add(size=200,location=(0,0,-.01));floor=bpy.context.object;floor.name='PREVIEW_ONLY_floor';floor.data.materials.append(floor_mat)
 for name,pos,power,size,color in [('key',(-4,-5,6),650,4,(1,.86,.69)),('fill',(4,-1,4),400,4,(.76,.89,1)),('rim',(0,4,5),700,3,(1,.89,.69))]:
@@ -225,12 +263,15 @@ def camera_at(pos,target=(0,.35,1.15)):
     camera.location=pos;camera.rotation_euler=(Vector(target)-camera.location).to_track_quat('-Z','Y').to_euler()
 camera_at((-4,-6,3));scene.render.filepath=str(ROOT/'previews/Otti_hero.png')
 (ROOT/'validation.json').write_text(json.dumps(report,indent=2));bpy.ops.wm.save_as_mainfile(filepath=str(ROOT/'Otti.blend'))
-for name,pos,clip,frame in [('hero',(-4,-6,3),'BipedIdle',1),('back',(4,6,3),'BipedIdle',1),('quad',(-4,-6,3),'QuadIdle',1),('bound',(-4,-6,3),'QuadRun',10),('slash',(-4,-6,3),'Slash',26),('guard',(-4,-6,3),'Guard',31)]:
+for name,pos,clip,frame in [('hero',(-4,-6,3),'TridentIdle',1),('back',(4,6,3),'TridentIdle',1),('quad',(-4,-6,3),'QuadIdle',1),('bound',(-4,-6,3),'QuadRun',10),('slash',(-4,-6,3),'Slash',26),('guard',(-4,-6,3),'Guard',31),('trident',(-4,-6,3),'TridentThrust',30),('net',(-4,-6,3),'NetThrow',28),('grip',(-4,-6,3),'TridentIdle',1)]:
     camera_at(pos);arm.animation_data.action=actions['Otti_'+clip][0];scene.frame_set(frame)
-    sword_obj.hide_render=sheathed_obj.hide_render=False
+    is_trident=clip.startswith('Trident') or clip=='NetThrow'
+    trident_obj.hide_render=net_obj.hide_render=not is_trident
+    shield_obj.hide_render=is_trident
+    sword_obj.hide_render=sheathed_obj.hide_render=is_trident
     if clip.startswith('Quad'):sword_obj.hide_render=True
-    else:sheathed_obj.hide_render=True
+    elif not is_trident:sheathed_obj.hide_render=True
     scene.render.filepath=str(ROOT/'previews'/f'Otti_{name}.png');bpy.ops.render.render(write_still=True)
-sword_obj.hide_render=False;sheathed_obj.hide_render=True
-arm.animation_data.action=actions['Otti_BipedIdle'][0];scene.frame_set(1);camera_at((-4,-6,3));bpy.ops.wm.save_as_mainfile(filepath=str(ROOT/'Otti.blend'))
+sword_obj.hide_render=shield_obj.hide_render=sheathed_obj.hide_render=True;trident_obj.hide_render=net_obj.hide_render=False
+arm.animation_data.action=actions['Otti_TridentIdle'][0];scene.frame_set(1);camera_at((-4,-6,3));bpy.ops.wm.save_as_mainfile(filepath=str(ROOT/'Otti.blend'))
 print('OTTI_COMPLETE',json.dumps(report),flush=True)

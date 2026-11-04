@@ -311,7 +311,10 @@ function OttiBossAI.step(boss: Boss, ctx: BossContext, dt: number)
 			if followUp and ctx.stillValid() and boss.phase >= followUp.MinPhase and boss.rng:NextNumber() < followUp.Chance
 				and (not followUp.OnlyIfHit or result.damaged) and ready(boss, followUp.Move, os.clock()) then
 				local nextMove = OttiMoveDefinitions[followUp.Move]
-				if nextMove and not (nextMove.Kind == "Grapple" and boss.lastGrappled == target and #ctx.fighters() > 1) then
+				local _,_,followRoot=CombatUtil.getLivingCharacter(target)
+				local followDistance=if followRoot then CombatUtil.flatDistance(boss.root.Position,followRoot.Position) else math.huge
+				if nextMove and followDistance<=nextMove.StartRange and followDistance>=(nextMove.MinRange or 0)
+					and not (nextMove.Kind == "Grapple" and boss.lastGrappled == target and #ctx.fighters() > 1) then
 					BossAttackService.execute(boss, ctx, nextMove, target)
 				end
 			end

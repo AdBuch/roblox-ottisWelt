@@ -66,10 +66,19 @@ function SkinnedCompanionModel.build(id: string): HeroRigTypes.OttiRig?
 	glow.Parent = shield
 	local sheathed = model:FindFirstChild("Otti_Sheathed")
 	if sheathed and sheathed:IsA("BasePart") then sheathed.Transparency = 1 end
+	local drawnParts={club}
+	if id=="Otti" then
+		for _,name in {"Otti_Trident","Otti_NetHeld"} do
+			local part=model:FindFirstChild(name)
+			if part and part:IsA("BasePart") then table.insert(drawnParts,part) end
+		end
+		model:SetAttribute("SwordDrawn",true)
+		require(script.Parent.OttiEquipment).select(model,"Retiarius")
+	end
 	return {
 		model=model, humanoid=humanoid, root=root,
 		pelvis=body, chest=body, head=body, rightArm=body, leftArm=body,
-		swordParts={club}, sheathedParts=if sheathed and sheathed:IsA("BasePart") then {sheathed} else {}, shieldFace=shield, guardLight=glow,
+		swordParts=drawnParts, sheathedParts=if sheathed and sheathed:IsA("BasePart") then {sheathed} else {}, shieldFace=shield, guardLight=glow,
 		tail={segments={},motors={}}, motors={}, bodyParts=parts,
 	}
 end

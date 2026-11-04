@@ -41,6 +41,22 @@
       "passed": true
     },
     {
+      "name": "Otti_NetHeld triangle budget",
+      "passed": true
+    },
+    {
+      "name": "Otti_NetHeld UV atlas",
+      "passed": true
+    },
+    {
+      "name": "Otti_NetHeld one to four influences",
+      "passed": true
+    },
+    {
+      "name": "Otti_NetHeld normalized weights",
+      "passed": true
+    },
+    {
       "name": "Otti_Sheathed triangle budget",
       "passed": true
     },
@@ -86,6 +102,22 @@
     },
     {
       "name": "Otti_Sword normalized weights",
+      "passed": true
+    },
+    {
+      "name": "Otti_Trident triangle budget",
+      "passed": true
+    },
+    {
+      "name": "Otti_Trident UV atlas",
+      "passed": true
+    },
+    {
+      "name": "Otti_Trident one to four influences",
+      "passed": true
+    },
+    {
+      "name": "Otti_Trident normalized weights",
       "passed": true
     },
     {
@@ -137,6 +169,10 @@
       "passed": true
     },
     {
+      "name": "Otti_NetThrow skin deformation stays bounded",
+      "passed": true
+    },
+    {
       "name": "Otti_QuadIdle skin deformation stays bounded",
       "passed": true
     },
@@ -185,11 +221,19 @@
       "passed": true
     },
     {
+      "name": "Otti_TridentIdle skin deformation stays bounded",
+      "passed": true
+    },
+    {
+      "name": "Otti_TridentThrust skin deformation stays bounded",
+      "passed": true
+    },
+    {
       "name": "Otti_Trip skin deformation stays bounded",
       "passed": true
     },
     {
-      "name": "bind FBX round trip has five meshes",
+      "name": "bind FBX round trip has seven meshes",
       "passed": true
     },
     {
@@ -203,103 +247,115 @@
   ],
   "pose_bounds": {
     "Otti_Backslash": {
-      "worst_edge_ratio": 2.800900657010189,
+      "worst_edge_ratio": 2.5459133578905253,
       "longest_extreme_edge": 0
     },
     "Otti_Bash": {
-      "worst_edge_ratio": 3.029903309906754,
+      "worst_edge_ratio": 3.024303395182753,
       "longest_extreme_edge": 0
     },
     "Otti_BipedIdle": {
-      "worst_edge_ratio": 1.226023933409054,
+      "worst_edge_ratio": 1.2260228448797341,
       "longest_extreme_edge": 0
     },
     "Otti_BipedWalk": {
-      "worst_edge_ratio": 1.841288347415951,
+      "worst_edge_ratio": 1.8147886357052998,
       "longest_extreme_edge": 0
     },
     "Otti_Bite": {
-      "worst_edge_ratio": 3.2933986922737155,
+      "worst_edge_ratio": 2.97885012118906,
       "longest_extreme_edge": 0
     },
     "Otti_Celebrate": {
-      "worst_edge_ratio": 3.093768691935262,
+      "worst_edge_ratio": 3.0881605258938825,
       "longest_extreme_edge": 0
     },
     "Otti_Draw": {
-      "worst_edge_ratio": 1.6223491376075352,
+      "worst_edge_ratio": 1.6223492958109158,
       "longest_extreme_edge": 0
     },
     "Otti_Feint": {
-      "worst_edge_ratio": 1.5016446713990688,
+      "worst_edge_ratio": 1.501681161238846,
       "longest_extreme_edge": 0
     },
     "Otti_Grapple": {
-      "worst_edge_ratio": 2.919185955531168,
+      "worst_edge_ratio": 2.9136154391680886,
       "longest_extreme_edge": 0
     },
     "Otti_Guard": {
-      "worst_edge_ratio": 2.53128656284328,
+      "worst_edge_ratio": 2.5261786906077845,
       "longest_extreme_edge": 0
     },
     "Otti_Land": {
-      "worst_edge_ratio": 2.0820967357893743,
+      "worst_edge_ratio": 2.063993399838928,
       "longest_extreme_edge": 0
     },
     "Otti_Leap": {
-      "worst_edge_ratio": 2.693550812571854,
+      "worst_edge_ratio": 2.689037882580388,
+      "longest_extreme_edge": 0
+    },
+    "Otti_NetThrow": {
+      "worst_edge_ratio": 1.9609880801810986,
       "longest_extreme_edge": 0
     },
     "Otti_QuadIdle": {
-      "worst_edge_ratio": 3.2933986922737155,
+      "worst_edge_ratio": 3.0253156223269744,
       "longest_extreme_edge": 0
     },
     "Otti_QuadRun": {
-      "worst_edge_ratio": 3.7022223548361706,
+      "worst_edge_ratio": 3.3749199343182563,
       "longest_extreme_edge": 0
     },
     "Otti_QuadWalk": {
-      "worst_edge_ratio": 3.548052988333201,
+      "worst_edge_ratio": 3.2675256193656663,
       "longest_extreme_edge": 0
     },
     "Otti_Rise": {
-      "worst_edge_ratio": 3.2933995170350587,
+      "worst_edge_ratio": 2.978851346505549,
       "longest_extreme_edge": 0
     },
     "Otti_Roar": {
-      "worst_edge_ratio": 1.639163090682878,
+      "worst_edge_ratio": 1.8531155956069743,
       "longest_extreme_edge": 0
     },
     "Otti_Sit": {
-      "worst_edge_ratio": 2.704692677165936,
+      "worst_edge_ratio": 2.6839310564490355,
       "longest_extreme_edge": 0
     },
     "Otti_Slam": {
-      "worst_edge_ratio": 1.4219730538600661,
+      "worst_edge_ratio": 1.4219145576875927,
       "longest_extreme_edge": 0
     },
     "Otti_Slash": {
-      "worst_edge_ratio": 2.7313473384340794,
+      "worst_edge_ratio": 2.7316510910391885,
       "longest_extreme_edge": 0
     },
     "Otti_Stagger": {
-      "worst_edge_ratio": 1.52456628157933,
+      "worst_edge_ratio": 1.6297477536553475,
       "longest_extreme_edge": 0
     },
     "Otti_Surrender": {
-      "worst_edge_ratio": 3.9156790553540537,
+      "worst_edge_ratio": 3.9080951575867795,
       "longest_extreme_edge": 0
     },
     "Otti_Sweep": {
-      "worst_edge_ratio": 2.0086434318919313,
+      "worst_edge_ratio": 2.0703946049999855,
       "longest_extreme_edge": 0
     },
     "Otti_Thrust": {
-      "worst_edge_ratio": 2.569666265804003,
+      "worst_edge_ratio": 2.5699793298299722,
+      "longest_extreme_edge": 0
+    },
+    "Otti_TridentIdle": {
+      "worst_edge_ratio": 1.4666825002935482,
+      "longest_extreme_edge": 0
+    },
+    "Otti_TridentThrust": {
+      "worst_edge_ratio": 2.2241595945745596,
       "longest_extreme_edge": 0
     },
     "Otti_Trip": {
-      "worst_edge_ratio": 3.3240643350506227,
+      "worst_edge_ratio": 3.2619779901199735,
       "longest_extreme_edge": 0
     }
   },
