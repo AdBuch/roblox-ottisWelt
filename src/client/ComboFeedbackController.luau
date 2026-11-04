@@ -175,10 +175,12 @@ function ComboFeedbackController.start(group: (string, Vector2, UDim2, UDim2?) -
 				local id = SpecialChargeDefinitions.specialFor(nil, weapon.Basic, family)
 				local special = id and (SpecialMoveDefinitions :: any)[id]
 				if special and id then
-					table.insert(lines, ("%s · %s · %s"):format(if family == "Up" then "Lv5 AIR: release SPECIAL in air" else "Lv9 ELITE: release SPECIAL holding BLOCK", special.Name, Practice.label(Players.LocalPlayer, weapon.Id, id)))
+					local stageIndex = if family == "Up" then 2 else 4
+					local how = if family == "Up" then "release SPECIAL in air" else "release SPECIAL holding BLOCK"
+					table.insert(lines, ("STAGE %d %s: %s · %s · %s"):format(stageIndex, Practice.Stages[stageIndex].Name:upper(), how, special.Name, Practice.label(Players.LocalPlayer, weapon.Id, id)))
 				end
 			end
-			table.insert(lines, "Failed special = fall. Every valid attempt improves success by 1%; saved, also in training.")
+			table.insert(lines, "Failed special = fall. Every attempt lowers Fail and raises Perfect (5 points a day here, 15 in the arena); mastery stages unlock more attacks per weapon.")
 			table.insert(lines, ('<font color="#BBBBBB">MOMENTUM 0-%d: recharges over time; attacks and blocks do not change it.</font>'):format(MomentumConfig.Max))
 			table.insert(lines, '<font color="#BBBBBB">Practise on the dummies: no Aura here.</font>')
 			label.Text = table.concat(lines, "\n")

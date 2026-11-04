@@ -83,7 +83,13 @@ function ItemInfo.describe(kind: string, id: string): Card?
 			local moveId = families and (families :: any)[family]
 			local move = moveId and (SpecialMoveDefinitions :: any)[moveId]
 			if move and moveId then
-				local unlock = if family == "Up" then " · Luft ab Lv5" elseif family == "Circle" then " · Block ab Lv9" else ""
+				-- unlocked by the weapon's mastery stage (SpecialPracticeDefinitions.Stages), not by the level
+				local unlock = ""
+				for index, stage in Practice.Stages do
+					if table.find(stage.Unlocks, family) then
+						unlock = (" · ab Stufe %d %s"):format(index, stage.Name)
+					end
+				end
 				table.insert(specials, move.Name .. " (" .. Practice.label(Players.LocalPlayer, weapon.Id, moveId) .. unlock .. ")")
 			end
 		end

@@ -1275,7 +1275,7 @@ end
 -- The next normal attack from the context (AttackSequenceService). nil = nothing allowed now.
 local function chooseNormal(player: Player, state: PlayerState, weapon: any, root: BasePart, gesture: string?): (any?, RunOptions?)
 	local now = os.clock()
-	local counter = now < state.counterReadyUntil
+	local counter = now < state.counterReadyUntil and SpecialPracticeDefinitions.unlocked(InventoryService.weaponStage(player, weapon.Id), "Counter")
 	local sliding = SlideService.isSliding(player)
 	local slide = sliding and not counter and SlideService.consumeAttack(player)
 	if sliding and counter then
@@ -1364,7 +1364,7 @@ local function releaseSpecial(player: Player, state: PlayerState, context: Comba
 	end
 	local tier = tierDef.Tier
 	local family = SpecialPracticeDefinitions.family(tierDef.Family, ultimate,
-		JumpAttackService.isAirborne(player), state.blocking or (character ~= nil and character:GetAttribute("SpecialBlockHeld") == true), InventoryService.getLevel(player))
+		JumpAttackService.isAirborne(player), state.blocking or (character ~= nil and character:GetAttribute("SpecialBlockHeld") == true), InventoryService.weaponStage(player, weapon.Id))
 	local move = SpecialMoveDefinitions[SpecialChargeDefinitions.specialFor(nil, weapon.Basic, family) or ""]
 	if not move then
 		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.SpecialCharge, "cancel", "NO SPECIAL")
