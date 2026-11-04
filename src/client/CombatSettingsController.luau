@@ -14,6 +14,7 @@ local UiConfig = require(Shared:WaitForChild("UiConfig"))
 
 export type Settings = {
 	getCameraShake: () -> string,
+	setCameraShake: (value: string) -> (), -- the lobby menu's setting (saved like the pill)
 	onChanged: (callback: () -> ()) -> (),
 }
 
@@ -56,13 +57,19 @@ function CombatSettingsController.start(edge: Frame, preferenceRemote: RemoteEve
 		changed()
 	end
 
-	button.Activated:Connect(function()
-		camera = CAMERA_ORDER[(table.find(CAMERA_ORDER, camera) or 1) % #CAMERA_ORDER + 1]
+	local function set(value: string)
+		if not table.find(CAMERA_ORDER, value) then
+			return
+		end
+		camera = value
 		if preferenceRemote and player:GetAttribute(Config.PreferencePrefix .. "CameraShake") ~= camera then
 			preferenceRemote:FireServer("CameraShake", camera)
 		end
 		notify("CAMERA SHAKE: " .. camera:upper())
 		changed()
+	end
+	button.Activated:Connect(function()
+		set(CAMERA_ORDER[(table.find(CAMERA_ORDER, camera) or 1) % #CAMERA_ORDER + 1])
 	end)
 	player:GetAttributeChangedSignal(Config.PreferencePrefix .. "CameraShake"):Connect(fromAttribute)
 	fromAttribute()
@@ -71,6 +78,7 @@ function CombatSettingsController.start(edge: Frame, preferenceRemote: RemoteEve
 		getCameraShake = function()
 			return camera
 		end,
+		setCameraShake = set,
 		onChanged = function(callback: () -> ())
 			table.insert(changeListeners, callback)
 		end,

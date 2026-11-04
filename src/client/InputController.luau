@@ -8,10 +8,11 @@
 --            state (Feedback.Block -> syncBlock); a guard it lowered needs a new press.
 --   SPECIAL  hold Q / X / SPECIAL to charge, release to fire ("SpecialStart" / "SpecialRelease";
 --            the server measures the hold time). Block may stay on while charging.
---   JUMP     Space / A / Roblox's own jump button (no second jump button).
+--   JUMP     Space / A / the SPRUNG touch button (MobileControlsController; it replaces Roblox's own).
 -- Soft Targeting: an attack turns the character smoothly (at most MaxTurnDegrees) toward the enemy
 -- in a cone in front with a clear line of sight and aims there; otherwise it hits straight ahead.
 -- With the bow and a mouse the cursor aims instead.
+-- While a big menu is open (MenuSystem) canAct is false and suspend() ends held inputs cleanly.
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
@@ -51,6 +52,7 @@ export type Input = {
 	syncBlock: (active: boolean) -> (), -- the server's confirmed block state
 	chargeEnded: () -> (), -- the server cancelled / fired the charge
 	lastTarget: (model: Instance?) -> (),
+	suspend: () -> (), -- a big menu opened: end held inputs cleanly (charge cancelled, never fired; guard lowered)
 }
 
 local InputController = {}
@@ -216,7 +218,7 @@ function InputController.init(options: Options): Input
 	end
 
 	local function pressBlock(input: InputObject)
-		if not options.canAct() then
+		if blockInput or not options.canAct() then
 			return
 		end
 		blockInput = input
@@ -310,13 +312,20 @@ function InputController.init(options: Options): Input
 		end
 	end)
 	options.blockButton.InputEnded:Connect(releaseBlock)
+	-- SPECIAL: the finger that started the charge ends it - even if it slid off the button, and
+	-- independent of other fingers on ATTACK / BLOCK / JUMP or the thumbstick (multi-touch)
+	local specialInput: InputObject? = nil
 	options.specialButton.InputBegan:Connect(function(input: InputObject)
-		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+		if not charging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1) then
 			startCharge()
+			if charging then
+				specialInput = input
+			end
 		end
 	end)
-	options.specialButton.InputEnded:Connect(function(input: InputObject)
-		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+	UserInputService.InputEnded:Connect(function(input: InputObject)
+		if specialInput ~= nil and input == specialInput then
+			specialInput = nil
 			releaseCharge()
 		end
 	end)
@@ -366,6 +375,16 @@ function InputController.init(options: Options): Input
 		end,
 		lastTarget = function(model: Instance?)
 			engaged = model
+		end,
+		suspend = function()
+			blockInput = nil
+			specialInput = nil
+			if charging then
+				charging = false
+				options.onChargeEnd()
+				remotes.combatAction:FireServer("SpecialCancel") -- ends the charge on the server WITHOUT firing
+			end
+			setBlock(false)
 		end,
 	}
 end

@@ -53,4 +53,5 @@ return table.freeze({
 	SavePreference = getRemote(Config.PreferenceRemoteName),
 	MatchEvent = getRemote(Config.MatchEventRemoteName),
 	MatchRequest = getFunction(Config.MatchRequestRemoteName),
+	LoadoutRequest = getFunction(Config.LoadoutRequestRemoteName),
 })

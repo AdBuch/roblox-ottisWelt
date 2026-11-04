@@ -26,7 +26,7 @@ export type AuraDisplay = {
 local AuraDisplayController = {}
 
 local SILVER = Color3.fromRGB(214, 222, 232)
-local LEVEL_WIDTH = 150
+local LEVEL_WIDTH = 196
 local COIN_WIDTH = 96
 local GAP = 6
 
@@ -58,12 +58,29 @@ local function label(parent: Instance, position: UDim2, size: UDim2, textSize: n
 	return text
 end
 
-function AuraDisplayController.start(group: (string, Vector2, UDim2, UDim2?) -> Frame, visibility: Visibility, notify: (kind: string, text: string, amount: number?) -> ()): AuraDisplay
+function AuraDisplayController.start(group: (string, Vector2, UDim2, UDim2?) -> Frame, visibility: Visibility, notify: (kind: string, text: string, amount: number?) -> (), onOpen: (() -> ())?): AuraDisplay
 	local frame = group("Aura", Vector2.new(1, 0), UDim2.new(1, -8, 0, 6), UDim2.fromOffset(LEVEL_WIDTH + GAP + COIN_WIDTH, 30))
 
 	-- LEVEL capsule: number + title, Aura progress bar underneath
 	local levelCapsule = capsuleFrame(frame, 0, LEVEL_WIDTH)
 	local levelText = label(levelCapsule, UDim2.fromOffset(12, 2), UDim2.new(1, -20, 0, 16), 13, UiConfig.Gold)
+	-- long titles ("HELD DES KOLOSSEUMS XIV") shrink to fit instead of being cut off
+	levelText.TextTruncate = Enum.TextTruncate.None
+	levelText.TextScaled = true
+	local levelLimit = Instance.new("UITextSizeConstraint")
+	levelLimit.MaxTextSize = 13
+	levelLimit.Parent = levelText
+	if onOpen then
+		-- the capsule opens the lobby menu's overview (a transparent button over the capsule)
+		local openButton = Instance.new("TextButton")
+		openButton.Name = "OpenProfile"
+		openButton.Size = UDim2.fromScale(1, 1)
+		openButton.BackgroundTransparency = 1
+		openButton.Text = ""
+		openButton.ZIndex = levelCapsule.ZIndex + 3
+		openButton.Parent = levelCapsule
+		openButton.Activated:Connect(onOpen)
+	end
 	local track = Instance.new("Frame")
 	track.Position = UDim2.new(0, 12, 1, -9)
 	track.Size = UDim2.new(1, -24, 0, 4)
@@ -105,7 +122,7 @@ function AuraDisplayController.start(group: (string, Vector2, UDim2, UDim2?) -> 
 	return {
 		set = function(aura: number, denarii: number)
 			local current, nextLevel, share = GladiatorLevelDefinitions.levelFor(aura)
-			levelText.Text = ("LV %d  %s"):format(current.Level, current.Title)
+			levelText.Text = ("LV %d/%d  %s"):format(current.Level, GladiatorLevelDefinitions.MaxLevel, current.Title)
 			TweenService:Create(progress, TweenInfo.new(0.25), { Size = UDim2.fromScale(if nextLevel then share else 1, 1) }):Play()
 			if shownLevel ~= 0 and current.Level > shownLevel then
 				notify("Info", ("LEVEL UP · LV %d %s"):format(current.Level, current.Title))

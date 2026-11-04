@@ -7,13 +7,12 @@
 --                    · LEAVE QUEUE
 --   WATCH LIVE       opens LIVE IN THE COLOSSEUM
 -- Requests only (MatchRequest); every answer comes from the server. Closed = invisible and inert.
+-- Styled and coordinated by MenuSystem (same theme as the lobby menu; only one big menu at a time).
 
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SocialService = game:GetService("SocialService")
 
-local Shared = ReplicatedStorage:WaitForChild("Shared")
-local UiConfig = require(Shared:WaitForChild("UiConfig"))
+local MenuSystem = require(script.Parent.Parent:WaitForChild("MenuSystem"))
 
 export type ModeMenu = {
 	open: (tab: string?) -> (),
@@ -22,8 +21,9 @@ export type ModeMenu = {
 
 local GameModeMenuController = {}
 
-local RED = Color3.fromRGB(150, 40, 34)
-local DARK = Color3.fromRGB(70, 56, 40)
+local THEME = MenuSystem.Theme
+local RED = THEME.Primary
+local DARK = THEME.SurfaceRaised
 
 local function make(className: string, props: { [string]: any }, parent: Instance?): any
 	local instance = Instance.new(className)
@@ -38,11 +38,12 @@ end
 
 local function button(parent: Instance, text: string, color: Color3, order: number, height: number?): TextButton
 	local b = make("TextButton", {
-		Size = UDim2.new(1, 0, 0, height or 42),
+		Size = UDim2.new(1, 0, 0, math.max(THEME.TouchTarget, height or THEME.TouchTarget)),
 		BackgroundColor3 = color,
-		Font = Enum.Font.GothamBold,
+		Font = THEME.LabelFont,
 		TextSize = 14,
-		TextColor3 = Color3.new(1, 1, 1),
+		TextWrapped = true,
+		TextColor3 = THEME.Text,
 		Text = text,
 		AutoButtonColor = true,
 		LayoutOrder = order,
@@ -57,11 +58,11 @@ local function note(parent: Instance, text: string, order: number): TextLabel
 		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		BackgroundTransparency = 1,
-		Font = Enum.Font.Gotham,
-		TextSize = 12,
+		Font = THEME.BodyFont,
+		TextSize = 13,
 		TextWrapped = true,
 		TextXAlignment = Enum.TextXAlignment.Left,
-		TextColor3 = Color3.fromRGB(215, 205, 190),
+		TextColor3 = THEME.TextMuted,
 		Text = text,
 		LayoutOrder = order,
 		ZIndex = 32,
@@ -84,32 +85,40 @@ function GameModeMenuController.start(gui: ScreenGui, edge: Frame, request: Remo
 	}, edge)
 	make("UICorner", { CornerRadius = UDim.new(1, 0) }, playButton)
 
-	local backdrop = make("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.6, Text = "", AutoButtonColor = false, Visible = false, ZIndex = 30 }, gui)
+	local backdrop = make("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = THEME.Backdrop, BackgroundTransparency = THEME.BackdropTransparency, Text = "", AutoButtonColor = false, Selectable = false, Visible = false, ZIndex = 30 }, gui)
 	local panel = make("Frame", {
 		Name = "ModeMenu",
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.new(0.92, 0, 0.74, 0),
-		BackgroundColor3 = Color3.fromRGB(22, 18, 14),
-		BackgroundTransparency = 0.06,
+		Size = UDim2.new(1, -24, 1, -24),
+		BackgroundColor3 = THEME.Panel,
 		Visible = false,
 		ZIndex = 31,
 	}, gui)
 	make("UICorner", { CornerRadius = UDim.new(0, 12) }, panel)
-	make("UISizeConstraint", { MaxSize = Vector2.new(380, 600) }, panel)
-	make("UIStroke", { Color = UiConfig.Gold, Transparency = 0.5, Thickness = 1.5 }, panel)
-	make("UIPadding", { PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10), PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, panel)
+	make("UISizeConstraint", { MaxSize = Vector2.new(460, 620) }, panel)
+	MenuSystem.stroke(panel, THEME.Bronze, 0.25, 2)
+	make("TextButton", { Name = "ModalCatcher", Size = UDim2.fromOffset(0, 0), BackgroundTransparency = 1, Text = "", Modal = true, Selectable = false }, panel)
 
-	local tabs = make("Frame", { Size = UDim2.new(1, -42, 0, 34), BackgroundTransparency = 1, ZIndex = 32 }, panel)
-	make("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }, tabs)
-	local closeButton = make("TextButton", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.fromScale(1, 0), Size = UDim2.fromOffset(36, 34), BackgroundColor3 = DARK, Font = Enum.Font.GothamBold, TextSize = 14, TextColor3 = Color3.new(1, 1, 1), Text = "✕", ZIndex = 32 }, panel)
+	-- the shared header: warm stone band, title, 44 px close button
+	local header = make("Frame", { Size = UDim2.new(1, 0, 0, 52), BackgroundColor3 = THEME.Stone, ZIndex = 32 }, panel)
+	make("UICorner", { CornerRadius = UDim.new(0, 12) }, header)
+	make("Frame", { Position = UDim2.new(0, 0, 1, -12), Size = UDim2.new(1, 0, 0, 12), BackgroundColor3 = THEME.Stone, BorderSizePixel = 0, ZIndex = 32 }, header)
+	make("Frame", { Position = UDim2.new(0, 0, 1, 0), Size = UDim2.new(1, 0, 0, 2), BackgroundColor3 = THEME.Bronze, BorderSizePixel = 0, ZIndex = 33 }, header)
+	make("TextLabel", { Position = UDim2.fromOffset(16, 0), Size = UDim2.new(1, -76, 1, 0), BackgroundTransparency = 1, Font = THEME.TitleFont, TextSize = 19, TextColor3 = Color3.fromRGB(40, 28, 18), TextXAlignment = Enum.TextXAlignment.Left, Text = "SPIELMODI", ZIndex = 33 }, header)
+	local closeButton = make("TextButton", { AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -4, 0.5, 0), Size = UDim2.fromOffset(THEME.TouchTarget, THEME.TouchTarget), BackgroundColor3 = THEME.Panel, Font = THEME.TitleFont, TextSize = 18, TextColor3 = THEME.Gold, Text = "✕", ZIndex = 33 }, header)
 	make("UICorner", { CornerRadius = UDim.new(0, 8) }, closeButton)
 
+	local tabs = make("Frame", { Position = UDim2.fromOffset(12, 62), Size = UDim2.new(1, -24, 0, THEME.TouchTarget), BackgroundTransparency = 1, ZIndex = 32 }, panel)
+	make("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }, tabs)
+
+	local bodyTop = 62 + THEME.TouchTarget + 10
 	local body = make("ScrollingFrame", {
-		Position = UDim2.fromOffset(0, 42),
-		Size = UDim2.new(1, 0, 1, -42),
+		Position = UDim2.fromOffset(12, bodyTop),
+		Size = UDim2.new(1, -24, 1, -(bodyTop + 12)),
 		BackgroundTransparency = 1,
-		ScrollBarThickness = 4,
+		ScrollBarThickness = 5,
+		ScrollBarImageColor3 = THEME.Bronze,
 		AutomaticCanvasSize = Enum.AutomaticSize.Y,
 		CanvasSize = UDim2.new(),
 		ZIndex = 32,
@@ -279,23 +288,33 @@ function GameModeMenuController.start(gui: ScreenGui, edge: Frame, request: Remo
 		end
 	end
 
+	local function close()
+		if not isOpen then
+			return
+		end
+		isOpen = false
+		panel.Visible = false
+		backdrop.Visible = false
+		MenuSystem.closed("ModeMenu")
+	end
+	MenuSystem.register("ModeMenu", close)
+
 	local tabButtons: { [string]: TextButton } = {}
 	local function selectTab(tab: string)
 		if tab == "LIVE" then
-			panel.Visible = false
-			backdrop.Visible = false
-			isOpen = false
-			openLive()
+			close()
+			openLive() -- LIVE IN THE COLOSSEUM is its own big menu
 			return
 		end
 		currentTab = tab
 		for name, b in tabButtons do
-			b.BackgroundColor3 = if name == currentTab then RED else DARK
+			MenuSystem.setState(b, if name == currentTab then "Selected" else "Normal")
 		end
 		render()
 	end
 	for i, entry in { { "ZOMBIES", "ZOMBIE BATTLES" }, { "TEAMS", "TEAM BATTLES" }, { "BOSS", "BOSS FIGHT" }, { "LIVE", "WATCH LIVE" } } do
-		local b = make("TextButton", { Size = UDim2.new(1 / 4, -3, 1, 0), BackgroundColor3 = DARK, Font = Enum.Font.GothamBold, TextSize = 10, TextWrapped = true, TextColor3 = Color3.new(1, 1, 1), Text = entry[2], LayoutOrder = i, ZIndex = 32 }, tabs)
+		local b = make("TextButton", { Size = UDim2.new(1 / 4, -3, 1, 0), BackgroundColor3 = DARK, Font = THEME.LabelFont, TextSize = 11, TextWrapped = true, TextColor3 = THEME.Text, Text = entry[2], LayoutOrder = i, ZIndex = 32 }, tabs)
+		b:SetAttribute("MenuStyle", "Tab")
 		make("UICorner", { CornerRadius = UDim.new(0, 8) }, b)
 		tabButtons[entry[1]] = b
 		b.Activated:Connect(function()
@@ -304,18 +323,23 @@ function GameModeMenuController.start(gui: ScreenGui, edge: Frame, request: Remo
 	end
 
 	local function open(tab: string?)
+		if tab == "LIVE" then
+			openLive()
+			return
+		end
+		MenuSystem.opening("ModeMenu") -- closes the lobby menu / live overlay first
 		isOpen = true
 		panel.Visible = true
 		backdrop.Visible = true
+		local target = tab or currentTab
+		currentTab = target
+		MenuSystem.focus(tabButtons[target])
 		task.spawn(function()
 			invoke("Party")
-			selectTab(tab or currentTab)
+			if isOpen then
+				selectTab(target)
+			end
 		end)
-	end
-	local function close()
-		isOpen = false
-		panel.Visible = false
-		backdrop.Visible = false
 	end
 	playButton.Activated:Connect(function()
 		if isOpen then

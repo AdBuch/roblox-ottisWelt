@@ -1404,13 +1404,18 @@ end
 --   "Basic"          (aim point)  attack: the contextual chain; drops an active block first
 --   "SpecialStart"                start charging the special (block may stay up)
 --   "SpecialRelease" (aim point)  fire the reached tier
+--   "SpecialCancel"               end a running charge WITHOUT firing (a menu opened while holding)
 --   "Slide"                       start a slide (not sent by the Classic V2 controls)
 --   "Jump"                        legacy jump report (ignored: jumps are measured server-side)
 local function onActionRequest(player: Player, action: unknown, payload: unknown)
-	if action ~= "Basic" and action ~= "SpecialStart" and action ~= "SpecialRelease" and action ~= "Slide" and action ~= "Jump" then
+	if action ~= "Basic" and action ~= "SpecialStart" and action ~= "SpecialRelease" and action ~= "SpecialCancel" and action ~= "Slide" and action ~= "Jump" then
 		return
 	end
 	local state = getState(player)
+	if action == "SpecialCancel" then
+		cancelCharge(player, nil) -- never rate limited, never fires anything
+		return
+	end
 	if action ~= "SpecialRelease" and not allowRequest(state, "action") then -- a release must never get lost (it only ends a running charge)
 		return
 	end

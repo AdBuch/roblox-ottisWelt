@@ -170,7 +170,11 @@ function NotificationController.create(group: (string, Vector2, UDim2, UDim2?) -
 	end
 
 	------------------------------------------------------------------ banner (upper third)
-	local bannerFrame = group("Banner", Vector2.new(0.5, 0), UDim2.new(0.5, 0, 0.2, 0), UDim2.fromOffset(560, 96))
+	-- result / round banner: fits narrow phones (scale width, capped) and holds a two-line detail
+	local bannerFrame = group("Banner", Vector2.new(0.5, 0), UDim2.new(0.5, 0, 0.2, 0), UDim2.new(0.92, 0, 0, 118))
+	local bannerLimit = Instance.new("UISizeConstraint")
+	bannerLimit.MaxSize = Vector2.new(560, 118)
+	bannerLimit.Parent = bannerFrame
 	local function bannerLabel(name: string, y: number, height: number, size: number, font: Enum.Font, color: Color3): TextLabel
 		local label = Instance.new("TextLabel")
 		label.Name = name
@@ -188,7 +192,11 @@ function NotificationController.create(group: (string, Vector2, UDim2, UDim2?) -
 	end
 	local title = bannerLabel("Title", 0, 44, 38, Enum.Font.GothamBlack, UiConfig.Gold)
 	local subtitle = bannerLabel("Subtitle", 44, 26, 20, Enum.Font.GothamBold, Color3.new(1, 1, 1))
-	local detail = bannerLabel("Detail", 70, 22, 15, Enum.Font.GothamMedium, Color3.fromRGB(230, 230, 230))
+	local detail = bannerLabel("Detail", 70, 44, 15, Enum.Font.GothamMedium, Color3.fromRGB(240, 232, 216))
+	title.TextScaled = true -- long results ("SCHILI DEFEATED") shrink instead of being cut off
+	local titleLimit = Instance.new("UITextSizeConstraint")
+	titleLimit.MaxTextSize = 38
+	titleLimit.Parent = title
 	local bannerToken = 0
 	bannerFrame.Visible = false
 

@@ -66,6 +66,16 @@ local function inLobby(player: Player): boolean
 	return GameStates.isInLobby(player:GetAttribute(GameStates.StateAttribute)) and PlayerDataService.isReady(player)
 end
 
+-- A match is being prepared for `player`: the lobby menu locks gear changes meanwhile.
+local function setStarting(player: Player, on: boolean)
+	if on then
+		starting[player] = true
+	else
+		starting[player] = nil
+	end
+	player:SetAttribute(Config.MatchTransitionAttribute, on)
+end
+
 -- Creates a zombie match for `players` and sends them. `party` (optional) is locked meanwhile.
 local function startZombies(mode: MatchTypes.MatchMode, players: { Player }, party: PartyService.Party?, boss: string?): (boolean, string)
 	local fighters: { MatchTypes.Fighter } = {}
@@ -86,7 +96,7 @@ local function startZombies(mode: MatchTypes.MatchMode, players: { Player }, par
 		return false, "Nobody can start right now (equipment, queue or loading)"
 	end
 	for _, player in valid do
-		starting[player] = true
+		setStarting(player, true)
 	end
 	if party then
 		PartyService.setLocked(party, true)
@@ -94,7 +104,7 @@ local function startZombies(mode: MatchTypes.MatchMode, players: { Player }, par
 	local created = ArenaReservationService.create(mode, fighters, nil, boss)
 	if not created then
 		for _, player in valid do
-			starting[player] = nil
+			setStarting(player, false)
 		end
 		if party then
 			PartyService.setLocked(party, false)
@@ -107,7 +117,7 @@ local function startZombies(mode: MatchTypes.MatchMode, players: { Player }, par
 		mode = mode,
 		mock = created.mock,
 		onFailed = function(player: Player, _code: string)
-			starting[player] = nil
+			setStarting(player, false)
 			if party and party.locked then
 				PartyService.setLocked(party, false)
 			end
@@ -117,7 +127,7 @@ local function startZombies(mode: MatchTypes.MatchMode, players: { Player }, par
 		task.delay(20, function()
 			-- players who are still here after a successful start get their flags back
 			for _, player in valid do
-				starting[player] = nil
+				setStarting(player, false)
 			end
 			if party and party.locked and not MatchmakingService.isQueued(party.members[1]) then
 				PartyService.setLocked(party, false)
@@ -125,7 +135,7 @@ local function startZombies(mode: MatchTypes.MatchMode, players: { Player }, par
 		end)
 	else
 		for _, player in valid do
-			starting[player] = nil
+			setStarting(player, false)
 		end
 	end
 	return true, if created.mock then "STUDIO MOCK: match created (no teleport)" else "Preparing the arena…"

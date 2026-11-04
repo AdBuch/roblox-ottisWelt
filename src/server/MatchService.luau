@@ -385,7 +385,7 @@ function MatchService.startZombies(mode: ModeId, players: { Player }, bossId: st
 
 	for index, player in valid do
 		current.alive[player] = true
-		AuraService.resetRunStats(player)
+		AuraService.resetRunStats(player, if bossId then "BOSS_" .. string.upper(bossId) else mode)
 		PlayerCombatService.resetCombatState(player)
 		MomentumService.reset(player, if mode == "Coop" then MomentumConfig.Start.Coop else MomentumConfig.Start.Solo)
 		PlayerCombatService.refreshEquipment(player) -- the saved weapon, shield and armor
@@ -559,7 +559,7 @@ function MatchService.startTeams(red: { Player }, blue: { Player }, subMode: str
 	for _, entry in teams do
 		for index, player in entry.players do
 			current.alive[player] = true
-			AuraService.resetRunStats(player)
+			AuraService.resetRunStats(player, subMode)
 			MomentumService.reset(player, if subMode == "ELIMINATION" then MomentumConfig.Start.EliminationRound else MomentumConfig.Start.TeamBattle)
 			PlayerMatchStateService.assign(player, current.id, "TeamBattle", entry.team, entry.zone)
 			player:SetAttribute(Config.ArenaRoleAttribute, "FIGHTER")

@@ -8,6 +8,8 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local UiConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("UiConfig"))
+local MenuSystem = require(script.Parent:WaitForChild("MenuSystem"))
+local THEME = MenuSystem.Theme
 
 export type InfoPanel = {
 	open: () -> (),
@@ -38,8 +40,8 @@ function InfoPanelController.start(gui: ScreenGui, edge: Frame, content: () -> s
 	local backdrop = Instance.new("TextButton")
 	backdrop.Name = "InfoBackdrop"
 	backdrop.Size = UDim2.fromScale(1, 1)
-	backdrop.BackgroundColor3 = Color3.new(0, 0, 0)
-	backdrop.BackgroundTransparency = 0.6
+	backdrop.BackgroundColor3 = THEME.Backdrop
+	backdrop.BackgroundTransparency = THEME.BackdropTransparency
 	backdrop.Text = ""
 	backdrop.AutoButtonColor = false
 	backdrop.Visible = false
@@ -51,8 +53,8 @@ function InfoPanelController.start(gui: ScreenGui, edge: Frame, content: () -> s
 	panel.AnchorPoint = Vector2.new(0.5, 0.5)
 	panel.Position = UDim2.fromScale(0.5, 0.5)
 	panel.Size = UDim2.fromScale(0.9, 0.8)
-	panel.BackgroundColor3 = UiConfig.Panel
-	panel.BackgroundTransparency = 0.05
+	panel.BackgroundColor3 = THEME.Panel
+	panel.BackgroundTransparency = 0
 	panel.Visible = false
 	panel.ZIndex = 21
 	panel.Parent = gui
@@ -62,16 +64,18 @@ function InfoPanelController.start(gui: ScreenGui, edge: Frame, content: () -> s
 	local panelCorner = Instance.new("UICorner")
 	panelCorner.CornerRadius = UDim.new(0, 12)
 	panelCorner.Parent = panel
+	MenuSystem.stroke(panel, THEME.Bronze, 0.25, 2)
 
 	local closeButton = Instance.new("TextButton")
 	closeButton.Name = "Close"
 	closeButton.AnchorPoint = Vector2.new(1, 0)
 	closeButton.Position = UDim2.new(1, -6, 0, 6)
 	closeButton.Size = UDim2.fromOffset(44, 44)
-	closeButton.BackgroundTransparency = 1
+	closeButton.BackgroundColor3 = THEME.SurfaceRaised
+	MenuSystem.corner(closeButton, 8)
 	closeButton.Font = Enum.Font.GothamBlack
 	closeButton.TextSize = 22
-	closeButton.TextColor3 = Color3.new(1, 1, 1)
+	closeButton.TextColor3 = THEME.Gold
 	closeButton.Text = "✕"
 	closeButton.ZIndex = 23
 	closeButton.Parent = panel
@@ -92,7 +96,7 @@ function InfoPanelController.start(gui: ScreenGui, edge: Frame, content: () -> s
 	text.BackgroundTransparency = 1
 	text.Font = Enum.Font.GothamMedium
 	text.TextSize = 14
-	text.TextColor3 = Color3.new(1, 1, 1)
+	text.TextColor3 = THEME.Text
 	text.TextXAlignment = Enum.TextXAlignment.Left
 	text.TextYAlignment = Enum.TextYAlignment.Top
 	text.TextWrapped = true
@@ -102,6 +106,12 @@ function InfoPanelController.start(gui: ScreenGui, edge: Frame, content: () -> s
 
 	local isOpen = false
 	local function setOpen(open: boolean)
+		if open == isOpen then
+			return
+		end
+		if open then
+			MenuSystem.opening("InfoPanel", true) -- exclusive, but movement and combat keep working
+		end
 		isOpen = open
 		if open then
 			text.Text = content()
@@ -109,7 +119,13 @@ function InfoPanelController.start(gui: ScreenGui, edge: Frame, content: () -> s
 		end
 		panel.Visible = open
 		backdrop.Visible = open
+		if not open then
+			MenuSystem.closed("InfoPanel")
+		end
 	end
+	MenuSystem.register("InfoPanel", function()
+		setOpen(false)
+	end)
 	button.Activated:Connect(function()
 		setOpen(not isOpen)
 	end)

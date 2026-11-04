@@ -5,15 +5,20 @@
 --   Aura     experience: earned by playing, never spent. It gives the GLADIATOR LEVEL
 --            (GladiatorLevelDefinitions); an item is UNLOCKED at its LevelRequired.
 --   Denarii  earned with every Aura reward and spent on unlocked items (their Price).
--- Buying needs the item unlocked AND enough Denarii; equipping needs it owned AND unlocked.
+-- Buying needs the item unlocked AND enough Denarii; equipping only needs it OWNED (gear that was
+-- bought legitimately stays usable when level requirements are re-balanced).
 --
 -- Used identically by the Hub and the Arena place (same schema, validation and migrations:
 -- PlayerDataSchema). Migration: version 1 stored `coins` (moved into `auraPoints` once and
 -- cleared); version 2 had no armor (Recruit Leather is granted); version 3 had no statistics
 -- (all start at 0); version 4 spent Aura on gear: the old balance becomes the Denarii balance and
 -- Aura becomes balance + what the owned gear cost back then, so nothing owned gets locked.
+-- Version 7 had no earnings history: v8 adds the persistent earnings counters (total Aura and
+-- Denarii EARNED since tracking began, never derived from the balance), the play session, the last
+-- battle and the active-play statistics for the time estimate. Old profiles start these counters at
+-- 0 and are marked `complete = false` ("since tracking began"); nothing is invented.
 -- migrateProfile() is safe to call repeatedly and also removes unknown ids, so a saved profile can
--- never equip something that no longer exists.
+-- never equip something that no longer exists, and no value is ever granted twice.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -34,6 +39,23 @@ type ArmorDefinition = ArmorDefinitions.ArmorDefinition
 
 export type ItemKind = "Weapon" | "Shield" | "Armor"
 
+-- Persistent earnings counters (only ever increased by server rewards; spending never touches them).
+export type Earnings = {
+	aura: number,
+	denarii: number,
+	since: number, -- os.time() when tracking began for this profile
+	complete: boolean, -- true when tracking began with the profile itself (lifetime totals)
+}
+
+-- The current play session: survives Hub <-> Arena teleports, restarts after SessionGapSeconds away.
+export type Session = { aura: number, denarii: number, startedAt: number, lastSeen: number }
+
+-- Rewards of the last battle (started by beginBattle, filled by every reward of that battle).
+export type LastBattle = { aura: number, denarii: number, mode: string, at: number }
+
+-- Active fighting time and the Aura earned meanwhile: the basis of the optional play-time estimate.
+export type Activity = { aura: number, seconds: number, rewards: number }
+
 export type Profile = {
 	version: number,
 	auraPoints: number, -- progress (never spent)
@@ -49,10 +71,16 @@ export type Profile = {
 	stats: { [string]: number },
 	specialAttempts: { [string]: number },
 	resetToken: string?, -- the last controlled test-data reset applied (PlayerDataResetConfig)
+	earnings: Earnings,
+	session: Session,
+	lastBattle: LastBattle?,
+	activity: Activity,
 }
 
 local PROFILE_VERSION = PlayerDataSchema.Version
 local DENARII_VERSION = 5 -- first schema version with separate Denarii
+local SESSION_GAP = PlayerDataSchema.SessionGapSeconds
+local ESTIMATE = PlayerDataSchema.Estimate
 
 -- Preferences a client may store (value must be one of the listed strings)
 local PREFERENCES: { [string]: { string } } = PlayerDataSchema.Preferences :: any
@@ -86,6 +114,10 @@ local function newProfile(): Profile
 		preferences = {},
 		stats = {},
 		specialAttempts = {},
+		earnings = { aura = 0, denarii = 0, since = os.time(), complete = true },
+		session = { aura = 0, denarii = 0, startedAt = os.time(), lastSeen = os.time() },
+		lastBattle = nil,
+		activity = { aura = 0, seconds = 0, rewards = 0 },
 	}
 end
 
@@ -187,6 +219,40 @@ function InventoryService.migrateProfile(profile: Profile): Profile
 	if typeof(profile.resetToken) ~= "string" then
 		profile.resetToken = nil
 	end
+	-- v8: earnings history. Created ONCE with counters at 0 (never derived from the balance); an
+	-- existing table is only sanitized, so repeating the migration never adds anything.
+	local now = os.time()
+	local earnings: any = profile.earnings
+	if typeof(earnings) ~= "table" then
+		earnings = { aura = 0, denarii = 0, since = now, complete = savedVersion == 0 and profile.auraPoints == 0 and profile.denarii == 0 }
+	end
+	profile.earnings = {
+		aura = wholeNumber(earnings.aura),
+		denarii = wholeNumber(earnings.denarii),
+		since = if typeof(earnings.since) == "number" and earnings.since > 0 then math.floor(earnings.since) else now,
+		complete = earnings.complete == true,
+	}
+	local session: any = profile.session
+	local hasSession = typeof(session) == "table"
+	profile.session = {
+		aura = if hasSession then wholeNumber(session.aura) else 0,
+		denarii = if hasSession then wholeNumber(session.denarii) else 0,
+		startedAt = if hasSession and typeof(session.startedAt) == "number" then session.startedAt else now,
+		lastSeen = if hasSession and typeof(session.lastSeen) == "number" then session.lastSeen else now,
+	}
+	local last: any = profile.lastBattle
+	if typeof(last) == "table" and typeof(last.at) == "number" then
+		profile.lastBattle = { aura = wholeNumber(last.aura), denarii = wholeNumber(last.denarii), mode = if typeof(last.mode) == "string" then last.mode else "", at = last.at }
+	else
+		profile.lastBattle = nil
+	end
+	local activity: any = profile.activity
+	local hasActivity = typeof(activity) == "table"
+	profile.activity = {
+		aura = if hasActivity then wholeNumber(activity.aura) else 0,
+		seconds = if hasActivity then wholeNumber(activity.seconds) else 0,
+		rewards = if hasActivity then wholeNumber(activity.rewards) else 0,
+	}
 	profile.version = math.max(PROFILE_VERSION, savedVersion)
 	return profile
 end
@@ -241,6 +307,18 @@ function InventoryService.publish(player: Player)
 	for key in PREFERENCES do
 		player:SetAttribute(Config.PreferencePrefix .. key, profile.preferences[key] or "")
 	end
+	-- Earnings (display only): the profile's own counters, never the balance
+	player:SetAttribute(Config.EarnedAuraAttribute, profile.earnings.aura)
+	player:SetAttribute(Config.EarnedDenariiAttribute, profile.earnings.denarii)
+	player:SetAttribute(Config.EarnedSinceAttribute, profile.earnings.since)
+	player:SetAttribute(Config.EarnedCompleteAttribute, profile.earnings.complete)
+	player:SetAttribute(Config.SessionAuraAttribute, profile.session.aura)
+	player:SetAttribute(Config.SessionDenariiAttribute, profile.session.denarii)
+	local last = profile.lastBattle
+	player:SetAttribute(Config.LastBattleAuraAttribute, if last then last.aura else nil)
+	player:SetAttribute(Config.LastBattleDenariiAttribute, if last then last.denarii else nil)
+	player:SetAttribute(Config.LastBattleModeAttribute, if last then last.mode else nil)
+	player:SetAttribute(Config.AuraPerHourAttribute, InventoryService.auraPerActiveHour(player))
 end
 
 -- Replaces the in-memory profile with a loaded one. Aura and Denarii earned before the load
@@ -249,8 +327,21 @@ end
 function InventoryService.load(player: Player, saved: { [string]: any }?, earnedAura: number, earnedDenarii: number, resetToken: string?)
 	local profile: Profile = if saved then (table.clone(saved) :: any) else newProfile()
 	InventoryService.migrateProfile(profile)
-	profile.auraPoints += math.max(0, math.floor(earnedAura))
-	profile.denarii += math.max(0, math.floor(earnedDenarii))
+	local now = os.time()
+	if now - profile.session.lastSeen > SESSION_GAP then
+		-- away for a while: a new play session (a Hub <-> Arena teleport takes seconds, not minutes)
+		profile.session = { aura = 0, denarii = 0, startedAt = now, lastSeen = now }
+	end
+	profile.session.lastSeen = now
+	local lateAura = math.max(0, math.floor(earnedAura))
+	local lateDenarii = math.max(0, math.floor(earnedDenarii))
+	profile.auraPoints += lateAura
+	profile.denarii += lateDenarii
+	-- rewards paid while the DataStore answered were never saved: they count as earnings once
+	profile.earnings.aura += lateAura
+	profile.earnings.denarii += lateDenarii
+	profile.session.aura += lateAura
+	profile.session.denarii += lateDenarii
 	if resetToken then
 		profile.resetToken = resetToken -- this profile is reset at most once per token
 	end
@@ -307,6 +398,65 @@ function InventoryService.addDenarii(player: Player, amount: number)
 	profile.denarii += math.floor(amount)
 	InventoryService.publish(player)
 	changed(player)
+end
+
+-- One server-decided reward: Aura + Denarii, counted ONCE in the persistent earnings, the session,
+-- the last battle (if one was started) and, unless `active` is false, the active-play statistics.
+function InventoryService.addReward(player: Player, aura: number, denarii: number, active: boolean?)
+	local a = if aura == aura then math.max(0, math.floor(aura)) else 0
+	local d = if denarii == denarii then math.max(0, math.floor(denarii)) else 0
+	if a <= 0 and d <= 0 then
+		return
+	end
+	local profile = getProfile(player)
+	profile.auraPoints += a
+	profile.denarii += d
+	profile.earnings.aura += a
+	profile.earnings.denarii += d
+	profile.session.aura += a
+	profile.session.denarii += d
+	local last = profile.lastBattle
+	if last then
+		last.aura += a
+		last.denarii += d
+	end
+	if active ~= false then
+		profile.activity.aura += a
+		profile.activity.rewards += 1
+	end
+	InventoryService.publish(player)
+	changed(player)
+end
+
+-- A battle starts: its rewards are collected as "last battle" from now on.
+function InventoryService.beginBattle(player: Player, mode: string)
+	local profile = getProfile(player)
+	profile.lastBattle = { aura = 0, denarii = 0, mode = mode, at = os.time() }
+	InventoryService.publish(player)
+	changed(player)
+end
+
+-- Seconds of ACTIVE fighting (match states only; lobby waiting never counts).
+function InventoryService.addActiveSeconds(player: Player, seconds: number)
+	if seconds ~= seconds or seconds <= 0 then
+		return
+	end
+	local profile = getProfile(player)
+	profile.activity.seconds += math.floor(seconds + 0.5)
+	player:SetAttribute(Config.AuraPerHourAttribute, InventoryService.auraPerActiveHour(player))
+end
+
+-- Aura per hour of active play, or 0 while there is too little real data for an honest estimate.
+function InventoryService.auraPerActiveHour(player: Player): number
+	local activity = getProfile(player).activity
+	if activity.rewards < ESTIMATE.MinRewards or activity.seconds < ESTIMATE.MinActiveSeconds or activity.aura <= 0 then
+		return 0
+	end
+	return math.floor(activity.aura / activity.seconds * 3600 + 0.5)
+end
+
+function InventoryService.getEarnings(player: Player): Earnings
+	return table.clone(getProfile(player).earnings)
 end
 
 local function ownedSet(profile: Profile, kind: ItemKind): { [string]: boolean }
@@ -390,20 +540,18 @@ function InventoryService.purchase(player: Player, kind: ItemKind, id: string): 
 	return true, ("Bought %s for %d Denarii"):format(name, price)
 end
 
--- Equips an owned, unlocked item (exactly one per kind). Returns (success, message).
+-- Equips an OWNED item (exactly one per kind). The level only limits buying: gear that was bought
+-- legitimately stays usable after a re-balance of LevelRequired. Never costs Denarii.
+-- Returns (success, message).
 function InventoryService.equip(player: Player, kind: ItemKind, id: string): (boolean, string)
-	local name, _, required = lookup(kind, id)
-	if not name then
+	if not InventoryService.isItem(kind, id) then
 		return false, "Unknown item"
 	end
+	local name = lookup(kind, id) :: string
 	if not InventoryService.owns(player, kind, id) then
 		return false, name .. " is not owned yet"
 	end
 	local profile = getProfile(player)
-	local locked = lockReason(profile, name, required)
-	if locked then
-		return false, locked
-	end
 	local message = name .. " equipped"
 	if kind == "Weapon" then
 		profile.equippedWeapon = id
@@ -413,8 +561,9 @@ function InventoryService.equip(player: Player, kind: ItemKind, id: string): (bo
 		end
 	elseif kind == "Shield" then
 		profile.equippedShield = id
+		-- kept as the choice for one-handed weapons; a two-handed weapon ignores it
 		if InventoryService.getEquippedWeapon(player).TwoHanded then
-			message ..= " (unused while twin daggers are equipped)"
+			message ..= " (unused while a two-handed weapon is equipped)"
 		end
 	else
 		profile.equippedArmor = id
@@ -546,6 +695,10 @@ function InventoryService.serialize(player: Player): { [string]: any }
 		stats = table.clone(profile.stats),
 		specialAttempts = table.clone(profile.specialAttempts),
 		resetToken = profile.resetToken,
+		earnings = table.clone(profile.earnings),
+		session = { aura = profile.session.aura, denarii = profile.session.denarii, startedAt = profile.session.startedAt, lastSeen = os.time() },
+		lastBattle = if profile.lastBattle then table.clone(profile.lastBattle) else nil,
+		activity = table.clone(profile.activity),
 	}
 end
 

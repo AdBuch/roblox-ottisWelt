@@ -8,7 +8,8 @@ check(Practice.family("Down", false, false, true, 8) == "Down", "block locked un
 check(Practice.family("Down", false, false, true, 9) == "Circle", "block unlock at 9")
 check(Practice.family("Right", true, true, true, 9) == "Ultimate", "ultimate precedence")
 check(Practice.family("Right", false, true, true, 9) == "Up", "air precedence")
-check(Levels.levelFor(6999).Level == 8 and Levels.levelFor(7000).Level == 9, "elite reachable")
+local circleAura = Levels.Levels[Practice.CircleLevel].Aura
+check(Levels.levelFor(circleAura - 1).Level == Practice.CircleLevel - 1 and Levels.levelFor(circleAura).Level == Practice.CircleLevel, "block special level threshold is reachable")
 check(Practice.failure(0) == 0.5 and Practice.failure(50) == 0 and Practice.failure(500) == 0, "practice bounds")
 local attrs = {}
 -- Like Roblox: attribute names allow only letters, digits and _ (at most 100 characters)
@@ -38,7 +39,7 @@ malformed.specialAttempts = nil
 malformed.version = 6
 Inventory.load(player, malformed, 0, 0)
 check(Inventory.practiceSpecial(player, "RustyGladius", "RebellionCombo") == 0.5, "v6 migration grants no mastery")
--- Studio test switch: everything owned, ELITE level (Up and Circle unlocked)
+-- Studio test switch: everything owned, top level (Up and Circle unlocked)
 Inventory.forget(player)
 Inventory.load(player, nil, 0, 0)
 Inventory.unlockAll(player)
@@ -46,7 +47,7 @@ local unlocked = Inventory.serialize(player)
 for id in modules.WeaponDefinitions.ById do
 	check(table.find(string.split(unlocked.ownedWeapons, ","), id) ~= nil, "unlockAll owns " .. id)
 end
-check(Inventory.getLevel(player) == 9, "unlockAll reaches ELITE")
+check(Inventory.getLevel(player) == Levels.MaxLevel, "unlockAll reaches the top level")
 -- Choreography: every assignment has its own key track, synchronised with the server's hits
 local function finalSpin(keys)
 	local spin = 0

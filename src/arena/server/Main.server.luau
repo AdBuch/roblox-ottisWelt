@@ -29,9 +29,11 @@ local EnvironmentConfig = require(ReplicatedStorage.Shared.EnvironmentConfig)
 local Server = script.Parent.Parent
 local Arena = require(Server.Arena)
 local ArenaSafetyService = require(Server.ArenaSafetyService)
+local AuraService = require(Server.AuraService)
 local CrowdReactionService = require(Server.CrowdReactionService)
 local DamageEffectsService = require(Server.DamageEffectsService)
 local InventoryService = require(Server.InventoryService)
+local LoadoutRequestService = require(Server.LoadoutRequestService)
 local OttiBossService = require(Server.OttiBossService)
 local PlayerCombatService = require(Server.PlayerCombatService)
 local PlayerDataService = require(Server.PlayerDataService)
@@ -125,6 +127,8 @@ ArenaSpectatorService.init()
 ArenaReturnService.init()
 ArenaMatchService.init(arena) -- MatchService, admission, heartbeat, return requests
 ArenaSafetyService.init()
+AuraService.startActivityTracking() -- active fighting seconds for the honest play-time estimate
+LoadoutRequestService.init() -- answers lobby-menu equip requests with a refusal (no gear changes in the Arena)
 
 Players.PlayerAdded:Connect(setupLeaderstats)
 for _, player in Players:GetPlayers() do

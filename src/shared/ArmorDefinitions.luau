@@ -11,7 +11,8 @@ export type ArmorDefinition = {
 	DisplayName: string,
 	Order: number,
 	Price: number, -- Denarii (CurrencyConfig)
-	LevelRequired: number, -- gladiator level (GladiatorLevelDefinitions) needed to buy and equip it
+	Tier: number, -- armory tier 1..6 (balance, e.g. WeaponBalanceConfig PvE factor; independent of the level curve)
+	LevelRequired: number, -- gladiator level (GladiatorLevelDefinitions, 1..150) needed to BUY it; owned items stay usable
 	Reduction: number, -- share of incoming damage removed (PvE; PvP: DamageConfig.PvPArmorEffectiveness)
 	MovePenalty: number, -- share of walk speed lost while wearing it
 	Description: string,
@@ -22,10 +23,10 @@ local function armor(def: ArmorDefinition): ArmorDefinition
 end
 
 local list: { ArmorDefinition } = {
-	armor({ Id = "RecruitLeather", DisplayName = "Recruit Leather", Order = 1, Price = 0, LevelRequired = 1, Reduction = 0.05, MovePenalty = 0, Description = "Leather straps, belt and light bracers" }),
-	armor({ Id = "MurmilloArmor", DisplayName = "Murmillo Armor", Order = 2, Price = 180, LevelRequired = 3, Reduction = 0.15, MovePenalty = 0.02, Description = "Bronze shoulder guard, reinforced leather, leg guards" }),
-	armor({ Id = "HopliteBronze", DisplayName = "Hoplite Bronze", Order = 3, Price = 320, LevelRequired = 5, Reduction = 0.25, MovePenalty = 0.06, Description = "Bronze chest plate over layered leather" }),
-	armor({ Id = "ChampionArmor", DisplayName = "Champion Armor", Order = 4, Price = 520, LevelRequired = 6, Reduction = 0.35, MovePenalty = 0.10, Description = "Ornate battle-worn bronze of a Colosseum champion" }),
+	armor({ Id = "RecruitLeather", DisplayName = "Recruit Leather", Order = 1, Price = 0, Tier = 1, LevelRequired = 1, Reduction = 0.05, MovePenalty = 0, Description = "Leather straps, belt and light bracers" }),
+	armor({ Id = "MurmilloArmor", DisplayName = "Murmillo Armor", Order = 2, Price = 180, Tier = 3, LevelRequired = 11, Reduction = 0.15, MovePenalty = 0.02, Description = "Bronze shoulder guard, reinforced leather, leg guards" }),
+	armor({ Id = "HopliteBronze", DisplayName = "Hoplite Bronze", Order = 3, Price = 320, Tier = 5, LevelRequired = 24, Reduction = 0.25, MovePenalty = 0.06, Description = "Bronze chest plate over layered leather" }),
+	armor({ Id = "ChampionArmor", DisplayName = "Champion Armor", Order = 4, Price = 520, Tier = 6, LevelRequired = 41, Reduction = 0.35, MovePenalty = 0.10, Description = "Ornate battle-worn bronze of a Colosseum champion" }),
 }
 
 local byId: { [string]: ArmorDefinition } = {}

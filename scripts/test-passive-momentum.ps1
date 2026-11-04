@@ -115,18 +115,19 @@ end
 check(definitions.availableTier(24) == nil, "tier I locked below cost")
 check(definitions.availableTier(50).Tier == 2, "availability follows stored energy")
 local function distance(a,b) return math.sqrt((a.X-b.X)^2+(a.Y-b.Y)^2) end
-for _, positions in { ui.TouchLayoutPhone, ui.TouchLayoutTablet } do
-	check(positions.Attack.X < positions.Special.X, "Attack is on screen right of Special")
-	check(positions.Block.Y > positions.Attack.Y, "Block above Attack")
-	check(positions.Block.Y > positions.Special.Y, "Block above Special")
-	for _, pair in { {positions.Attack,positions.Special}, {positions.Attack,positions.Block}, {positions.Special,positions.Block} } do
-		check(distance(pair[1],pair[2]) > ui.TouchButtonSize, "combat buttons do not overlap")
+-- Touch rhombus: BLOCK top, ATTACK right, JUMP bottom, SPECIAL left, all from one centre and radius
+for _, layout in { ui.TouchRhombus.Phone, ui.TouchRhombus.Tablet } do
+	local o = ui.rhombusOffsets(layout.Radius)
+	check(o.Block.X == 0 and o.Block.Y == -layout.Radius, "BLOCK = C + (0, -r)")
+	check(o.Attack.X == layout.Radius and o.Attack.Y == 0, "ATTACK = C + (r, 0)")
+	check(o.Jump.X == 0 and o.Jump.Y == layout.Radius, "JUMP = C + (0, r)")
+	check(o.Special.X == -layout.Radius and o.Special.Y == 0, "SPECIAL = C + (-r, 0)")
+	for _, pair in { {o.Block,o.Attack}, {o.Attack,o.Jump}, {o.Jump,o.Special}, {o.Special,o.Block} } do
+		check(math.abs(distance(pair[1],pair[2]) - layout.Radius*math.sqrt(2)) < 1e-9, "neighbours are equally far apart")
+		check(distance(pair[1],pair[2]) >= layout.Size + ui.TouchButtonGap, "touch buttons never overlap (gap kept)")
 	end
-end
-for _, data in { {ui.TouchLayoutPhone,{X=60,Y=55},35}, {ui.TouchLayoutTablet,{X=110,Y=150},60} } do
-	for _, button in { data[1].Attack, data[1].Special, data[1].Block } do
-		check(distance(button,data[2]) > ui.TouchButtonSize/2+data[3], "combat button clears native jump nominal bounds")
-	end
+	check(distance(o.Block,o.Jump) == distance(o.Attack,o.Special), "both diagonals are equal (exact rhombus / square)")
+	check(ui.rhombusBox(layout.Size, layout.Radius) == layout.Size + 2*layout.Radius, "box holds the whole rhombus")
 end
 print("PASS: " .. checks .. " checks against actual Luau sources (mock Roblox services/clock).")
 '@

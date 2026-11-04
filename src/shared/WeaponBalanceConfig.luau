@@ -1,7 +1,7 @@
 --!strict
 -- PvE and PvP weapon values, configured SEPARATELY (applied on the server in SpecialMoveService).
 --   PvE  progression should be felt: a weapon deals more against zombies and bosses the higher its
---        gladiator level (LevelRequired). Starter weapons keep their full base damage, so beginners
+--        armory tier (Tier: the former level 1..6, kept when the career grew to 150 levels). Starter weapons keep their full base damage, so beginners
 --        still win their fights.
 --   PvP  fair duels: every weapon's basic attack is normalized to the same damage per second
 --        (PvPReferenceDPS) using its own damage, PvP multiplier and cooldown. Weapons still differ in
@@ -13,7 +13,7 @@ local WeaponDefinitions = require(script.Parent.WeaponDefinitions)
 local SpecialMoveDefinitions = require(script.Parent.SpecialMoveDefinitions)
 
 local WeaponBalanceConfig = {
-	-- PvE: multiplier = 1 + (LevelRequired - 1) * PvELevelStep, unless PvEOverride sets one
+	-- PvE: multiplier = 1 + (Tier - 1) * PvELevelStep, unless PvEOverride sets one
 	PvELevelStep = 0.08,
 	PvEOverride = table.freeze({}) :: { [string]: number }, -- e.g. { BattleAxe = 1.4 }
 
@@ -39,7 +39,7 @@ function WeaponBalanceConfig.pveFactor(weaponId: string): number
 	end
 	local override = WeaponBalanceConfig.PvEOverride[weaponId]
 	local weapon = WeaponDefinitions.ById[weaponId]
-	local factor = override or (if weapon then 1 + (weapon.LevelRequired - 1) * WeaponBalanceConfig.PvELevelStep else 1)
+	local factor = override or (if weapon then 1 + (weapon.Tier - 1) * WeaponBalanceConfig.PvELevelStep else 1)
 	pveCache[weaponId] = factor
 	return factor
 end

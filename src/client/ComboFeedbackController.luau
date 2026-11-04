@@ -82,9 +82,9 @@ function ComboFeedbackController.start(group: (string, Vector2, UDim2, UDim2?) -
 	onLayout(function(layout: Layout)
 		-- Touch: above the combat buttons on the right; otherwise just above the bottom hint
 		if layout.touch then
-			local positions = if layout.device == "Phone" then UiConfig.TouchLayoutPhone else UiConfig.TouchLayoutTablet
+			local rhombus = if layout.device == "Phone" then UiConfig.TouchRhombus.Phone else UiConfig.TouchRhombus.Tablet
 			frame.AnchorPoint = Vector2.new(1, 1)
-			frame.Position = UDim2.new(1, -16, 1, -(positions.Block.Y + 48))
+			frame.Position = UDim2.new(1, -16, 1, -(rhombus.Margin + UiConfig.rhombusBox(rhombus.Size, rhombus.Radius) + 12))
 		else
 			frame.AnchorPoint = Vector2.new(0.5, 1)
 			frame.Position = UDim2.new(0.5, 0, 1, -34)

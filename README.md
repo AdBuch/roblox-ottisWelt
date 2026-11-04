@@ -28,6 +28,7 @@ src/hub/PlaceRole, src/arena/PlaceRole   -> ReplicatedStorage.Shared.PlaceRole (
 src/hub/server/   -> ServerScriptService.Server.Place  (Hub only)
   Main.server                        builds the hero lobbies, starts data, shops, training, Hub matchmaking
   HubMatchService                    MatchRequest dispatch (rate limited), Solo / Co-op start, lobby prompts, live board
+  (src/server) LoadoutRequestService  equip OWNED gear from the lobby menu (server-validated, Hub only)
   PartyService                       parties 1-4 (create, invite, accept, ready, lock while queued)
   MatchmakingService                 cross-server queues (Co-op, Time, First to, Elimination), lease, claims, assignments
   ArenaReservationService            match id + ReserveServerAsync + match record + connection record + fighter tickets
@@ -36,6 +37,7 @@ src/hub/server/   -> ServerScriptService.Server.Place  (Hub only)
   FriendBattleService                server-side Roblox friend lists (cached)
   SpectatorJoinService               WATCH / WATCH RANDOM: atomic slot reservation, spectator ticket, teleport
 src/hub/client/   -> StarterPlayerScripts.Client.Place  (Hub only)
+  (src/client) LobbyMenuController     central lobby MENÜ: overview, inventory, career, modes, settings, controls (MenuSystem, ItemInfo)
   GameModeMenuController             PLAY menu: ZOMBIE BATTLES / TEAM BATTLES / WATCH LIVE, party panel
   ActiveBattlesController            the LIVE IN THE COLOSSEUM overlay
 src/arena/server/ -> ServerScriptService.Server.Place  (Arena only)
@@ -64,7 +66,7 @@ src/shared/   -> ReplicatedStorage.Shared
   SpecialMoveDefinitions             every basic, aerial and combination move as data (nothing charged)
   WeaponAttackDefinitions / WeaponSpecialDefinitions   contextual attack chains / Special gesture families and tiers
   ControlModeDefinitions / SpecialChargeDefinitions / ShieldDefenseConfig / MomentumConfig / BlockDefinitions   Classic controls / special charge tiers / shield defense by direction / Momentum / block poses
-  GladiatorLevelDefinitions / WeaponBalanceConfig   gladiator levels, titles, matchmaking gap / separate PvE and PvP weapon values
+  GladiatorLevelDefinitions / WeaponBalanceConfig   150 gladiator levels + rank titles (CÄSAR at 150; docs/GLADIATOR_CAREER.md), matchmaking gap / separate PvE and PvP weapon values
   CombatEffectsConfig / ZombieAttackDefinitions / SpectatorZoneDefinitions / CrowdQualityConfig   hit effects (no blood) / zombie attack sequences / tribune zones and quality
   CurrencyConfig                     Aura (progress, unlocks gear) and Denarii (money, buys gear)
   InputDefinitions / PvPBalanceConfig   input timing and mapping / PvP caps for specials and aerials

@@ -85,6 +85,8 @@ local ComboFeedbackController = load(script.Parent, "ComboFeedbackController")
 local PlayerAnimator = load(script.Parent, "PlayerAnimator")
 local OttiEntranceController = load(script.Parent, "OttiEntranceController")
 local TeleportStatusController = load(script.Parent, "TeleportStatusController")
+local MenuSystem = load(script.Parent, "MenuSystem")
+local LobbyMenuController = load(script.Parent, "LobbyMenuController")
 -- Build-time place role (Rojo project): the Hub shows the menus, the Arena the spectator tools
 local placeRoleModule = shared and shared:FindFirstChild("PlaceRole")
 local placeRole: string = if placeRoleModule and placeRoleModule:IsA("ModuleScript") then tostring(require(placeRoleModule) :: any) else "Hub"
@@ -101,7 +103,7 @@ for _, module in {
 	SpectatorController, InputController, SpecialChargeHudController, CombatSettingsController, SlideController, MomentumHudController,
 	CombatEffectsController, CombatCameraController,
 	ShopController, EffectsController, ZombieAnimator, OttiAnimator, DamageEffectsController, CrowdEffectsController,
-	BowController, ComboFeedbackController, PlayerAnimator, OttiEntranceController, TeleportStatusController,
+	BowController, ComboFeedbackController, PlayerAnimator, OttiEntranceController, TeleportStatusController, MenuSystem, LobbyMenuController,
 } do
 	if not module then
 		return
@@ -143,7 +145,7 @@ end
 local function canFight(): boolean
 	local state = gameState()
 	local character = player.Character
-	return (GameStates.isFighter(state) or GameStates.isInLobby(state)) and character ~= nil and character:GetAttribute("CombatZone") == true
+	return not MenuSystem.isOpen() and (GameStates.isFighter(state) or GameStates.isInLobby(state)) and character ~= nil and character:GetAttribute("CombatZone") == true
 end
 
 local function arenaAttr(name: string): any
@@ -171,9 +173,11 @@ menuGui.DisplayOrder = 20
 menuGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 menuGui.Parent = playerGui
 TeleportStatusController.start(menuGui, matchRequest, matchEvent, isArena)
+-- Big menus share MenuSystem: only one is open at a time (opening one closes the other)
+local modeMenu: any = nil
+local live: any = nil
 if not isArena and GameModeMenuController and ActiveBattlesController then
-	local modeMenu: any = nil
-	local live = ActiveBattlesController.start(menuGui, matchRequest, matchEvent, function()
+	live = ActiveBattlesController.start(menuGui, matchRequest, matchEvent, function()
 		if modeMenu then
 			modeMenu.open(nil)
 		end
@@ -183,12 +187,6 @@ if not isArena and GameModeMenuController and ActiveBattlesController then
 	end, function(text: string)
 		notify("Info", text)
 	end)
-	-- the overlay's MODE SELECTION button closes it and opens the menu
-	local openMenu = modeMenu.open
-	modeMenu.open = function(tab: string?)
-		live.close()
-		openMenu(tab)
-	end
 end
 
 -- CAMERA setting (saved)
@@ -196,9 +194,14 @@ local settings = CombatSettingsController.start(edge, preferenceEvent, function(
 	notify("Info", text)
 end)
 
-local aura = AuraDisplayController.start(hud.group, visibility, notify)
+local lobbyMenu: any = nil
+local aura = AuraDisplayController.start(hud.group, visibility, notify, function()
+	if lobbyMenu then
+		lobbyMenu.open("Overview") -- the level capsule opens the overview
+	end
+end)
 local controls = MobileControlsController.start(hud.group, visibility, hud.onLayout, function()
-	return hud.layout.touch
+	return hud.layout.touch and not MenuSystem.isOpen() -- hidden (and released) while a big menu is open
 end)
 MomentumHudController.start(hud.group, visibility, hud.onLayout, player, function() return hud.layout.touch end)
 
@@ -265,6 +268,64 @@ if combatAction and shieldBlock and shieldBlock:IsA("RemoteEvent") then
 	})
 else
 	warn(PREFIX, "CombatAction/ShieldBlock RemoteEvents not found; combat input is disabled")
+end
+
+------------------------------------------------------------------ big menus: input, controls, prompts
+local ProximityPromptService = game:GetService("ProximityPromptService")
+MenuSystem.onChanged(function(open: boolean)
+	if open then
+		if input then
+			input.suspend() -- a held special is cancelled (never fired), the guard is lowered
+		end
+		controls.releaseJump()
+		chargeHud.stop()
+	end
+	ProximityPromptService.Enabled = not open -- F / X / touch prompts can't buy or equip behind a menu
+	visibility.refresh() -- touch buttons hide while open and come back afterwards
+end)
+
+local function controlLines(): { string }
+	return {
+		"<b>TOUCH</b> · links der Bewegungsstick · rechts vier gleich große Tasten als Raute:",
+		"   BLOCK oben (an / aus) · SPEZIAL links (halten zum Aufladen, loslassen zum Auslösen) · ANGRIFF rechts · SPRUNG unten (halten = erneut springen)",
+		"   Mehrere Finger gleichzeitig sind möglich, z. B. laufen, blocken und springen. Freie Bildschirmfläche ziehen = Kamera.",
+		"<b>MAUS & TASTATUR</b> · WASD laufen · Linksklick Angriff (erneut = Kombo) · Rechtsklick Block an / aus · Q halten = Spezial · Leertaste Sprung · F interagieren · H Anzeige · M Menü",
+		"<b>GAMEPAD</b> · linker Stick laufen · R2 Angriff · L2 Block an / aus · X halten = Spezial · A Sprung · Y Menü · B schließt Menüs",
+		"<b>SPEZIAL-STUFEN</b> · I (tippen) · II (0,5 s halten) · III (1,5 s halten, voll bei 2,5 s) · kosten 25 / 50 / 75 Momentum · voll gehalten mit 100 Momentum = ULTIMATE",
+		"Solange ein Menü offen ist, lösen Eingaben keine Angriffe oder Spezialaktionen aus.",
+	}
+end
+
+if not isArena and LobbyMenuController then
+	local loadoutInstance = remotes and remotes:WaitForChild(Config.LoadoutRequestRemoteName, WAIT_TIMEOUT)
+	local hudPreferenceKey = Config.PreferencePrefix .. "HudMode"
+	lobbyMenu = LobbyMenuController.start({
+		gui = menuGui,
+		loadoutRemote = if loadoutInstance and loadoutInstance:IsA("RemoteFunction") then loadoutInstance else nil,
+		notify = function(text: string)
+			notify("Info", text)
+		end,
+		openModes = function(tab: string?)
+			if modeMenu then
+				modeMenu.open(tab) -- MenuSystem closes the lobby menu first (one big menu at a time)
+			end
+		end,
+		openLive = function()
+			if live then
+				live.open()
+			end
+		end,
+		getCameraShake = settings.getCameraShake,
+		setCameraShake = settings.setCameraShake,
+		getHudMode = visibility.getMode,
+		setHudMode = function(mode: string)
+			visibility.setMode(mode)
+			if preferenceEvent and player:GetAttribute(hudPreferenceKey) ~= mode then
+				preferenceEvent:FireServer("HudMode", mode)
+			end
+		end,
+		controlLines = controlLines,
+	})
 end
 
 ------------------------------------------------------------------ HUD and match feedback
@@ -486,6 +547,11 @@ local function refreshMatch()
 			local stats = if mode == "TeamBattle"
 				then ("Elims %d · Deaths %d · +%d Aura · +%d Denarii"):format(tonumber(player:GetAttribute(Config.EliminationsAttribute)) or 0, tonumber(player:GetAttribute(Config.DeathsAttribute)) or 0, earned, coins)
 				else ("Kills %d · +%d Aura · +%d Denarii"):format(kills, earned, coins)
+			-- the career after the reward (same numbers as the lobby menu's overview)
+			local progress = GladiatorLevelDefinitions.progressFor(tonumber(player:GetAttribute(Config.AuraAttribute)) or 0)
+			stats ..= if progress.isMax
+				then ("\nLevel 150 · %s · Höchster Rang erreicht"):format(progress.level.Title)
+				else ("\nLevel %d / 150 · %s · noch %d Aura bis Level %d"):format(progress.level.Level, progress.level.Title, progress.remaining, progress.level.Level + 1)
 			notifier.banner(title, subtitle, stats)
 		end
 		return

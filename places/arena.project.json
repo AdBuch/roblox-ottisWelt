@@ -26,6 +26,9 @@
         "MatchRequest": {
           "$className": "RemoteFunction"
         },
+        "LoadoutRequest": {
+          "$className": "RemoteFunction"
+        },
         "MatchEvent": {
           "$className": "RemoteEvent"
         }

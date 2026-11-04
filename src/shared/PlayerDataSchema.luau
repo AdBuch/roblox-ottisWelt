@@ -13,9 +13,23 @@
 -- gladiator level (GladiatorLevelDefinitions; levels are derived, not stored), the ControlMode and
 -- BloodFx preferences are gone (dropped on load), optional resetToken (PlayerDataResetConfig).
 -- v5 -> v6 needs no data change. A controlled test-data reset is prepared (off by default).
+-- v7: per-weapon special practice attempts.
+-- v8: the career grows to 150 levels (still derived from Aura: nobody loses Aura, Denarii or items;
+-- owned gear stays usable even if its LevelRequired rose) and the profile gets its own earnings
+-- history: `earnings` (Aura / Denarii EARNED since `since`; `complete` only for profiles tracked
+-- from their start), `session` (current play session across teleports), `lastBattle` and
+-- `activity` (active fighting seconds + Aura for the play-time estimate). Old profiles start these
+-- at 0 - no invented history. The migration only creates missing tables, so it can run repeatedly.
 
 local PlayerDataSchema = {
-	Version = 7, -- v7: per-weapon special practice attempts; older profiles start at zero
+	Version = 8,
+
+	-- A new play session starts when the profile was not seen for this long (teleports take seconds)
+	SessionGapSeconds = 20 * 60,
+
+	-- The optional play-time estimate needs real data: at least this many rewards AND this much
+	-- active fighting time (lobby waiting never counts). Below that the UI shows no time at all.
+	Estimate = table.freeze({ MinRewards = 25, MinActiveSeconds = 15 * 60 }),
 
 	-- Statistics (whole numbers, only ever increased by the server)
 	Stats = table.freeze({

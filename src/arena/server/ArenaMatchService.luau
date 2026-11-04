@@ -185,9 +185,10 @@ local function restart(current: PostMatch)
 		return
 	end
 	retries += 1
-	local def = MatchDefinitions.get(previous.mode)
+	local source = if mock and selectedBoss then newMockRecord() else previous
+	local def = MatchDefinitions.get(source.mode)
 	local teams = def ~= nil and def.Kind == "Team"
-	local record = table.clone(previous)
+	local record = table.clone(source)
 	record.matchId = ("%s_retry%d"):format((previous.matchId:gsub("_retry%d+$", "")), retries)
 	record.fighters = {}
 	for i, player in voters do
@@ -266,6 +267,11 @@ local function onEnded(result: MatchService.Result)
 	local def = definition()
 	local current: PostMatch = { fighters = fighters, retry = {}, decided = {}, canRetry = mock or (def ~= nil and def.Kind == "Zombies") }
 	postMatch = current
+	if mock and result.reason == "Studio boss selection" and #fighters > 0 then
+		current.retry = table.clone(fighters)
+		restart(current)
+		return
+	end
 	print(PREFIX, ("Match over (%s): waiting for RETRY / BACK TO LOBBY"):format(result.reason))
 	for _, player in Players:GetPlayers() do
 		Remotes.MatchEvent:FireClient(player, "PostMatch", { retry = current.canRetry and table.find(fighters, player) ~= nil, seconds = POST_MATCH_SECONDS })
@@ -297,7 +303,12 @@ function ArenaMatchService.selectStudioBoss(id: string): boolean
 	selectedBoss = id
 	Workspace:SetAttribute("StudioBossChoice", id)
 	if started then
-		if not MatchService.isFinished() then MatchService.cancel("Studio boss selection") end
+		if not MatchService.isFinished() then
+			MatchService.cancel("Studio boss selection")
+		elseif postMatch then
+			postMatch.retry = table.clone(postMatch.fighters)
+			restart(postMatch)
+		end
 	else
 		mockRecord = newMockRecord()
 		checkStart()
@@ -383,7 +394,7 @@ function ArenaMatchService.init(folder: Instance)
 	Remotes.MatchRequest.OnServerInvoke = function(player: Player, action: unknown, bossId: unknown)
 		if action == "StudioBoss" and type(bossId) == "string" then
 			local ok = ArenaMatchService.selectStudioBoss(bossId)
-			return { ok = ok, message = if ok then "Boss selected; local restart in up to 14 seconds" else "Studio test unavailable" }
+			return { ok = ok, message = if ok then "Boss selected; restarting local match" else "Studio test unavailable" }
 		end
 		if action == "ReturnToHub" then
 			backToLobby(player)

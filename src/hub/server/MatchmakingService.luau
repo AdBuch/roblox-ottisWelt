@@ -352,10 +352,11 @@ local function tickMode(mode: MatchTypes.MatchMode)
 		return
 	end
 	-- Team modes: the largest equal team size the waiting time allows, among entries whose gladiator
-	-- levels are close to the oldest entry's (the allowed gap widens while it waits)
+	-- levels are close to the oldest entry's (the allowed gap scales with its level and widens while it
+	-- waits; after MatchLevelGap.OpenSeconds anybody may meet)
 	local waited = now - entries[1].enqueuedAt
 	local anchorLevel = entries[1].level or 1
-	local gap = GladiatorLevelDefinitions.matchGap(waited)
+	local gap = GladiatorLevelDefinitions.matchGap(waited, anchorLevel) -- scales with the level (1..150)
 	local close: { QueueEntry } = {}
 	for _, entry in entries do
 		if math.abs((entry.level or anchorLevel) - anchorLevel) <= gap then

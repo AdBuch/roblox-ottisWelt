@@ -7,6 +7,9 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local Players = game:GetService("Players")
+
+local GameStates = require(ReplicatedStorage.Shared.GameStates)
 local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
 local Config = require(ReplicatedStorage.Shared.Config)
 local CurrencyConfig = require(ReplicatedStorage.Shared.CurrencyConfig)
@@ -20,14 +23,16 @@ export type RewardEvent = {
 
 local AuraService = {}
 
+local ACTIVITY_INTERVAL = 5 -- seconds between active-play samples
+
 -- Pays every recipient its Aura and Denarii (`fixedDenarii` overrides the Aura-based amount).
 local function grant(event: RewardEvent, fixedDenarii: number?)
 	for _, recipient in event.recipients do
 		local player = recipient.player
 		if player.Parent and recipient.amount > 0 then
 			local denarii = fixedDenarii or CurrencyConfig.denariiFor(recipient.amount)
-			InventoryService.addAura(player, recipient.amount)
-			InventoryService.addDenarii(player, denarii)
+			-- one call: balance + persistent earnings + session + last battle + activity, counted once
+			InventoryService.addReward(player, recipient.amount, denarii)
 			player:SetAttribute(Config.RunAuraAttribute, (tonumber(player:GetAttribute(Config.RunAuraAttribute)) or 0) + recipient.amount)
 			player:SetAttribute(Config.RunDenariiAttribute, (tonumber(player:GetAttribute(Config.RunDenariiAttribute)) or 0) + denarii)
 			Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Aura, recipient.amount, recipient.kind, denarii)
@@ -97,10 +102,38 @@ function AuraService.awardBossVictory(rewards: { { player: Player, amount: numbe
 	grant(event)
 end
 
-function AuraService.resetRunStats(player: Player)
+-- A battle starts for `player`: the run counters reset and the saved "last battle" begins (`mode`).
+function AuraService.resetRunStats(player: Player, mode: string?)
 	player:SetAttribute(Config.RunKillsAttribute, 0)
 	player:SetAttribute(Config.RunAuraAttribute, 0)
 	player:SetAttribute(Config.RunDenariiAttribute, 0)
+	if mode then
+		InventoryService.beginBattle(player, mode)
+	end
+end
+
+-- Active play time for the optional play-time estimate: only seconds in a fighting state
+-- (MATCH_ACTIVE / ROUND_COMPLETE) count - never lobby, countdown, spectating or results.
+local tracking = false
+function AuraService.startActivityTracking()
+	if tracking then
+		return
+	end
+	tracking = true
+	task.spawn(function()
+		local last = os.clock()
+		while true do
+			task.wait(ACTIVITY_INTERVAL)
+			local now = os.clock()
+			local elapsed = math.min(now - last, ACTIVITY_INTERVAL * 3) -- a stalled server never adds hours
+			last = now
+			for _, player in Players:GetPlayers() do
+				if GameStates.isFighter(player:GetAttribute(GameStates.StateAttribute)) then
+					InventoryService.addActiveSeconds(player, elapsed)
+				end
+			end
+		end
+	end)
 end
 
 return AuraService

@@ -82,6 +82,18 @@ local Config = {
 	EliminationsAttribute = "Eliminations",
 	DeathsAttribute = "Deaths",
 	AssistsAttribute = "Assists",
+	-- Earnings history (server-owned display copies of the saved profile, InventoryService)
+	EarnedAuraAttribute = "EarnedAura", -- Aura earned since EarnedSince (own counter, never the balance)
+	EarnedDenariiAttribute = "EarnedDenarii", -- Denarii earned since EarnedSince (spending never lowers it)
+	EarnedSinceAttribute = "EarnedSince", -- os.time() when tracking began
+	EarnedCompleteAttribute = "EarnedComplete", -- true: tracked since the profile began (lifetime totals)
+	SessionAuraAttribute = "SessionAura", -- this play session (survives Hub <-> Arena teleports)
+	SessionDenariiAttribute = "SessionDenarii",
+	LastBattleAuraAttribute = "LastBattleAura", -- nil until a battle was fought with tracking
+	LastBattleDenariiAttribute = "LastBattleDenarii",
+	LastBattleModeAttribute = "LastBattleMode",
+	AuraPerHourAttribute = "AuraPerActiveHour", -- 0 = not enough real data for an estimate
+	MatchTransitionAttribute = "MatchTransition", -- true while the Hub prepares this player's match (gear locked)
 
 	RemotesFolderName = "Remotes",
 	CombatActionRemoteName = "CombatAction",
@@ -90,6 +102,7 @@ local Config = {
 	PreferenceRemoteName = "SavePreference",
 	MatchRequestRemoteName = "MatchRequest", -- RemoteFunction: Hub menu / Arena spectator requests
 	MatchEventRemoteName = "MatchEvent", -- RemoteEvent: server -> client match / teleport status
+	LoadoutRequestRemoteName = "LoadoutRequest", -- RemoteFunction: equip an OWNED item from the lobby menu (Hub)
 
 	-- Multi-place (Hub / Arena)
 	ArenaRoleAttribute = "ArenaRole", -- FIGHTER | SPECTATOR | ELIMINATED_SPECTATOR (server-set)

@@ -15,7 +15,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local ExperienceConfig = require(Shared:WaitForChild("ExperienceConfig"))
 local MatchDefinitions = require(Shared:WaitForChild("MatchDefinitions"))
-local UiConfig = require(Shared:WaitForChild("UiConfig"))
+local MenuSystem = require(script.Parent.Parent:WaitForChild("MenuSystem"))
 
 export type ActiveBattles = {
 	open: () -> (),
@@ -25,8 +25,9 @@ export type ActiveBattles = {
 
 local ActiveBattlesController = {}
 
-local GOLD = UiConfig.Gold
-local CARD = Color3.fromRGB(44, 34, 26)
+local THEME = MenuSystem.Theme
+local GOLD = THEME.Gold
+local CARD = THEME.Surface
 
 local function make(className: string, props: { [string]: any }, parent: Instance?): any
 	local instance = Instance.new(className)
@@ -67,8 +68,8 @@ function ActiveBattlesController.start(gui: ScreenGui, request: RemoteFunction?,
 	local backdrop = make("TextButton", {
 		Name = "LiveBackdrop",
 		Size = UDim2.fromScale(1, 1),
-		BackgroundColor3 = Color3.new(0, 0, 0),
-		BackgroundTransparency = 0.55,
+		BackgroundColor3 = THEME.Backdrop,
+		BackgroundTransparency = THEME.BackdropTransparency,
 		Text = "",
 		AutoButtonColor = false,
 		Visible = false,
@@ -79,44 +80,44 @@ function ActiveBattlesController.start(gui: ScreenGui, request: RemoteFunction?,
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
 		Size = UDim2.new(0.94, 0, 0.78, 0),
-		BackgroundColor3 = Color3.fromRGB(22, 18, 14),
+		BackgroundColor3 = THEME.Panel,
 		BackgroundTransparency = 0.08,
 		Visible = false,
 		ZIndex = 21,
 	}, gui)
 	round(panel, 12)
 	make("UISizeConstraint", { MaxSize = Vector2.new(440, 640) }, panel)
-	make("UIStroke", { Color = GOLD, Transparency = 0.5, Thickness = 1.5 }, panel)
+	MenuSystem.stroke(panel, THEME.Bronze, 0.25, 2)
 	make("UIPadding", { PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10), PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, panel)
 
 	make("TextLabel", {
-		Size = UDim2.new(1, -44, 0, 26),
+		Size = UDim2.new(1, -52, 0, 44),
 		BackgroundTransparency = 1,
-		Font = Enum.Font.Garamond,
-		TextScaled = true,
+		Font = THEME.TitleFont,
+		TextSize = 18,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextColor3 = GOLD,
 		Text = "LIVE IN THE COLOSSEUM",
 		ZIndex = 22,
 	}, panel)
-	local close = button(panel, "✕", Color3.fromRGB(80, 60, 50), UDim2.fromOffset(36, 30))
+	local close = button(panel, "✕", THEME.Panel, UDim2.fromOffset(THEME.TouchTarget, THEME.TouchTarget))
 	close.AnchorPoint = Vector2.new(1, 0)
 	close.Position = UDim2.fromScale(1, 0)
 	close.ZIndex = 22
 
 	-- Top controls
-	local controls = make("Frame", { Position = UDim2.fromOffset(0, 34), Size = UDim2.new(1, 0, 0, 40), BackgroundTransparency = 1, ZIndex = 22 }, panel)
+	local controls = make("Frame", { Position = UDim2.fromOffset(0, 52), Size = UDim2.new(1, 0, 0, THEME.TouchTarget), BackgroundTransparency = 1, ZIndex = 22 }, panel)
 	make("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, controls)
-	local random = button(controls, "WATCH RANDOM", Color3.fromRGB(150, 40, 34), UDim2.new(0.5, -6, 1, 0), 1)
-	local refreshButton = button(controls, "⟳", Color3.fromRGB(70, 56, 40), UDim2.new(0.18, 0, 1, 0), 2)
-	local filterButton = button(controls, "FILTER", Color3.fromRGB(70, 56, 40), UDim2.new(0.32, -6, 1, 0), 3)
+	local random = button(controls, "WATCH RANDOM", THEME.Primary, UDim2.new(0.5, -6, 1, 0), 1)
+	local refreshButton = button(controls, "⟳", THEME.SurfaceRaised, UDim2.new(0.18, 0, 1, 0), 2)
+	local filterButton = button(controls, "FILTER", THEME.SurfaceRaised, UDim2.new(0.32, -6, 1, 0), 3)
 	for _, b in { random, refreshButton, filterButton } do
 		b.ZIndex = 22
 	end
 
 	-- Filter chips (horizontal scroll, shown on demand)
 	local chips = make("ScrollingFrame", {
-		Position = UDim2.fromOffset(0, 80),
+		Position = UDim2.fromOffset(0, 104),
 		Size = UDim2.new(1, 0, 0, 34),
 		BackgroundTransparency = 1,
 		ScrollBarThickness = 3,
@@ -131,8 +132,8 @@ function ActiveBattlesController.start(gui: ScreenGui, request: RemoteFunction?,
 
 	-- Card list
 	local list = make("ScrollingFrame", {
-		Position = UDim2.fromOffset(0, 80),
-		Size = UDim2.new(1, 0, 1, -80),
+		Position = UDim2.fromOffset(0, 104),
+		Size = UDim2.new(1, 0, 1, -104),
 		BackgroundTransparency = 1,
 		ScrollBarThickness = 5,
 		ScrollingDirection = Enum.ScrollingDirection.Y,
@@ -144,8 +145,8 @@ function ActiveBattlesController.start(gui: ScreenGui, request: RemoteFunction?,
 
 	local function setChipsVisible(visible: boolean)
 		chips.Visible = visible
-		list.Position = UDim2.fromOffset(0, if visible then 118 else 80)
-		list.Size = UDim2.new(1, 0, 1, if visible then -118 else -80)
+		list.Position = UDim2.fromOffset(0, if visible then 142 else 104)
+		list.Size = UDim2.new(1, 0, 1, if visible then -142 else -104)
 	end
 
 	local function invoke(action: string, arg: any?): any
@@ -200,7 +201,7 @@ function ActiveBattlesController.start(gui: ScreenGui, request: RemoteFunction?,
 				make("ImageLabel", {
 					Position = UDim2.fromOffset(8 + (i - 1) * 18, 8),
 					Size = UDim2.fromOffset(28, 28),
-					BackgroundColor3 = Color3.fromRGB(70, 56, 40),
+					BackgroundColor3 = THEME.SurfaceRaised,
 					Image = ("rbxthumb://type=AvatarHeadShot&id=%d&w=48&h=48"):format(friend.userId),
 					ZIndex = 24 + i,
 				}, frame)
@@ -252,7 +253,7 @@ function ActiveBattlesController.start(gui: ScreenGui, request: RemoteFunction?,
 			Text = ("%d Fighter%s · %d Watching%s"):format(info.fighters, if info.fighters == 1 then "" else "s", info.spectators, if info.mock then " · MOCK" else ""),
 			ZIndex = 24,
 		}, frame)
-		local watchButton = button(frame, if info.joinable then "WATCH" else "FULL", if info.joinable then Color3.fromRGB(150, 40, 34) else Color3.fromRGB(70, 60, 55), UDim2.fromOffset(84, 44))
+		local watchButton = button(frame, if info.joinable then "WATCH" else "FULL", if info.joinable then THEME.Primary else Color3.fromRGB(70, 60, 55), UDim2.fromOffset(84, 44))
 		watchButton.AnchorPoint = Vector2.new(1, 0.5)
 		watchButton.Position = UDim2.new(1, -8, 0.5, 0)
 		watchButton.ZIndex = 25
@@ -291,8 +292,8 @@ function ActiveBattlesController.start(gui: ScreenGui, request: RemoteFunction?,
 			make("TextLabel", { Size = UDim2.new(1, 0, 0, 60), BackgroundTransparency = 1, Font = Enum.Font.GothamBlack, TextSize = 16, TextColor3 = Color3.new(1, 1, 1), Text = "NO LIVE BATTLES RIGHT NOW", LayoutOrder = order, ZIndex = 23 }, list)
 			local row = make("Frame", { Size = UDim2.new(1, 0, 0, 44), BackgroundTransparency = 1, LayoutOrder = order + 1, ZIndex = 23 }, list)
 			make("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, HorizontalAlignment = Enum.HorizontalAlignment.Center, Padding = UDim.new(0, 8) }, row)
-			local again = button(row, "REFRESH", Color3.fromRGB(70, 56, 40), UDim2.fromOffset(120, 40))
-			local back = button(row, "MODE SELECTION", Color3.fromRGB(150, 40, 34), UDim2.fromOffset(150, 40))
+			local again = button(row, "REFRESH", THEME.SurfaceRaised, UDim2.fromOffset(120, 40))
+			local back = button(row, "MODE SELECTION", THEME.Primary, UDim2.fromOffset(150, 40))
 			again.ZIndex, back.ZIndex = 24, 24
 			again.Activated:Connect(function()
 				refresh()
@@ -326,13 +327,13 @@ function ActiveBattlesController.start(gui: ScreenGui, request: RemoteFunction?,
 	end
 
 	for i, name in MatchDefinitions.Filters do
-		local chip = button(chips, name, if name == filter then Color3.fromRGB(150, 40, 34) else Color3.fromRGB(70, 56, 40), UDim2.fromOffset(math.max(64, #name * 8 + 18), 30), i)
+		local chip = button(chips, name, if name == filter then THEME.Primary else THEME.SurfaceRaised, UDim2.fromOffset(math.max(64, #name * 8 + 18), 30), i)
 		chip.ZIndex = 23
 		chipButtons[name] = chip
 		chip.Activated:Connect(function()
 			filter = name
 			for other, b in chipButtons do
-				b.BackgroundColor3 = if other == filter then Color3.fromRGB(150, 40, 34) else Color3.fromRGB(70, 56, 40)
+				b.BackgroundColor3 = if other == filter then THEME.Primary else THEME.SurfaceRaised
 			end
 			filterButton.Text = if filter == "All" then "FILTER" else filter:upper()
 			refresh()
@@ -340,10 +341,14 @@ function ActiveBattlesController.start(gui: ScreenGui, request: RemoteFunction?,
 	end
 
 	local function closePanel()
+		if not isOpen then
+			return
+		end
 		isOpen = false
 		refreshToken += 1 -- stops the background refresh
 		panel.Visible = false
 		backdrop.Visible = false -- a closed overlay never catches input
+		MenuSystem.closed("LiveBattles")
 	end
 
 	local function openPanel()
@@ -351,9 +356,11 @@ function ActiveBattlesController.start(gui: ScreenGui, request: RemoteFunction?,
 			refresh()
 			return
 		end
+		MenuSystem.opening("LiveBattles") -- closes the lobby menu / mode menu first
 		isOpen = true
 		panel.Visible = true
 		backdrop.Visible = true
+		MenuSystem.focus(random)
 		refreshToken += 1
 		local myToken = refreshToken
 		refresh()
@@ -367,6 +374,7 @@ function ActiveBattlesController.start(gui: ScreenGui, request: RemoteFunction?,
 		end)
 	end
 
+	MenuSystem.register("LiveBattles", closePanel)
 	close.Activated:Connect(closePanel)
 	backdrop.Activated:Connect(closePanel)
 	refreshButton.Activated:Connect(refresh)

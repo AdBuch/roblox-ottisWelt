@@ -50,19 +50,47 @@ local UiConfig = {
 	HudToggleKey = Enum.KeyCode.H,
 	InfoPanelOpenInLobbyOnDesktop = false,
 
-	-- Touch controls (button centres measured from the bottom-right corner, base pixels). They sit
-	-- around Roblox's own jump button (= JUMP), never on it: on phones Roblox draws it 70 px at about
-	-- (60, 55) from the corner, on tablets 120 px at about (110, 150).
-	TouchButtonSize = 64,
-	TouchLayoutPhone = table.freeze({
-		Attack = Vector2.new(46, 145), -- right
-		Special = Vector2.new(174, 145), -- left
-		Block = Vector2.new(110, 235), -- centred above
+	-- Touch controls: FOUR equal buttons as an exact rhombus around one centre C with distance R:
+	--   BLOCK C+(0,-R) · ATTACK C+(R,0) · JUMP C+(0,R) · SPECIAL C+(-R,0)
+	-- (UiConfig.rhombusOffsets). Size = width = height of every button (base pixels; the HUD's UIScale
+	-- scales all four identically). Margin = distance of the rhombus box to the bottom-right screen
+	-- edge (the ScreenGui already keeps out of notches / safe areas). JUMP replaces Roblox's own
+	-- touch jump button, which is hidden (MobileControlsController), so there is never a fifth button.
+	-- Neighbouring centres are R*sqrt(2) apart: R >= (Size + Gap) / sqrt(2) keeps them apart.
+	TouchRhombus = table.freeze({
+		Phone = table.freeze({ Size = 66, Radius = 60, Margin = 14 }),
+		Tablet = table.freeze({ Size = 84, Radius = 76, Margin = 26 }),
 	}),
-	TouchLayoutTablet = table.freeze({
-		Attack = Vector2.new(76, 270),
-		Special = Vector2.new(204, 270),
-		Block = Vector2.new(140, 360),
+	TouchButtonGap = 12, -- minimum free space between two neighbouring touch buttons
+
+	-- Menus (MenuSystem): warm stone, dark surfaces, discreet bronze / gold accents
+	Menu = table.freeze({
+		Backdrop = Color3.fromRGB(8, 6, 4),
+		BackdropTransparency = 0.45,
+		Panel = Color3.fromRGB(27, 22, 18), -- dark surface
+		Surface = Color3.fromRGB(44, 37, 30), -- cards, rows
+		SurfaceRaised = Color3.fromRGB(62, 52, 42), -- tabs, secondary buttons
+		Stone = Color3.fromRGB(148, 131, 108), -- warm stone band
+		StoneDark = Color3.fromRGB(96, 84, 70),
+		Bronze = Color3.fromRGB(176, 125, 60),
+		Gold = Color3.fromRGB(238, 196, 96),
+		Text = Color3.fromRGB(246, 238, 224),
+		TextMuted = Color3.fromRGB(198, 186, 168),
+		Primary = Color3.fromRGB(150, 48, 34), -- Roman red: the main action
+		Equipped = Color3.fromRGB(86, 150, 86),
+		Locked = Color3.fromRGB(86, 80, 74),
+		Positive = Color3.fromRGB(130, 220, 130),
+		Negative = Color3.fromRGB(240, 130, 120),
+		TitleFont = Enum.Font.GothamBlack,
+		LabelFont = Enum.Font.GothamBold,
+		BodyFont = Enum.Font.Gotham,
+		TouchTarget = 44, -- minimum height / width of every interactive element (px)
+		Padding = 12,
+		Gap = 8,
+		Corner = 10,
+		MaxSize = Vector2.new(820, 600),
+		ToggleKey = Enum.KeyCode.M,
+		GamepadToggle = Enum.KeyCode.ButtonY,
 	}),
 
 	-- Colors
@@ -79,5 +107,21 @@ local UiConfig = {
 	-- Block stages I · II · III (touch button ring)
 	BlockStageColors = table.freeze({ Color3.fromRGB(120, 170, 235), Color3.fromRGB(70, 215, 200), Color3.fromRGB(255, 205, 70) }),
 }
+
+-- The four rhombus offsets from the common centre C (pixels, y grows downwards). Computed ONCE
+-- from the radius, never four independent guesses.
+function UiConfig.rhombusOffsets(radius: number): { [string]: Vector2 }
+	return {
+		Block = Vector2.new(0, -radius), -- top
+		Attack = Vector2.new(radius, 0), -- right
+		Jump = Vector2.new(0, radius), -- bottom
+		Special = Vector2.new(-radius, 0), -- left
+	}
+end
+
+-- Side length of the square box that holds the whole rhombus (button size + 2 radius).
+function UiConfig.rhombusBox(size: number, radius: number): number
+	return size + 2 * radius
+end
 
 return table.freeze(UiConfig)
