@@ -65,6 +65,9 @@ export type ZombieRig = {
 	leftElbow: Motor6D?,
 	rightKnee: Motor6D?,
 	leftKnee: Motor6D?,
+	bowPivot: Motor6D?,
+	bowArrowRest: Attachment?,
+	bowNock: Attachment?,
 }
 
 type MeshKind = "Sphere" | "Head"
@@ -75,7 +78,9 @@ function ZombieFactory.build(def: ZombieDefinition, appearanceSeed: number?): Zo
 	local body = def.Body
 	local gear = def.Gear
 	local S = body.Scale
-	local legionary = def.Id == "LegionRemnant"
+	local legionary = def.Id == "LegionRemnant" or def.Id == "TestudoLegionary"
+	local mounted = def.Id == "MountedPraetorian"
+	local terracotta = def.Id == "TerracottaSamurai"
 	local rng = if appearanceSeed then Random.new(appearanceSeed) else Random.new()
 	local variant = if legionary then rng:NextInteger(1, 4) else 0
 	local CLOTH = if legionary then gear.ClothColor:Lerp(LEATHER, (variant - 1) * 0.06) else gear.ClothColor
@@ -105,6 +110,11 @@ function ZombieFactory.build(def: ZombieDefinition, appearanceSeed: number?): Zo
 		part.CFrame = scaled(cframe)
 		part.Color = color
 		part.Material = material
+		if terracotta and material ~= Enum.Material.Neon and material ~= Enum.Material.Metal then
+			local clay = if color == SKIN then Color3.fromRGB(175, 106, 71) else Color3.fromRGB(119, 68, 48)
+			part.Color = clay:Lerp(color, 0.18)
+			part.Material = Enum.Material.Slate
+		end
 		part.CanCollide = false
 		part.CanTouch = false
 		part.CanQuery = false
@@ -119,7 +129,7 @@ function ZombieFactory.build(def: ZombieDefinition, appearanceSeed: number?): Zo
 			specialMesh.MeshType = if mesh == "Sphere" then Enum.MeshType.Sphere else Enum.MeshType.Head
 			specialMesh.Parent = part
 		end
-		if color == SKIN then
+		if color == SKIN and not terracotta then
 			part:SetAttribute("Skin", true) -- recolored by the damage states
 		end
 		part.Parent = model
@@ -191,7 +201,7 @@ function ZombieFactory.build(def: ZombieDefinition, appearanceSeed: number?): Zo
 	-- segment. Upper segments keep the names RightArm / LeftArm / RightLeg / LeftLeg, so every
 	-- existing reference (shoulders, hips, loss keys) still points at the same logical limb.
 	-- Other types keep single-part limbs: the lower-segment fields then just alias the upper part.
-	local jointed = legionary
+	local jointed = legionary or gear.Weapon == "Bow"
 	local upperArmLen = if jointed then Arm.Y * 0.52 else Arm.Y
 	local lowerArmLen = Arm.Y - upperArmLen
 	local armUpperY = (shoulderY + 0.25) - upperArmLen / 2 -- equals armY when not jointed
@@ -204,7 +214,8 @@ function ZombieFactory.build(def: ZombieDefinition, appearanceSeed: number?): Zo
 	local lowerLegY = kneeY - lowerLegLen / 2
 
 	-- Core rig. The root is the zombie's solid body (sized to the torso); everything else is visual.
-	local rootSize = Vector3.new(math.max(2, T.X * 0.8), 2, math.max(1.2, T.Z * 0.85))
+	local rootSize = if mounted then Vector3.new(2.6, 2, 4.8)
+		else Vector3.new(math.max(2, T.X * 0.8), 2, math.max(1.2, T.Z * 0.85))
 	local root = newPart("HumanoidRootPart", rootSize, CFrame.new(0, legLen + 1, 0), SKIN, smooth)
 	root.Transparency = 1
 	root.CanCollide = true
@@ -486,6 +497,9 @@ function ZombieFactory.build(def: ZombieDefinition, appearanceSeed: number?): Zo
 
 	-- Weapon in the right hand (points forward while the arm hangs; raised for attacks)
 	local hx = shoulderX
+	local bowPivot: Motor6D? = nil
+	local bowArrowRest: Attachment? = nil
+	local bowNock: Attachment? = nil
 	if gear.Weapon == "Gladius" or gear.Weapon == "LargeSword" then
 		local k = if gear.Weapon == "LargeSword" then 1.45 else 1
 		add(rightForearm, "Grip", Vector3.new(0.26, 0.26, 0.8 * k), Vector3.new(hx, handY, -0.15), LEATHER_DARK, leather)
@@ -493,6 +507,17 @@ function ZombieFactory.build(def: ZombieDefinition, appearanceSeed: number?): Zo
 		add(rightForearm, "Guard", Vector3.new(0.9 * k, 0.22, 0.22), Vector3.new(hx, handY, -0.62 * k), if k > 1 then GOLD else BRONZE, metal)
 		add(rightForearm, "Blade", Vector3.new(0.14, 0.42 * k, 2.0 * k), Vector3.new(hx, handY, -0.62 * k - 1.05 * k), STEEL, Enum.Material.Metal)
 		add(rightForearm, "Tip", Vector3.new(0.14, 0.3 * k, 0.3 * k), Vector3.new(hx, handY, -0.62 * k - 2.1 * k), STEEL, Enum.Material.Metal, CFrame.Angles(math.rad(45), 0, 0))
+	elseif gear.Weapon == "Nunchaku" then
+		local grip = add(rightForearm, "NunchakuGrip", Vector3.new(1.55, 0.3, 0.3),
+			Vector3.new(hx, handY, -0.6), WOOD, Enum.Material.Wood, faceForward, CYLINDER)
+		local pivot = Vector3.new(hx, handY, -1.72)
+		local freeHandle = newPart("NunchakuFreeHandle", Vector3.new(0.3, 1.5, 0.3),
+			CFrame.new(pivot - Vector3.new(0, 0.93, 0)), WOOD, Enum.Material.Wood, nil, "Head")
+		freeHandle:SetAttribute("Limb", "RightArm")
+		local swing = motor("NunchakuSwing", grip, freeHandle, pivot)
+		swing:SetAttribute("Rest", swing.C0)
+		add(grip, "NunchakuCord", Vector3.new(0.11, 0.11, 0.37), pivot + Vector3.new(0, 0, 0.19), NET, fabric)
+		add(freeHandle, "NunchakuLink", Vector3.new(0.11, 0.22, 0.11), pivot - Vector3.new(0, 0.09, 0), NET, fabric)
 	elseif gear.Weapon == "Club" then
 		add(rightForearm, "Shaft", Vector3.new(2.6, 0.5, 0.5), Vector3.new(hx, handY, -1.0), WOOD, Enum.Material.Wood, faceForward, CYLINDER)
 		add(rightForearm, "ClubHead", Vector3.new(1.8, 1.1, 1.1), Vector3.new(hx, handY, -2.9), WOOD, Enum.Material.Wood, faceForward, CYLINDER)
@@ -504,12 +529,31 @@ function ZombieFactory.build(def: ZombieDefinition, appearanceSeed: number?): Zo
 	elseif gear.Weapon == "Bow" then
 		-- Roman recurve bow in the LEFT hand (vertical), the right hand draws
 		local bx, by, bz = -shoulderX, handY, -0.35
-		add(leftForearm, "BowGrip", Vector3.new(0.22, 0.5, 0.22), Vector3.new(bx, by, bz), LEATHER_DARK, leather)
-		for _, dir in { 1, -1 } do
-			add(leftForearm, "BowLimb", Vector3.new(0.16, 1.5, 0.16), Vector3.new(bx, by + dir * 0.9, bz - 0.25), WOOD, Enum.Material.Wood, CFrame.Angles(math.rad(dir * 18), 0, 0))
-			add(leftForearm, "BowTip", Vector3.new(0.14, 0.45, 0.14), Vector3.new(bx, by + dir * 1.7, bz - 0.2), BRONZE, metal, CFrame.Angles(math.rad(-dir * 35), 0, 0))
+		local center = Vector3.new(bx, by, bz)
+		local grip = newPart("BowGrip", Vector3.new(0.22, 0.5, 0.22), CFrame.new(center), LEATHER_DARK, leather)
+		grip:SetAttribute("Limb", "LeftArm")
+		bowPivot = motor("BowPivot", leftForearm, grip, center)
+		local function attachment(name: string, offset: Vector3): Attachment
+			local point = Instance.new("Attachment")
+			point.Name = name
+			point.Position = offset * S
+			point.Parent = grip
+			return point
 		end
-		add(leftForearm, "BowString", Vector3.new(0.04, 3.5, 0.04), Vector3.new(bx, by, bz + 0.15), NET, fabric)
+		local nock = attachment("BowNock", Vector3.new(0, 0.24, 0.15))
+		bowNock = nock
+		bowArrowRest = attachment("BowArrowRest", Vector3.new(0, 0.24, -0.25))
+		for _, dir in { 1, -1 } do
+			add(grip, "BowLimb", Vector3.new(0.16, 1.5, 0.16), Vector3.new(bx, by + dir * 0.9, bz + 0.05), WOOD, Enum.Material.Wood, CFrame.Angles(math.rad(-dir * 18), 0, 0))
+			add(grip, "BowTip", Vector3.new(0.14, 0.45, 0.14), Vector3.new(bx, by + dir * 1.7, bz + 0.15), BRONZE, metal, CFrame.Angles(math.rad(dir * 35), 0, 0))
+			local string = Instance.new("Beam")
+			string.Attachment0 = attachment("BowStringEnd", Vector3.new(0, dir * 1.7, 0.15))
+			string.Attachment1 = nock
+			string.Width0, string.Width1 = 0.04, 0.04
+			string.Color = ColorSequence.new(NET)
+			string.FaceCamera = true
+			string.Parent = grip
+		end
 		add(rightForearm, "DrawGlove", Vector3.one * Arm.X * 0.7, Vector3.new(hx, handY - 0.1, -0.1), LEATHER, leather, nil, BALL)
 	else -- Spear (long reach: the visible shaft matches the validated attack range)
 		add(rightForearm, "Shaft", Vector3.new(5.6, 0.22, 0.22), Vector3.new(hx, handY, -1.9), WOOD, Enum.Material.Wood, faceForward, CYLINDER)
@@ -590,10 +634,57 @@ function ZombieFactory.build(def: ZombieDefinition, appearanceSeed: number?): Zo
 		add(leftForearm, "NetWeight", Vector3.one * 0.25, netCenter + Vector3.new(0.3, -0.35, -0.3), Color3.fromRGB(90, 90, 95), Enum.Material.Metal, nil, BALL)
 	end
 
+	if def.Id == "ZombieNinja" or def.Id == "NunchakuNinja" or def.Id == "NinjaArcher" then
+		add(head, "NinjaFaceWrap", Vector3.new(H.X * 1.02, H.Y * 0.46, H.Z * 1.06),
+			Vector3.new(0, headY - H.Y * 0.2, -0.05), CLOTH, fabric, nil, nil, "Head")
+	end
+	if terracotta then
+		for row = 0, 3 do
+			for column = -2, 2 do
+				local x = (column + (row % 2 - 0.5) * 0.45) * T.X * 0.17
+				local y = torsoTop - T.Y * (0.22 + row * 0.18)
+				add(torso, "ClayLamella", Vector3.new(T.X * 0.15, T.Y * 0.15, 0.17),
+					Vector3.new(x, y, -T.Z * 0.57), if row % 2 == 0 then BRONZE else CLOTH, smooth)
+			end
+		end
+	end
+
+	if mounted then
+		local hide = Color3.fromRGB(70, 76, 69)
+		local mane = Color3.fromRGB(39, 39, 43)
+		local barrel = add(root, "HorseBarrel", Vector3.new(2.6, 2.7, 5.3), Vector3.new(0, 0.45, 0),
+			hide, smooth, nil, nil, "Sphere")
+		add(barrel, "HorseNeck", Vector3.new(1.25, 2.8, 1.65), Vector3.new(0, 1.75, -1.95),
+			hide, smooth, CFrame.Angles(math.rad(-24), 0, 0), nil, "Sphere")
+		add(barrel, "HorseHead", Vector3.new(1.15, 1.25, 2), Vector3.new(0, 2.75, -2.65),
+			hide, smooth, CFrame.Angles(math.rad(-14), 0, 0), nil, "Head")
+		add(barrel, "HorseMane", Vector3.new(0.5, 2.5, 0.55), Vector3.new(0, 2, -1.48),
+			mane, smooth, CFrame.Angles(math.rad(-24), 0, 0), nil, "Sphere")
+		add(barrel, "HorseTail", Vector3.new(0.48, 2.3, 0.5), Vector3.new(0, 0.18, 2.5),
+			mane, smooth, CFrame.Angles(math.rad(-28), 0, 0), nil, "Sphere")
+		add(barrel, "SaddleCloth", Vector3.new(2.75, 0.22, 2.4), Vector3.new(0, 1.63, 0.25), CLOTH, fabric)
+		for _, side in { -1, 1 } do
+			add(barrel, "HorseEar", Vector3.new(0.3, 0.64, 0.33), Vector3.new(side * 0.34, 3.43, -2.04),
+				hide, smooth, nil, nil, "Head")
+			add(barrel, "HorseEye", Vector3.new(0.12, 0.16, 0.2), Vector3.new(side * 0.55, 2.87, -2.78),
+				Color3.fromRGB(225, 148, 62), Enum.Material.Neon, nil, BALL)
+			for _, row in { -1, 1 } do
+				local index = (if row == -1 then 0 else 2) + (if side == -1 then 1 else 2)
+				local pivot = Vector3.new(side * 0.86, 0.1, row * 1.67)
+				local leg = newPart("HorseLeg" .. index, Vector3.new(0.52, 2.25, 0.6),
+					CFrame.new(pivot - Vector3.new(0, 1.07, 0)), hide, smooth, nil, "Head")
+				motor("HorseGait" .. index, barrel, leg, pivot)
+				add(leg, "HorseHoof", Vector3.new(0.59, 0.36, 0.71), pivot - Vector3.new(0, 2.03, 0),
+					mane, smooth, nil, nil, "Head")
+			end
+		end
+		model:SetAttribute("Mounted", true)
+	end
+
 	-- Humanoid (R15 rules: HipHeight = ground to bottom of the root part)
 	local humanoid = Instance.new("Humanoid")
 	humanoid.RigType = Enum.HumanoidRigType.R15
-	humanoid.HipHeight = legLen * S
+	humanoid.HipHeight = (legLen + (if mounted then 2.25 else 0)) * S
 	humanoid.MaxHealth = def.Health
 	humanoid.Health = def.Health
 	humanoid.WalkSpeed = def.WalkSpeed
@@ -662,6 +753,9 @@ function ZombieFactory.build(def: ZombieDefinition, appearanceSeed: number?): Zo
 		leftElbow = leftElbow,
 		rightKnee = rightKnee,
 		leftKnee = leftKnee,
+		bowPivot = bowPivot,
+		bowArrowRest = bowArrowRest,
+		bowNock = bowNock,
 	}
 end
 

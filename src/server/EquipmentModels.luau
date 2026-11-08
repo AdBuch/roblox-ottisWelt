@@ -135,7 +135,6 @@ local function bow(add: AddFn)
 		end
 		add("Nock", Vector3.one * 0.2, CFrame.new(0, -0.65, 2.4 * side), BRONZE, Enum.Material.Metal, BALL)
 	end
-	add("String", Vector3.new(0.05, 0.05, 4.8), CFrame.new(0, -0.65, 0), Color3.fromRGB(235, 230, 215), Enum.Material.Fabric)
 	add("Wrap", Vector3.new(0.34, 0.34, 0.3), CFrame.new(0, 0, 0.3), BRONZE, Enum.Material.Metal)
 	add("Wrap", Vector3.new(0.34, 0.34, 0.3), CFrame.new(0, 0, -0.3), BRONZE, Enum.Material.Metal)
 end
@@ -200,7 +199,7 @@ local function battleAxe(add: AddFn)
 end
 
 function EquipmentModels.buildWeapon(id: string): (Model, BasePart)
-	return build(id, function(add)
+	local model, core = build(id, function(add)
 		if id == "LegionSword" then
 			sword(add, STEEL, Enum.Material.Metal, 2.7, BRONZE, true)
 		elseif id == "HunterBow" then
@@ -219,6 +218,24 @@ function EquipmentModels.buildWeapon(id: string): (Model, BasePart)
 			sword(add, RUST, Enum.Material.CorrodedMetal, 2.1, Color3.fromRGB(120, 90, 60), false)
 		end
 	end)
+	if id == "HunterBow" then
+		local nock = Instance.new("Attachment")
+		nock.Name = "BowNock"
+		nock.Position = Vector3.new(0, -0.65, 0.3)
+		nock.Parent = core
+		for _, side in { -1, 1 } do
+			local tip = Instance.new("Attachment")
+			tip.Position = Vector3.new(0, -0.65, 2.4 * side)
+			tip.Parent = core
+			local string = Instance.new("Beam")
+			string.Attachment0, string.Attachment1 = tip, nock
+			string.Width0, string.Width1 = 0.04, 0.04
+			string.FaceCamera = true
+			string.Color = ColorSequence.new(Color3.fromRGB(235, 230, 215))
+			string.Parent = core
+		end
+	end
+	return model, core
 end
 
 -- The second dagger of the Twin Arena Daggers (left hand, replaces the shield).

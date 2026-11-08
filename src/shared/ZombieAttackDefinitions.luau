@@ -27,6 +27,7 @@ export type Step = {
 	Heavy: boolean?,
 	Pierce: number?, -- block pierce override
 	Knockback: number?,
+	KnockdownSeconds: number?,
 	Forward: number?, -- Move: studs (negative = back)
 	Side: number?, -- Move: sideways studs
 	Recovery: number?, -- seconds after the step
@@ -72,6 +73,30 @@ local function seq(id: string, name: string, weight: number, cooldown: number, c
 end
 
 local ByZombie: { [string]: { Sequence } } = {
+	ZombieNinja = {
+		seq("TwinCut", "TWIN CUT", 2, 0.65, "Any", { hit("SlashL", 1, 1), hit("SlashR", 0.85, 0.8) }, { Recovery = 0.16 }),
+		seq("QuickThrust", "QUICK THRUST", 2, 0.4, "Any", { hit("Thrust", 1.15, 1.15) }, { Recovery = 0.2 }),
+	},
+	NunchakuNinja = {
+		seq("Trip", "NUNCHAKU TRIP", 3, 2.8, "Any", {
+			hit("Low", 1.45, 0.85, { Height = "Low", Arc = 95, KnockdownSeconds = 0.75 }),
+		}, { Recovery = 0.35 }),
+		seq("Rebound", "NUNCHAKU REBOUND", 2, 1.2, "Any", {
+			hit("SlashR", 0.85, 0.65), hit("SlashL", 0.85, 0.65),
+		}),
+	},
+	TerracottaSamurai = {
+		seq("ClayCleaver", "CLAY CLEAVER", 3, 2.2, "Any", {
+			hit("Overhead", 1.2, 1.2, { Height = "High", Arc = 75, Heavy = true }),
+		}, { Recovery = 0.65 }),
+		seq("StoneSweep", "STONE SWEEP", 2, 2.6, "Any", {
+			hit("Wide", 1.1, 0.9, { Arc = 130, Knockback = 16 }),
+		}, { Recovery = 0.45 }),
+	},
+	MountedPraetorian = {
+		seq("CavalryThrust", "CAVALRY THRUST", 2, 0.75, "Any", { hit("Thrust", 1, 1, { Arc = 65, Knockback = 12 }) }),
+		seq("RiderSweep", "RIDER SWEEP", 1, 1.25, "Any", { hit("SlashR", 1.15, 1.15, { Arc = 105 }) }),
+	},
 	LegionRemnant = {
 		seq("RightSlash", "RIGHT SLASH", 2, 0, "Any", { hit("SlashR", 1, 1) }),
 		seq("LeftSlash", "LEFT SLASH", 2, 0, "Any", { hit("SlashL", 1, 1) }),
@@ -180,6 +205,7 @@ local ZombieAttackDefinitions = {
 }
 
 function ZombieAttackDefinitions.forZombie(id: string): { Sequence }
+	if id == "NinjaArcher" then return ByZombie.UndeadSagittarius end
 	return ByZombie[id] or ByZombie.LegionRemnant
 end
 

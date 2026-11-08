@@ -512,6 +512,7 @@ local function refreshMatch()
 	local state = gameState()
 	local mode = tostring(arenaAttr(Config.MatchModeAttribute) or "")
 	local round = tonumber(arenaAttr(Config.RoundAttribute)) or 0
+	local campaignStage = tonumber(arenaAttr(Config.CampaignStageAttribute))
 	local roundMax = tonumber(arenaAttr(Config.RoundMaxAttribute)) or 7
 	local alive = tonumber(arenaAttr(Config.ZombiesAliveAttribute)) or 0
 	local countdown = tonumber(arenaAttr(Config.CountdownAttribute)) or 0
@@ -524,13 +525,14 @@ local function refreshMatch()
 
 	-- Compact round line: one slim line, shown briefly on every change
 	if zombieMode and phase == "Fighting" then
-		hud.setRoundLine(("ROUND %d / %d   •   %d LEFT"):format(round, roundMax, alive))
+		local label = if campaignStage then ("LEVEL %d  •  "):format(campaignStage) else ""
+		hud.setRoundLine(label .. ("ROUND %d / %d   •   %d LEFT"):format(round, roundMax, alive))
 	elseif zombieMode and phase == "Intermission" then
 		hud.setRoundLine(("NEXT ROUND   %d"):format(countdown), true)
 	elseif zombieMode and phase == "Starting" then
 		hud.setRoundLine(("GET READY   %d"):format(countdown), true)
 	elseif uiState == "Spectator" and phase == "Boss" then
-		hud.setRoundLine("ROUND 7 — OTTI", true)
+		hud.setRoundLine(("ROUND %d — %s"):format(round, bossName), true)
 	else
 		hud.setRoundLine(nil)
 	end
@@ -543,7 +545,7 @@ local function refreshMatch()
 			local coins = tonumber(player:GetAttribute(Config.RunDenariiAttribute)) or 0
 			local kills = tonumber(player:GetAttribute(Config.RunKillsAttribute)) or 0
 			local title = if result ~= "" then result elseif state == GameStates.Victory then "VICTORY" else "MATCH COMPLETE"
-			local subtitle = if result:match(" DEFEATED$") then "CHAMPION OF THE COLOSSEUM" elseif state == GameStates.Victory then "GAME COMPLETE" else nil
+			local subtitle = if result:match(" DEFEATED$") then bossTitle elseif state == GameStates.Victory then "GAME COMPLETE" else nil
 			local stats = if mode == "TeamBattle"
 				then ("Elims %d · Deaths %d · +%d Aura · +%d Denarii"):format(tonumber(player:GetAttribute(Config.EliminationsAttribute)) or 0, tonumber(player:GetAttribute(Config.DeathsAttribute)) or 0, earned, coins)
 				else ("Kills %d · +%d Aura · +%d Denarii"):format(kills, earned, coins)
@@ -631,7 +633,7 @@ task.spawn(function()
 		return
 	end
 	for _, name in {
-		Config.MatchModeAttribute, Config.RoundAttribute, Config.RoundMaxAttribute, Config.ZombiesAliveAttribute,
+		Config.MatchModeAttribute, Config.CampaignStageAttribute, Config.RoundAttribute, Config.RoundMaxAttribute, Config.ZombiesAliveAttribute,
 		Config.CountdownAttribute, Config.WavePhaseAttribute, Config.ResultAttribute, Config.BossIntroAttribute,
 		Config.BossActiveAttribute,
 	} do

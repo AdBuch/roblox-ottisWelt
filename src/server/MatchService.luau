@@ -5,7 +5,7 @@
 --
 --   Match:  COUNTDOWN -> MATCH_ACTIVE <-> ROUND_COMPLETE -> VICTORY | MATCH_COMPLETE -> CLEANUP
 --           (published as "MatchState" on the arena folder)
---   Solo    : one fighter, rounds 1-2-4-8-16-32, then Round 7 (Otti), death ends the run.
+--   Solo    : one fighter, six zombie rounds and a boss per campaign stage, death ends the run.
 --   Co-op   : 1-4 fighters, scaled rounds, shared progression; the dead wait on the tribune and
 --             return with 60 % health after a completed round; a full wipe ends it.
 --   Team    : Red vs Blue via TeamBattleService with a submode (Time / First to / Elimination).
@@ -21,8 +21,10 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local GameModeDefinitions = require(ReplicatedStorage.Shared.GameModeDefinitions)
 local GameStates = require(ReplicatedStorage.Shared.GameStates)
 local OttiBossConfig = require(ReplicatedStorage.Shared.OttiBossConfig)
+local RoundDefinitions = require(ReplicatedStorage.Shared.RoundDefinitions)
 local TeamModeDefinitions = require(ReplicatedStorage.Shared.TeamModeDefinitions)
 local Arena = require(script.Parent.Arena)
+local Campaign = require(script.Parent.ArenaCampaignProgress)
 local AuraService = require(script.Parent.AuraService)
 local CombatEffects = require(script.Parent.CombatEffects)
 local CombatRules = require(script.Parent.CombatRules)
@@ -66,6 +68,8 @@ type Match = {
 	rewarded: boolean, -- match rewards are paid at most once
 	bossRewarded: boolean,
 	boss: string?, -- BOSS_SOLO: the boss fought directly (Otti, Kroko or Schili); nil = zombie run
+	campaignKey: string?,
+	campaignStage: number,
 }
 
 local MatchService = {}
@@ -73,6 +77,7 @@ local MatchService = {}
 local arenaFolder: Instance? = nil
 local hooks: Hooks? = nil
 local match: Match? = nil
+local nextMatchId = 0
 local finished = false -- this server's one match is over (no second match on a reserved server)
 
 ------------------------------------------------------------------------------------------
@@ -155,6 +160,7 @@ local function cleanupMatch(reason: string, victory: boolean)
 	print(PREFIX, ("Match %d (%s) completed: %s"):format(current.id, current.mode, reason))
 
 	WaveService.abort()
+	if arenaFolder then arenaFolder:SetAttribute(Config.CampaignStageAttribute, nil) end
 	OttiBossService.stop()
 	OttiSpectatorService.stop()
 	Arena.setSpawnBarriers(false)
@@ -277,9 +283,11 @@ local function onZombieParticipantDied(current: Match, player: Player)
 	end
 end
 
--- Otti defeated: boss reward exactly once, then the victory screen and the return to the Hub.
+local startCampaignWave: (Match) -> ()
+
+-- Each victory unlocks the next chapter for this roster.
 local function onBossDefeated(current: Match, damageBy: { [Player]: number })
-	if match ~= current or current.ended or current.bossRewarded then
+	if match ~= current or current.ended or current.rewarded or current.bossRewarded then
 		return
 	end
 	current.bossRewarded = true
@@ -299,12 +307,39 @@ local function onBossDefeated(current: Match, damageBy: { [Player]: number })
 		end
 	end
 	AuraService.awardBossVictory(rewards)
-	endZombieMatch(current, true, string.upper(current.boss or "Otti") .. " DEFEATED")
+	local stage = current.campaignStage
+	local bossName = current.boss or Campaign.Bosses[stage]
+	local key = current.campaignKey
+	local saved = not key or Campaign.clearStage(key, stage)
+	if match ~= current or current.ended or current.rewarded then return end
+	if not saved then
+		for _, player in current.participants do
+			message(player, "Campaign checkpoint could not be saved.", false)
+		end
+		endZombieMatch(current, true, string.upper(bossName) .. " DEFEATED")
+		return
+	end
+	if key and stage < #Campaign.Bosses then
+		for _, player in current.participants do
+			message(player, ("%s defeated · stage %d unlocked"):format(bossName, stage + 1), true)
+		end
+		task.delay(3, function()
+			if match ~= current or current.ended or current.rewarded then return end
+			OttiBossService.stop()
+			OttiSpectatorService.begin()
+			reviveWaitingPlayers(current)
+			current.campaignStage += 1
+			current.bossRewarded = false
+			startCampaignWave(current)
+		end)
+	else
+		endZombieMatch(current, true, string.upper(bossName) .. " DEFEATED")
+	end
 end
 
 -- Round 7: after the last Round 6 zombie, clean the arena and start the Otti encounter.
 local function startBossRound(current: Match)
-	if match ~= current or current.ended then
+	if match ~= current or current.ended or current.rewarded then
 		return
 	end
 	WaveService.setBossPhase("BossIntro")
@@ -315,8 +350,12 @@ local function startBossRound(current: Match)
 	end
 	ProjectileService.clear()
 	CombatEffects.clear() -- detached limbs, markers
+	local key = current.campaignKey
+	local firstAttempt = key ~= nil and Campaign.beginBoss(key, current.campaignStage)
+	if match ~= current or current.ended or current.rewarded then return end
 	OttiBossService.startEncounter({
-		companion = current.boss,
+		companion = current.boss or Campaign.Bosses[current.campaignStage],
+		firstAttempt = firstAttempt,
 		playerCount = math.max(1, #livingParticipants(current)),
 		participants = function()
 			return current.participants
@@ -350,7 +389,8 @@ local function startBossRound(current: Match)
 end
 
 local function newMatch(mode: ModeId, players: { Player }): Match
-	return { id = 1, mode = mode, participants = players, alive = {}, ended = false, rewarded = false, bossRewarded = false }
+	nextMatchId += 1
+	return { id = nextMatchId, mode = mode, participants = players, alive = {}, ended = false, rewarded = false, bossRewarded = false, campaignStage = 1 }
 end
 
 -- Starts the zombie run for the admitted fighters ("Solo" or "Coop").
@@ -410,59 +450,79 @@ function MatchService.startZombies(mode: ModeId, players: { Player }, bossId: st
 			startBossRound(current) -- a boss fight has no zombie rounds: straight to the boss
 			return
 		end
-		WaveService.startRun({
-			mode = mode,
-			maxActive = if mode == "Coop" then GameModeDefinitions.Coop.MaxActiveZombies else GameModeDefinitions.Solo.MaxActiveZombies,
-			getPlayerCount = function()
-				local count = 0
-				for _, player in current.participants do
-					if player.Parent then
-						count += 1
-					end
-				end
-				return math.max(1, count)
-			end,
-			onRoundStarted = function()
-				if match ~= current then
-					return
-				end
-				setMatchState(GameStates.MatchActive)
-				for _, player in livingParticipants(current) do
-					setState(player, GameStates.MatchActive)
-				end
-			end,
-			onRoundComplete = function(round: number)
-				if match ~= current then
-					return
-				end
-				setMatchState(GameStates.RoundComplete)
-				for _, player in livingParticipants(current) do
-					setState(player, GameStates.RoundComplete)
-				end
-				AuraService.awardRoundComplete(livingParticipants(current), current.id, round) -- once per round and player
-				reviveWaitingPlayers(current)
-				OttiSpectatorService.react("RoundComplete") -- applause from the imperial box
-			end,
-			onBossRound = function()
-				startBossRound(current)
-			end,
-			onZombieDied = function(zombie, killer, damagers)
-				local assist = if mode == "Coop" then GameModeDefinitions.Coop.AssistRewardFraction else 0
-				local rewarded = {}
-				for _, player in damagers do
-					if isParticipant(player) then
-						table.insert(rewarded, player)
-					end
-				end
-				local validKiller = if killer and isParticipant(killer) then killer else nil
-				if validKiller then
-					InventoryService.addStat(validKiller, "zombieKills", 1)
-				end
-				AuraService.awardZombieKill(zombie.definition.Coins, validKiller, rewarded, assist)
-			end,
-		})
+		local key = Campaign.key(mode, valid)
+		local stage = Campaign.loadStage(key)
+		if match ~= current or current.ended or current.rewarded then return end
+		if stage == nil then
+			for _, player in valid do message(player, "Campaign progress could not be loaded. Try again.", false) end
+			cleanupMatch("campaign data unavailable", false)
+			return
+		end
+		current.campaignKey = key
+		current.campaignStage = stage
+		startCampaignWave(current)
 	end)
 	return true
+end
+
+startCampaignWave = function(current: Match)
+	local mode, stage = current.mode, current.campaignStage
+	if arenaFolder then arenaFolder:SetAttribute(Config.CampaignStageAttribute, stage) end
+	for _, player in current.participants do
+		message(player, ("Campaign %d / %d · %s"):format(stage, #Campaign.Bosses, string.upper(Campaign.Bosses[stage])), true)
+	end
+	WaveService.startRun({
+		mode = mode,
+		stage = stage,
+		maxActive = if mode == "Coop" then GameModeDefinitions.Coop.MaxActiveZombies else GameModeDefinitions.Solo.MaxActiveZombies,
+		getPlayerCount = function()
+			local count = 0
+			for _, player in current.participants do
+				if player.Parent then
+					count += 1
+				end
+			end
+			return math.max(1, count)
+		end,
+		onRoundStarted = function()
+			if match ~= current then
+				return
+			end
+			setMatchState(GameStates.MatchActive)
+			for _, player in livingParticipants(current) do
+				setState(player, GameStates.MatchActive)
+			end
+		end,
+		onRoundComplete = function(round: number)
+			if match ~= current then
+				return
+			end
+			setMatchState(GameStates.RoundComplete)
+			for _, player in livingParticipants(current) do
+				setState(player, GameStates.RoundComplete)
+			end
+			AuraService.awardRoundComplete(livingParticipants(current), current.id, (stage - 1) * RoundDefinitions.TotalRounds + round)
+			reviveWaitingPlayers(current)
+			OttiSpectatorService.react("RoundComplete") -- applause from the imperial box
+		end,
+		onBossRound = function()
+			startBossRound(current)
+		end,
+		onZombieDied = function(zombie, killer, damagers)
+			local assist = if mode == "Coop" then GameModeDefinitions.Coop.AssistRewardFraction else 0
+			local rewarded = {}
+			for _, player in damagers do
+				if isParticipant(player) then
+					table.insert(rewarded, player)
+				end
+			end
+			local validKiller = if killer and isParticipant(killer) then killer else nil
+			if validKiller then
+				InventoryService.addStat(validKiller, "zombieKills", 1)
+			end
+			AuraService.awardZombieKill(zombie.definition.Coins, validKiller, rewarded, assist)
+		end,
+	})
 end
 
 ------------------------------------------------------------------------------------------

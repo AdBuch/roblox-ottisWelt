@@ -210,6 +210,18 @@ end
 -- non-damaging stance / step). Otti's own choice (chooseMove) is not used for companions.
 
 
+local function isAttacking(target: Player): boolean
+	local character = target.Character
+	local start = if character then tonumber(character:GetAttribute("AttackStart")) or 0 else 0
+	local duration = if character then tonumber(character:GetAttribute("AttackLength")) or 0 else 0
+	return Workspace:GetServerTimeNow() < start + duration
+end
+
+local function canStaffParry(boss: Boss, target: Player, distance: number, now: number): boolean
+	return boss.companion == "Schili" and distance <= 8
+		and now >= (boss.companionReadyAt.Guard or 0) and isAttacking(target)
+end
+
 function OttiBossAI.companionDecide(boss: Boss, ctx: BossContext, target: Player, targetRoot: BasePart, distance: number, now: number)
 	local personality = CompanionBossDefinitions.get(boss.companion :: string)
 	if not personality then
@@ -227,21 +239,17 @@ function OttiBossAI.companionDecide(boss: Boss, ctx: BossContext, target: Player
 		end
 	end
 	local health = boss.health / math.max(1, boss.maxHealth)
-	local character = target.Character
-	local attackStart = if character then tonumber(character:GetAttribute("AttackStart")) or 0 else 0
-	local attackLength = if character then tonumber(character:GetAttribute("AttackLength")) or 0 else 0
-	local targetAttacking = Workspace:GetServerTimeNow() < attackStart + attackLength
 	local choice = CompanionBossAI.choose(personality, {
 		now = now,
 		distance = distance,
 		bossHealth = health,
 		lastRole = boss.companionLastRole :: any,
 		readyAt = readyAt :: any,
-		targetAttacking = targetAttacking,
+		targetAttacking = isAttacking(target),
 		recentlyBlocked = now < (tonumber(boss.model:GetAttribute("BlockedUntil")) or 0),
 		surrounded = near >= 3,
 	}, boss.rng)
-	local role: any = choice.role
+	local role: any = if canStaffParry(boss, target, distance, now) then "Guard" else choice.role
 	if not role then
 		boss.nextDecisionAt = now + 0.4
 		return
@@ -254,22 +262,53 @@ function OttiBossAI.companionDecide(boss: Boss, ctx: BossContext, target: Player
 		BossAttackService.execute(boss, ctx, attack, target)
 		boss.companionReadyAt[role] = boss.cooldowns[attack.Id] or os.clock() + def.Cooldown
 	elseif role == "Guard" then
-		boss.guardUntil = now + def.Recovery + 0.6
+		local schili = boss.companion == "Schili"
+		local duration = if schili then 0.68 else def.Recovery + 0.6
+		boss.guardUntil = now + duration
 		boss.lockedUntil = boss.guardUntil
+		if schili then
+			OttiAnimationService.faceTowards(boss, targetRoot.Position, 0)
+		end
 		OttiAnimationService.setGuard(boss, true)
-		OttiAnimationService.setPose(boss, if boss.companion == "Schili" then "ShellGuard" else "RaiseShield", 0.18)
+		local pose = if schili then "StaffParry" else "RaiseShield"
+		OttiAnimationService.setPose(boss, pose, 0.18)
 		boss.humanoid:MoveTo(boss.root.Position)
-		task.delay(def.Recovery + 0.6, function()
+		task.delay(duration, function()
 			if boss.model.Parent and not boss.defeated and os.clock() >= boss.guardUntil then
 				OttiAnimationService.setGuard(boss, false)
-				if not boss.busy then OttiAnimationService.setPose(boss, "", 0.2) end
+				local currentPose = boss.model:GetAttribute("Pose")
+				if not boss.busy and (currentPose == pose or (schili and currentPose == "StaffDeflect")) then
+					OttiAnimationService.setPose(boss, "", 0.2)
+				end
 			end
 		end)
 	elseif role == "Retreat" then
 		local away = CombatUtil.flat(boss.root.Position - targetRoot.Position)
 		if away.Magnitude > 0.1 then
 			boss.lockedUntil = now + 0.8
-			boss.humanoid:MoveTo(clampInside(boss.root.Position + away.Unit * 7))
+			local goal = clampInside(boss.root.Position + away.Unit * 7)
+			if boss.companion == "Schili" and CombatUtil.flatDistance(goal, boss.root.Position) > 2 then
+				boss.humanoid:MoveTo(boss.root.Position)
+				OttiAnimationService.faceTowards(boss, goal, 0)
+				OttiAnimationService.setPose(boss, "StaffVault", 0.08)
+				task.delay(0.12, function()
+					if not ctx.stillValid() or boss.defeated or boss.model:GetAttribute("Pose") ~= "StaffVault" then
+						return
+					end
+					boss.humanoid:MoveTo(goal)
+					if not boss.root.Anchored and boss.humanoid.FloorMaterial ~= Enum.Material.Air then
+						boss.humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+						boss.root:ApplyImpulse(Vector3.new(0, 42 * boss.root.AssemblyMass, 0))
+					end
+				end)
+				task.delay(0.8, function()
+					if ctx.stillValid() and not boss.defeated and boss.model:GetAttribute("Pose") == "StaffVault" then
+						OttiAnimationService.setPose(boss, "", 0.15)
+					end
+				end)
+			else
+				boss.humanoid:MoveTo(goal)
+			end
 		end
 	end
 	boss.nextDecisionAt = os.clock() + CompanionBossAI.pause(personality, health, boss.rng)
@@ -294,7 +333,7 @@ function OttiBossAI.step(boss: Boss, ctx: BossContext, dt: number)
 
 	-- Companion bosses (Kroko, Schili) decide with their own personality AI; movement stays shared
 	if boss.companion then
-		if now >= boss.nextDecisionAt and now >= state.studyUntil then
+		if canStaffParry(boss, target, distance, now) or (now >= boss.nextDecisionAt and now >= state.studyUntil) then
 			OttiBossAI.companionDecide(boss, ctx, target, targetRoot, distance, now)
 			return -- preserve guard/retreat and do not overwrite a completed attack with stale movement
 		end

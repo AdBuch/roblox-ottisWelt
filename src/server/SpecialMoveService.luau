@@ -387,7 +387,18 @@ local function executeProjectile(execution: Execution)
 	local toAim = attacker.aimPoint - origin
 	local direction = if toAim.Magnitude > 2 then toAim.Unit else attacker.root.CFrame.LookVector
 	local flat = CombatUtil.flat(direction)
-	if flat.Magnitude > 0.05 then
+	if attacker.weaponId == "HunterBow" then
+		-- Avatar poses are local, so use a server-side arrow rest at the extended
+		-- left hand's height. Never move a launch point through cover.
+		local forward = if flat.Magnitude > 0.05 then flat.Unit else attacker.root.CFrame.LookVector
+		local right = forward:Cross(Vector3.yAxis)
+		local rest = origin - right * 0.85 + forward * 1.15 - Vector3.new(0, 0.4, 0)
+		if CombatUtil.hasLineOfSight(origin, rest, { attacker.character }) then
+			origin = rest
+		end
+		local fromRest = attacker.aimPoint - origin
+		if fromRest.Magnitude > 0.05 then direction = fromRest.Unit end
+	elseif flat.Magnitude > 0.05 then
 		origin += flat.Unit * 1.2
 	end
 	fireArrows(execution, origin, direction)

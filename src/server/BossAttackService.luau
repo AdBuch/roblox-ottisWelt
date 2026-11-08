@@ -344,11 +344,12 @@ local function executeDash(boss: Boss, ctx: BossContext, move: OttiMove, target:
 		mid = (start + finish) / 2
 	end
 
-	OttiAnimationService.setPose(boss, if boss.companion then "RushWind" else "DashWind", move.WindUp * 0.7)
+	local shellRoll = boss.companion == "Schili"
+	OttiAnimationService.setPose(boss, if shellRoll then "ShellTuck" elseif boss.companion then "RushWind" else "DashWind", move.WindUp * 0.7)
 	if not windUp(boss, ctx, move.WindUp, target, true) then
 		return false
 	end
-	OttiAnimationService.setPose(boss, if boss.companion then "RushRun" else "DashRun", 0.05)
+	OttiAnimationService.setPose(boss, if shellRoll then "ShellRoll" elseif boss.companion then "RushRun" else "DashRun", 0.05)
 	OttiAnimationService.setLoco(boss, if boss.companion then "BIPED_ATTACK" else "QUADRUPED_RUN")
 	boss.inActive = true
 	local ignore = losIgnore(boss)
@@ -366,7 +367,9 @@ local function executeDash(boss: Boss, ctx: BossContext, move: OttiMove, target:
 				break -- never through walls or gates
 			end
 			boss.root.CFrame = CFrame.lookAt(boss.root.Position, boss.root.Position + offset)
-			boss.root.AssemblyLinearVelocity = offset / math.max(dt, 1e-3) -- the client gait reads this
+			if not shellRoll then
+				boss.root.AssemblyLinearVelocity = offset / math.max(dt, 1e-3) -- the client gait reads this
+			end
 		end
 		previous = point
 		for _, player in ctx.fighters() do
@@ -416,6 +419,23 @@ function BossAttackService.execute(boss: Boss, ctx: BossContext, move: OttiMove,
 	local result: Result = { landed = false, damaged = false }
 	if boss.busy or not valid(boss, ctx) or os.clock() < (boss.cooldowns[move.Id] or 0) then
 		return result
+	end
+	-- Keep the warning readable while shortening recovery and the attack itself.
+	local tempo = if boss.companion == "Schili" then 0.72 elseif boss.companion == "Kroko" then 0.78 else 0.82
+	move = table.clone(move)
+	move.WindUp = math.max(0.24, move.WindUp * tempo)
+	move.Active *= tempo
+	move.Recovery *= tempo
+	move.Cooldown *= tempo
+	if move.Steps then
+		local steps = table.clone(move.Steps)
+		for index, step in steps do
+			local fast = table.clone(step)
+			fast.WindUp = math.max(0.20, fast.WindUp * tempo)
+			fast.Active *= tempo
+			steps[index] = fast
+		end
+		move.Steps = steps
 	end
 	boss.busy = true
 	boss.attackId = move.Id

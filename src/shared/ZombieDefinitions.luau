@@ -15,7 +15,7 @@ export type ZombieBody = {
 export type ZombieGear = {
 	Helmet: "Crested" | "Damaged" | "Cap" | "OpenFace" | "Ornate" | "Wrap",
 	Shoulders: "Single" | "HeavyBoth" | "Segmented" | "None",
-	Weapon: "Gladius" | "Club" | "Spear" | "LargeSword" | "Bow",
+	Weapon: "Gladius" | "Club" | "Spear" | "LargeSword" | "Bow" | "Nunchaku",
 	Shield: "Round" | "Buckler" | "Ornate" | "Scutum" | "None",
 	Armor: "Harness" | "Straps" | "Vest" | "Light" | "Heavy" | "Segmentata",
 	ThickBelt: boolean,
@@ -346,6 +346,60 @@ local UndeadSagittarius: ZombieDefinition = {
 	},
 }
 
+local TestudoLegionary = table.clone(LegionRemnant)
+TestudoLegionary.Id, TestudoLegionary.DisplayName = "TestudoLegionary", "Zombie Legionary"
+TestudoLegionary.Health, TestudoLegionary.Damage = 115, 14
+TestudoLegionary.WalkSpeed = 14
+TestudoLegionary.Role, TestudoLegionary.SpecialText = "Formation infantry", "Shield wall in front, shields overhead behind"
+
+local MountedPraetorian = table.clone(RottenVelite)
+MountedPraetorian.Id, MountedPraetorian.DisplayName = "MountedPraetorian", "Mounted Praetorian"
+MountedPraetorian.Health, MountedPraetorian.Damage, MountedPraetorian.WalkSpeed = 185, 20, 23
+MountedPraetorian.AttackRange, MountedPraetorian.AttackReach = 11, 13
+MountedPraetorian.KnockbackMultiplier, MountedPraetorian.Coins = 0.5, 24
+MountedPraetorian.Role, MountedPraetorian.SpecialText = "Praetorian cavalry", "Fast mounted spear attacks"
+MountedPraetorian.Gear = table.clone(RottenVelite.Gear)
+MountedPraetorian.Gear.Helmet, MountedPraetorian.Gear.Armor = "Ornate", "Segmentata"
+MountedPraetorian.Gear.ClothColor = PURPLE
+
+local ZombieNinja = table.clone(RottenVelite)
+ZombieNinja.Id, ZombieNinja.DisplayName = "ZombieNinja", "Zombie Ninja"
+ZombieNinja.Health, ZombieNinja.Damage, ZombieNinja.WalkSpeed = 80, 9, 24
+ZombieNinja.AttackCooldown, ZombieNinja.WindUpSeconds = 0.58, 0.19
+ZombieNinja.AttackRange, ZombieNinja.AttackReach, ZombieNinja.Coins = 6.5, 7.5, 18
+ZombieNinja.Role, ZombieNinja.SpecialText = "Fast ambusher", "Rapid two-hit attacks"
+ZombieNinja.Gear = table.clone(RottenVelite.Gear)
+ZombieNinja.Gear.Helmet, ZombieNinja.Gear.Weapon, ZombieNinja.Gear.Shield = "Wrap", "Gladius", "None"
+ZombieNinja.Gear.ClothColor = Color3.fromRGB(38, 33, 55)
+
+local NunchakuNinja = table.clone(ZombieNinja)
+NunchakuNinja.Id, NunchakuNinja.DisplayName = "NunchakuNinja", "Nunchaku Ninja"
+NunchakuNinja.WindUpSeconds, NunchakuNinja.AttackCooldown = 0.32, 1.25
+NunchakuNinja.Role, NunchakuNinja.SpecialText = "Trip fighter", "Low nunchaku strikes knock unguarded fighters down"
+NunchakuNinja.Gear = table.clone(ZombieNinja.Gear)
+NunchakuNinja.Gear.Weapon = "Nunchaku"
+NunchakuNinja.Gear.ClothColor = Color3.fromRGB(62, 34, 54)
+
+local NinjaArcher = table.clone(UndeadSagittarius)
+NinjaArcher.Id, NinjaArcher.DisplayName = "NinjaArcher", "Ninja Archer"
+NinjaArcher.Health, NinjaArcher.WalkSpeed = 68, 20
+NinjaArcher.DrawSeconds, NinjaArcher.FireCooldown = 0.48, 1.55
+NinjaArcher.PreferredRangeMin, NinjaArcher.PreferredRangeMax, NinjaArcher.MinComfortRange = 30, 55, 15
+NinjaArcher.Role, NinjaArcher.SpecialText = "Mobile archer", "Quick bow shots, then relocates"
+NinjaArcher.Gear = table.clone(UndeadSagittarius.Gear)
+NinjaArcher.Gear.ClothColor = Color3.fromRGB(31, 51, 58)
+
+local TerracottaSamurai = table.clone(ArenaChampion)
+TerracottaSamurai.Id, TerracottaSamurai.DisplayName = "TerracottaSamurai", "Terracotta Samurai"
+TerracottaSamurai.Health, TerracottaSamurai.Damage, TerracottaSamurai.WalkSpeed = 235, 26, 8
+TerracottaSamurai.WindUpSeconds, TerracottaSamurai.AttackCooldown = 0.72, 2.2
+TerracottaSamurai.Special, TerracottaSamurai.AIProfile = "None", "Tank"
+TerracottaSamurai.Coins, TerracottaSamurai.KnockbackMultiplier = 30, 0.35
+TerracottaSamurai.Role, TerracottaSamurai.SpecialText = "Heavy clay warrior", "Slow, heavy sword blows. Shatters when defeated"
+TerracottaSamurai.Gear = table.clone(ArenaChampion.Gear)
+TerracottaSamurai.Gear.Weapon, TerracottaSamurai.Gear.Shield, TerracottaSamurai.Gear.Scarf = "LargeSword", "None", false
+TerracottaSamurai.Gear.ClothColor = Color3.fromRGB(133, 73, 48)
+
 local ZombieDefinitions = {
 	ById = table.freeze({
 		LegionRemnant = LegionRemnant,
@@ -354,6 +408,12 @@ local ZombieDefinitions = {
 		NetFighter = NetFighter,
 		ArenaChampion = ArenaChampion,
 		UndeadSagittarius = UndeadSagittarius,
+		TestudoLegionary = TestudoLegionary,
+		MountedPraetorian = MountedPraetorian,
+		ZombieNinja = ZombieNinja,
+		NunchakuNinja = NunchakuNinja,
+		NinjaArcher = NinjaArcher,
+		TerracottaSamurai = TerracottaSamurai,
 	}) :: { [string]: ZombieDefinition },
 	Ordered = table.freeze({ LegionRemnant, RottenVelite, ArenaBrute, NetFighter, ArenaChampion, UndeadSagittarius }) :: { ZombieDefinition },
 }

@@ -87,6 +87,68 @@ for _, hero in { "Kroko", "Schili" } do
     for role in personality.Roles do readyAt[role] = 99 end
     check(modules.AI.choose(personality, { now = 10, distance = 4, bossHealth = 1, readyAt = readyAt, targetAttacking = false, recentlyBlocked = false, surrounded = false }, rng).role == nil, "AI respects every role cooldown")
 end
+'@
+$playerHit = [regex]::Match((Source 'src/server/OttiBossService.luau'), '(?ms)^function OttiBossService.applyPlayerHit\(.*?^end').Value
+if (-not $playerHit) { throw 'Missing boss hit handler' }
+$body += @'
+
+local OttiBossService = {}
+local BossPhaseDefinitions = { Phases = { {} }, forShare = function() return { Index = 1 } end }
+local OttiBossConfig = { PoiseMax = math.huge, RangedAttackerDistance = 15 }
+local CombatEffects = { burst = function() end }
+local Color3 = { fromRGB = function() end }
+local DamageEffectsService = { hit = function() end }
+local phaseChanging = false
+local function publishHealth() end
+local attacker = { UserId = 1 }
+local impulse
+local attackerRoot = { Position = 4, AssemblyMass = 2, ApplyImpulse = function(_, force) impulse = force end }
+local right = setmetatable({ Dot = function(_, offset) return offset end }, { __mul = function(_, factor) return factor end })
+local CombatUtil = {
+    isFacing = function(_, from) return from > 0 end,
+    flatDistance = function(a, b) return math.abs(a-b) end,
+    flat = function(offset) return offset end,
+    getLivingCharacter = function() return nil, nil, attackerRoot end,
+}
+local hitAttrs = { Pose = "StaffParry", PoseStart = clock }
+local model = { GetAttribute = function(_, key) return hitAttrs[key] end }
+local OttiAnimationService = {
+    setGuard = function() end,
+    setPose = function(_, pose) hitAttrs.Pose = pose end,
+}
+local boss = {
+    companion = "Schili", phase = 1, fighting = true, model = model, guardUntil = clock + .68,
+    root = { Position = 0, CFrame = { RightVector = right } }, rig = { shieldFace = { Position = 0 } },
+    health = 1000, maxHealth = 1000, poise = 0, damageBy = {}, threat = {}, rangedAt = {},
+    vulnerableUntil = 0,
+}
+'@
+$body += [Environment]::NewLine + $playerHit + [Environment]::NewLine
+$body += @'
+local function hit(from, projectile, breaksGuard)
+    return OttiBossService.applyPlayerHit(attacker, 25, from, projectile, 0, 1, breaksGuard)
+end
+local dealt, blocked = hit(4, false, false)
+check(dealt == 25 and not blocked, "staff is vulnerable during the parry wind-up")
+clock += .2
+dealt, blocked = hit(-4, false, false)
+check(dealt == 25 and not blocked, "staff parry does not catch rear attacks")
+dealt, blocked = hit(4, false, false)
+check(dealt == 0 and blocked and impulse == 22 and hitAttrs.Pose == "StaffDeflect", "staff redirects a frontal melee attacker sideways")
+dealt, blocked = hit(4, false, false)
+check(dealt == 25 and not blocked, "staff parry is spent after one hit")
+hitAttrs.Pose, hitAttrs.PoseStart, boss.guardUntil = "StaffParry", clock - .2, clock + .4
+impulse = nil
+dealt, blocked = hit(4, true, false)
+check(dealt == 0 and blocked and impulse == nil, "staff deflects a frontal projectile without moving its shooter")
+hitAttrs.Pose, boss.inActive = "ShellRoll", true
+dealt, blocked = hit(-4, false, false)
+check(dealt == 10 and blocked, "rolling shell absorbs most of a rear hit")
+dealt, blocked = hit(4, false, true)
+check(dealt == 25 and not blocked, "guard breaker bypasses rolling shell protection")
+hitAttrs.Pose, boss.inActive = "Recover", false
+dealt, blocked = hit(4, false, false)
+check(dealt == 25 and not blocked, "Schili is exposed again after the shell roll")
 print("PASS: " .. checks .. " hero combat checks against real source")
 '@
 New-Item -ItemType Directory -Force (Join-Path $repo 'build') | Out-Null

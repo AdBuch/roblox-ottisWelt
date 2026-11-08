@@ -226,11 +226,14 @@ function CombatTargets.applyHit(attacker: Player, target: Target, info: HitInfo)
 		if not zombie then
 			return 0, false
 		end
-		if info.guardBreak and ZombieService.breakGuard(zombie) then
+		local testudo = zombie.definition.Id == "TestudoLegionary"
+		if info.guardBreak and not testudo and ZombieService.breakGuard(zombie) then
 			-- the raised guard is broken: the hit goes through and the zombie staggers
 			ZombieService.applyDamage(zombie, attacker, math.floor(info.damage * ZombieService.damageMultiplier(zombie) + 0.5), info.fromPosition, 1.2, info.knockback, { weaponId = info.weaponId, isSpecial = true })
 			dealt = math.floor(info.damage + 0.5)
 		elseif ZombieService.tryGuardBlock(zombie, info.fromPosition) then
+			-- Testudo absorbs the first blow even when it opens the soldier's guard.
+			if testudo and info.guardBreak then ZombieService.breakGuard(zombie) end
 			blocked = true
 		else
 			local damage = info.damage

@@ -19,7 +19,10 @@ local RoundDefinitions = {
 }
 
 -- Zombies in a round for a mode; Co-op scales with the number of participating players.
-function RoundDefinitions.zombieCount(modeId: string, round: number, playerCount: number): number
+function RoundDefinitions.zombieCount(modeId: string, round: number, playerCount: number, stage: number?): number
+	if stage == 2 then
+		return math.min(round + 1, 4)^2 + math.max(round - 3, 0) * 2
+	end
 	if modeId == "Coop" then
 		local base = GameModeDefinitions.Coop.BaseRoundCounts[round] or 0
 		local scale = GameModeDefinitions.Coop.PlayerScaling[math.clamp(playerCount, 1, 4)]
@@ -54,6 +57,22 @@ function RoundDefinitions.pickVariant(round: number, rng: Random, exclude: { [st
 		end
 	end
 	return available[#available]
+end
+
+-- Later chapters use dedicated rosters. Cavalry reinforces the sixteen legionaries
+-- after round three. Ninja waves open with distinct roles as their numbers grow.
+local ninjaOrder = { "ZombieNinja", "NunchakuNinja", "NinjaArcher", "TerracottaSamurai", "ZombieNinja", "NunchakuNinja" }
+function RoundDefinitions.campaignVariant(stage: number, round: number, index: number): ZombieDefinition?
+	if stage == 2 then
+		if round > 3 and index > 16 then
+			return ZombieDefinitions.ById.MountedPraetorian
+		end
+		return ZombieDefinitions.ById.TestudoLegionary
+	elseif stage == 3 then
+		local offset = if round == 2 then 1 else 0
+		return ZombieDefinitions.ById[ninjaOrder[(index + offset - 1) % #ninjaOrder + 1]]
+	end
+	return nil
 end
 
 return RoundDefinitions

@@ -94,11 +94,11 @@ local P = {
 	TUCK = { w = v(10, 0, 0), rs = v(168, 0, 8), re = 78, rw = v(-10, 0, 0), ls = v(50, 0, -20), le = 55, rh = v(58, 0, 0), lh = v(48, 0, 0), c = 0.1 } :: KeyPose,
 	LAND_GUARD = { w = v(-10, 8, 0), rs = v(35, 0, 20), re = 55, rw = v(-50, 0, 0), ls = v(85, -12, -18), le = 45, rh = v(-14, 0, 0), lh = v(34, 0, 0), c = 0.6 } :: KeyPose,
 	-- Bow in the right hand: the right arm aims, the left hand draws to the cheek
-	BOW_READY = { w = v(2, -20, 0), rs = v(70, 0, 12), re = 15, rw = v(0, 0, -12), ls = v(60, -30, -15), le = 70, rh = v(-8, 0, 0), lh = v(12, 0, 0), c = 0.1 } :: KeyPose,
-	BOW_DRAW = { w = v(2, -26, 0), rs = v(84, 0, 12), re = 6, rw = v(0, 0, -12), ls = v(80, -40, -18), le = 115, lw = v(-15, 0, 0), rh = v(-8, 0, 0), lh = v(14, 0, 0), c = 0.15 } :: KeyPose,
-	BOW_RELEASE = { w = v(-2, -18, 0), rs = v(84, 0, 10), re = 8, rw = v(-5, 0, -12), ls = v(55, -65, -38), le = 40, rh = v(-8, 0, 0), lh = v(14, 0, 0), c = 0.12 } :: KeyPose,
-	BOW_SKY = { w = v(14, -20, 0), rs = v(140, 0, 8), re = 6, rw = v(0, 0, -10), ls = v(118, -30, -16), le = 112, rh = v(-6, 0, 0), lh = v(12, 0, 0), c = 0.15 } :: KeyPose,
-	BOW_SKY_RELEASE = { w = v(10, -16, 0), rs = v(140, 0, 10), re = 8, rw = v(-5, 0, -10), ls = v(95, -50, -30), le = 40, rh = v(-6, 0, 0), lh = v(12, 0, 0), c = 0.12 } :: KeyPose,
+	BOW_READY = { w = v(2, 8, 0), ls = v(70, 0, -12), le = 15, lw = v(-78, 0, 0), rs = v(60, 25, 15), re = 70, rh = v(-8, 0, 0), lh = v(12, 0, 0), c = 0.1 } :: KeyPose,
+	BOW_DRAW = { w = v(2, 12, 0), ls = v(84, 0, -12), le = 6, lw = v(-90, 0, 0), rs = v(65, 30, 18), re = 110, rh = v(-8, 0, 0), lh = v(14, 0, 0), c = 0.15 } :: KeyPose,
+	BOW_RELEASE = { w = v(-2, 8, 0), ls = v(84, 0, -10), le = 8, lw = v(-90, 0, 0), rs = v(52, 18, 30), re = 105, rh = v(-8, 0, 0), lh = v(14, 0, 0), c = 0.12 } :: KeyPose,
+	BOW_SKY = { w = v(14, 12, 0), ls = v(140, 0, -8), le = 6, lw = v(-82, 0, 0), rs = v(104, 30, 16), re = 112, rh = v(-6, 0, 0), lh = v(12, 0, 0), c = 0.15 } :: KeyPose,
+	BOW_SKY_RELEASE = { w = v(10, 8, 0), ls = v(140, 0, -10), le = 8, lw = v(-82, 0, 0), rs = v(88, 18, 30), re = 100, rh = v(-6, 0, 0), lh = v(12, 0, 0), c = 0.12 } :: KeyPose,
 }
 
 -- The same idea for each weapon style
@@ -407,7 +407,7 @@ end
 
 -- Up (in the air): long, slow full draw, release with a recoil
 CHOREO.SpecPierce = function(T)
-	local airDraw = with(P.BOW_DRAW, { le = 120, rh = v(40, 0, 0), lh = v(30, 0, 0), c = 0 })
+	local airDraw = with(P.BOW_DRAW, { re = 120, rh = v(40, 0, 0), lh = v(30, 0, 0), c = 0 })
 	return {
 		k(T.wind * 0.4, with(P.BOW_READY, { rh = v(40, 0, 0), lh = v(30, 0, 0), c = 0 })),
 		k(T.wind, airDraw),

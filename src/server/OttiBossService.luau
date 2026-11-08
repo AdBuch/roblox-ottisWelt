@@ -16,6 +16,7 @@
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local AudioConfig = require(ReplicatedStorage.Shared.AudioConfig)
 local BossPhaseDefinitions = require(ReplicatedStorage.Shared.BossPhaseDefinitions)
@@ -54,6 +55,7 @@ export type Handlers = {
 export type EncounterOptions = {
 	companion: string?, -- a companion boss (Kroko, Schili) instead of Otti; nil = Otti
 	playerCount: number, -- participants at the start (health scaling)
+	firstAttempt: boolean?,
 	participants: () -> { Player }, -- everyone in the match (for "intro seen")
 	fighters: () -> { Player }, -- living arena fighters Otti may target
 	onFightStarted: () -> (),
@@ -396,7 +398,8 @@ function OttiBossService.startEncounter(newOptions: EncounterOptions)
 	end
 	local count = math.clamp(newOptions.playerCount, 1, #OttiBossConfig.HealthByPlayers)
 	local companionDef = if current.companion then CompanionBossDefinitions.get(current.companion) else nil
-	current.maxHealth = if companionDef then companionDef.Health * count else OttiBossConfig.HealthByPlayers[count]
+	local health = if companionDef then companionDef.Health * (1 + (count - 1) * 0.55) else OttiBossConfig.HealthByPlayers[count]
+	current.maxHealth = math.ceil(health * (if newOptions.firstAttempt then 1.3 else 1))
 	current.health = current.maxHealth
 	current.phase = 1
 	current.fighting = true
@@ -456,6 +459,9 @@ function OttiBossService.applyPlayerHit(attacker: Player, damage: number, fromPo
 	local frontal = CombatUtil.isFacing(current.root.CFrame, fromPosition, OttiBossConfig.GuardFacingDot)
 	local blocked = false
 	local amount = damage
+	local pose = current.model:GetAttribute("Pose")
+	local staffParry = current.companion == "Schili" and pose == "StaffParry"
+	local rolling = current.companion == "Schili" and current.inActive and pose == "ShellRoll"
 
 	-- GUARD BREAK combos break his raised shield instead of being stopped by it
 	if guardBreak and now < current.guardUntil then
@@ -464,19 +470,38 @@ function OttiBossService.applyPlayerHit(attacker: Player, damage: number, fromPo
 		OttiAnimationService.setGuard(current, false)
 		CombatEffects.burst(current.rig.shieldFace.Position, Color3.fromRGB(255, 150, 80), 1)
 	end
+	if staffParry and frontal and now < current.guardUntil then
+		local poseStart = tonumber(current.model:GetAttribute("PoseStart")) or math.huge
+		if Workspace:GetServerTimeNow() - poseStart >= 0.16 then
+			current.guardUntil = 0
+			OttiAnimationService.setGuard(current, false)
+			OttiAnimationService.setPose(current, "StaffDeflect", 0.06)
+			local _, _, root = CombatUtil.getLivingCharacter(attacker)
+			if not isProjectile and root and CombatUtil.flatDistance(root.Position, current.root.Position) <= 9 then
+				local right = current.root.CFrame.RightVector
+				local side = if right:Dot(root.Position - current.root.Position) < 0 then -1 else 1
+				root:ApplyImpulse(right * side * root.AssemblyMass * 11)
+			end
+			return 0, true
+		end
+	end
+	if rolling and not guardBreak then
+		amount *= 0.4
+		blocked = true
+	end
 	-- Raised shield: frontal hits are mostly stopped
-	if frontal and now < current.guardUntil then
+	if frontal and current.companion ~= "Schili" and now < current.guardUntil then
 		blocked = true
 		amount *= 1 - OttiBossConfig.GuardReduction
 		CombatEffects.burst(current.rig.shieldFace.Position, Color3.fromRGB(255, 220, 120), 0.8)
 		-- Phase 3: shield-and-tail counter (limited cooldown, never on every block)
 		local counter = if current.companion then HeroCombatDefinitions.move(current.companion, "Strike", current.phase) else OttiMoveDefinitions.ShieldTailCounter
-		if counter and (phase.CounterEnabled or current.companion == "Schili") and now >= current.counterReadyAt and not current.busy then
+		if counter and phase.CounterEnabled and now >= current.counterReadyAt and not current.busy then
 			current.counterReadyAt = now + counter.Cooldown
 			local ctx = makeContext(token)
 			task.spawn(BossAttackService.execute, current, ctx, counter, attacker)
 		end
-	elseif frontal and not current.busy and now >= current.guardReadyAt then
+	elseif current.companion ~= "Schili" and frontal and not current.busy and now >= current.guardReadyAt then
 		-- Predictable frontal attacks from one player make him raise his shield
 		local list = current.frontalHits[attacker] or {}
 		table.insert(list, now)
@@ -550,7 +575,7 @@ end
 -- his shield toward a player who keeps using the same combination.
 function OttiBossService.onPlayerCombo(player: Player, comboName: string)
 	local current = boss
-	if not current or not current.fighting or current.defeated then
+	if not current or not current.fighting or current.defeated or current.companion == "Schili" then
 		return
 	end
 	local now = os.clock()

@@ -2,7 +2,7 @@
 -- Six-round zombie runs for Solo and Co-op. Round sizes come from RoundDefinitions (Co-op
 -- scales with the number of participating players). At most `maxActive` zombies are alive at
 -- once; the rest spawn as others die. The next round starts only after every zombie of the
--- current round is dead; after round 6 the boss callback (Round 7, Otti) fires exactly once.
+-- current round is dead; after round 6 the chapter's boss callback fires exactly once.
 -- Undead Sagittarius archers are capped per player count (RoundDefinitions.maxArchers).
 -- A run token guards against stale callbacks (aborted runs) and duplicate round starts.
 
@@ -17,6 +17,7 @@ export type WavePhase = "Idle" | "Starting" | "Fighting" | "Intermission" | "Bos
 
 export type RunOptions = {
 	mode: string,
+	stage: number?,
 	maxActive: number,
 	getPlayerCount: () -> number,
 	onRoundStarted: (round: number) -> (),
@@ -82,8 +83,13 @@ local function checkRoundComplete(myToken: number)
 		publish()
 		print(PREFIX, "Round 6 complete: the final boss approaches")
 		if run then
-			task.spawn(run.onRoundComplete, round)
-			task.spawn(run.onBossRound)
+			local completedRound = round
+			task.spawn(function()
+				if token ~= myToken then return end
+				run.onRoundComplete(completedRound)
+				if run.stage == 3 then task.wait(0.85) end -- let the final clay fragments scatter
+				if token == myToken then run.onBossRound() end
+			end)
 		end
 		return
 	end
@@ -114,7 +120,7 @@ startRound = function(newRound: number)
 	local myToken = token
 	round = newRound
 	phase = "Fighting"
-	totalThisRound = RoundDefinitions.zombieCount(run.mode, newRound, run.getPlayerCount())
+	totalThisRound = RoundDefinitions.zombieCount(run.mode, newRound, run.getPlayerCount(), run.stage)
 	aliveCount = 0
 	spawnedCount = 0
 	publish()
@@ -122,6 +128,9 @@ startRound = function(newRound: number)
 	task.spawn(run.onRoundStarted, newRound)
 
 	local gateOffset = rng:NextInteger(0, #Arena.Layout.ZombieSpawns - 1)
+	local formation: { ZombieService.Zombie } = {}
+	local formationGate: CFrame? = nil
+	local formationSlot = 0
 	for i = 1, totalThisRound do
 		-- Respect the simultaneous cap: wait until someone dies
 		while aliveCount >= run.maxActive and token == myToken do
@@ -134,8 +143,18 @@ startRound = function(newRound: number)
 		if ZombieService.countAliveOf("UndeadSagittarius") >= RoundDefinitions.maxArchers(run.getPlayerCount()) then
 			exclude = { UndeadSagittarius = true } -- archer cap reached: pick a melee zombie
 		end
-		local definition = RoundDefinitions.pickVariant(newRound, rng, exclude)
-		local zombie = ZombieService.spawn(definition, pickSpawn(i + gateOffset), function(z, killer, damagers)
+		local definition = RoundDefinitions.campaignVariant(run.stage or 1, newRound, i)
+			or RoundDefinitions.pickVariant(newRound, rng, exclude)
+		local spawn = pickSpawn(i + gateOffset)
+		if definition.Id == "TestudoLegionary" then
+			if formationSlot == (if newRound == 2 then 3 else 4) or not formationGate then
+				formation, formationSlot, formationGate = {}, 0, spawn
+			end
+			local slot = formationSlot
+			formationSlot += 1
+			spawn = (formationGate :: CFrame) * CFrame.new(if slot % 2 == 0 then -1.4 else 1.4, 0, math.floor(slot / 2) * 3.4)
+		end
+		local zombie = ZombieService.spawn(definition, spawn, function(z, killer, damagers)
 			if myToken ~= token then
 				return -- belonged to an aborted run
 			end
@@ -143,7 +162,7 @@ startRound = function(newRound: number)
 			aliveCount = math.max(0, aliveCount - 1)
 			publish()
 			checkRoundComplete(myToken)
-		end)
+		end, if definition.Id == "TestudoLegionary" then formation else nil, formationSlot)
 		spawnedCount += 1
 		if zombie then
 			aliveCount += 1

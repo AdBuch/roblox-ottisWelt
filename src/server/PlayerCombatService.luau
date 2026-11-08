@@ -332,8 +332,9 @@ local function placeEquipment(player: Player, state: PlayerState)
 	end
 	local bow = InventoryService.getEquippedWeapon(player).Kind == "Bow"
 	local shieldOnBack = state.shieldId ~= nil and (not state.drawn or (bow and not state.blocking))
-	if state.drawn then
-		moveWeld(state.weaponWeld, state.rightHand, state.weaponGrip * EquipmentModels.weaponRestPose(state.weaponId))
+	if state.drawn and not (bow and state.blocking) then
+		local hand = if bow then state.leftHand else state.rightHand
+		moveWeld(state.weaponWeld, hand, state.weaponGrip * EquipmentModels.weaponRestPose(state.weaponId))
 	else
 		local mount, c0 = EquipmentModels.stowMount(state.weaponId, state.shieldId ~= nil)
 		moveWeld(state.weaponWeld, torsoPart(character, mount), c0)
@@ -344,7 +345,7 @@ local function placeEquipment(player: Player, state: PlayerState)
 		else
 			moveWeld(state.offhandWeld, state.leftHand, state.offhandGrip * SHIELD_GRIP)
 		end
-	elseif state.drawn then
+	elseif state.drawn and not bow then
 		moveWeld(state.offhandWeld, state.leftHand, state.offhandGrip * OFFHAND_REST)
 	else
 		moveWeld(state.offhandWeld, torsoPart(character, "Belt"), EquipmentModels.OffhandDaggerMount)
@@ -372,9 +373,9 @@ local function setDrawn(player: Player, state: PlayerState, drawn: boolean, anim
 	end
 	local bow = InventoryService.getEquippedWeapon(player).Kind == "Bow"
 	local mount = EquipmentModels.stowMount(state.weaponId, state.shieldId ~= nil)
-	character:SetAttribute("SheatheReach", mount)
+	character:SetAttribute("SheatheReach", if bow then "" else mount)
 	-- the left hand reaches too: the shield on the back, the second dagger at the left hip
-	character:SetAttribute("SheatheOffReach", if state.shieldId == nil then "Belt" elseif bow then "" else "Back")
+	character:SetAttribute("SheatheOffReach", if bow then mount elseif state.shieldId == nil then "Belt" else "Back")
 	character:SetAttribute("SheatheAt", Workspace:GetServerTimeNow())
 	local token = state.sheatheToken
 	task.delay(SHEATHE_REACH, function()
@@ -410,11 +411,13 @@ function PlayerCombatService.refreshEquipment(player: Player)
 	local weapon = InventoryService.getEquippedWeapon(player)
 	local shield = InventoryService.getActiveShield(player)
 	local weaponModel, weaponCore = EquipmentModels.buildWeapon(weapon.Id)
-	state.weaponGrip = rightGrip
+	local bow = weapon.Kind == "Bow"
+	state.weaponGrip = if bow then leftGrip else rightGrip
 	state.offhandGrip = leftGrip
 	state.rightHand = rightHand
 	state.leftHand = leftHand
-	state.weaponWeld = attach(weaponModel, weaponCore, rightHand, rightGrip * EquipmentModels.weaponRestPose(weapon.Id), character)
+	state.weaponWeld = attach(weaponModel, weaponCore, if bow then leftHand else rightHand,
+		state.weaponGrip * EquipmentModels.weaponRestPose(weapon.Id), character)
 	state.weaponModel = weaponModel
 	state.weaponId = weapon.Id
 	state.trail = EquipmentModels.addTrail(weaponModel, weaponCore)
@@ -971,7 +974,7 @@ local function receiveHit(victim: Player, incoming: Incoming): (number, boolean,
 end
 
 -- A zombie blow lands. Returns landed, blocked, staggerMultiplier.
-function PlayerCombatService.applyZombieHit(player: Player, attackerPosition: Vector3, damage: number, blockPierce: number, knockback: number, info: { height: string?, heavy: boolean? }?): (boolean, boolean, number)
+function PlayerCombatService.applyZombieHit(player: Player, attackerPosition: Vector3, damage: number, blockPierce: number, knockback: number, info: { height: string?, heavy: boolean?, knockdownSeconds: number? }?): (boolean, boolean, number)
 	if not CombatRules.canZombiesTarget(player) then
 		return false, false, 1 -- lobby players and spectators can't be hurt
 	end
@@ -985,6 +988,7 @@ function PlayerCombatService.applyZombieHit(player: Player, attackerPosition: Ve
 		blockPierce = blockPierce,
 		knockback = knockback,
 		fromZombie = true,
+		knockdownSeconds = info and info.knockdownSeconds,
 		height = info and info.height,
 		heavy = info and info.heavy,
 	})
@@ -1207,6 +1211,7 @@ local function runMove(player: Player, state: PlayerState, context: CombatRules.
 	if typeof(aim) == "Vector3" and aim.X == aim.X and aim.Y == aim.Y and aim.Z == aim.Z and (aim - root.Position).Magnitude <= MAX_AIM_DISTANCE then
 		aimPoint = aim
 	end
+	character:SetAttribute("BowAimPoint", if weapon.Kind == "Bow" then aimPoint else nil)
 
 	local sound = Instance.new("Sound")
 	sound.SoundId = CombatConfig.SwingSoundId

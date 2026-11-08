@@ -61,8 +61,8 @@ local CompanionBossDefinitions = {
 		Cunning = 0.3,
 		RepeatPenalty = 1.1, -- repeats his favourite moves happily
 		RecklessBelow = 0.35, -- below a third of his health he stops holding back
-		PacingSeconds = { 1.0, 2.0 },
-		Health = 900,
+		PacingSeconds = { 0.65, 1.35 },
+		Health = 3000,
 		Roles = {
 			Strike = role({ Weight = 1.4, MinRange = 0, MaxRange = 6.5, Cooldown = 1.6, Telegraph = 0.45, Recovery = 0.7, Damage = 1.0 }),
 			Charge = role({ Weight = 1.2, MinRange = 6, MaxRange = 18, Cooldown = 4.0, Telegraph = 0.9, Recovery = 1.0, Damage = 1.2 }),
@@ -86,11 +86,11 @@ local CompanionBossDefinitions = {
 		Cunning = 0.9,
 		RepeatPenalty = 0.4, -- avoids repeating a move, keeps changing its approach
 		RecklessBelow = 0.35, -- below a third of its health it turns cautious and retreats more
-		PacingSeconds = { 2.0, 3.5 },
-		Health = 1100,
+		PacingSeconds = { 0.85, 1.6 },
+		Health = 3900,
 		Roles = {
 			Strike = role({ Weight = 0.9, MinRange = 0, MaxRange = 6.5, Cooldown = 2.0, Telegraph = 0.5, Recovery = 0.6, Damage = 0.9 }),
-			Charge = role({ Weight = 0.2, MinRange = 7, MaxRange = 14, Cooldown = 6.0, Telegraph = 0.9, Recovery = 1.0, Damage = 0.9 }),
+			Charge = role({ Weight = 0.65, MinRange = 7, MaxRange = 14, Cooldown = 6.0, Telegraph = 0.9, Recovery = 1.0, Damage = 0.9 }),
 			Sweep = role({ Weight = 0.7, MinRange = 0, MaxRange = 5, Cooldown = 3.5, Telegraph = 0.7, Recovery = 0.7, Damage = 0.9 }),
 			Guard = role({ Weight = 1.3, MinRange = 0, MaxRange = 12, Cooldown = 3.0, Telegraph = 0.2, Recovery = 0.5, Damage = 0 }),
 			Feint = role({ Weight = 1.1, MinRange = 2, MaxRange = 8, Cooldown = 3.5, Telegraph = 0.25, Recovery = 0.4, Damage = 0 }),

@@ -29,6 +29,7 @@ type Joints = {
 	leftKnee: Motor6D?,
 	rightElbow: Motor6D?,
 	leftElbow: Motor6D?,
+	horseGait: { [number]: Motor6D },
 	phase: number,
 }
 
@@ -63,8 +64,14 @@ function ZombieAnimator.start(tag: string)
 			leftKnee = getMotor(model:FindFirstChild("LeftLeg"), "LeftKnee"),
 			rightElbow = getMotor(model:FindFirstChild("RightArm"), "RightElbow"),
 			leftElbow = getMotor(model:FindFirstChild("LeftArm"), "LeftElbow"),
+			horseGait = {},
 			phase = math.random() * math.pi,
 		}
+		local horse = model:FindFirstChild("HorseBarrel")
+		for index = 1, 4 do
+			local joint = getMotor(horse, "HorseGait" .. index)
+			if joint then created.horseGait[index] = joint end
+		end
 		cache[model] = created
 		return created
 	end
@@ -78,15 +85,21 @@ function ZombieAnimator.start(tag: string)
 				local amount = math.clamp(speed / 12, 0, 1)
 				joints.phase += dt * speed * STRIDE_SPEED
 				local swing = math.sin(joints.phase) * amount
+				local mounted = model:GetAttribute("Mounted") == true
+				local bowAiming = model:GetAttribute("BowAiming") == true
+				for index, joint in joints.horseGait do
+					local diagonal = if index == 1 or index == 4 then 1 else -1
+					joint.Transform = CFrame.Angles(swing * LEG_SWING * diagonal, 0, 0)
+				end
 				local crawl = model:GetAttribute("Crawl") == true
 				local limp = model:GetAttribute("Condition") == "Critical"
 				local rightLeg = if crawl then 0.2 elseif limp then 0.3 else 1 -- stiff, dragging leg
 				local leftLeg = if crawl then 0.3 else 1
 				if joints.rightHip then
-					joints.rightHip.Transform = CFrame.Angles(swing * LEG_SWING * rightLeg, 0, 0)
+					joints.rightHip.Transform = if mounted then CFrame.Angles(-0.38, 0, 0.52) else CFrame.Angles(swing * LEG_SWING * rightLeg, 0, 0)
 				end
 				if joints.leftHip then
-					joints.leftHip.Transform = CFrame.Angles(-swing * LEG_SWING * leftLeg, 0, 0)
+					joints.leftHip.Transform = if mounted then CFrame.Angles(-0.38, 0, -0.52) else CFrame.Angles(-swing * LEG_SWING * leftLeg, 0, 0)
 				end
 				-- Knees bend backwards while a leg swings; elbows stay relaxed in front (cosmetic only)
 				if joints.rightKnee then
@@ -96,10 +109,10 @@ function ZombieAnimator.start(tag: string)
 					joints.leftKnee.Transform = CFrame.Angles(-(KNEE_REST + math.abs(swing) * KNEE_BEND * leftLeg), 0, 0)
 				end
 				if joints.rightElbow then
-					joints.rightElbow.Transform = CFrame.Angles(ELBOW_REST + math.abs(swing) * ELBOW_SWING, 0, 0)
+					joints.rightElbow.Transform = if bowAiming then CFrame.identity else CFrame.Angles(ELBOW_REST + math.abs(swing) * ELBOW_SWING, 0, 0)
 				end
 				if joints.leftElbow then
-					joints.leftElbow.Transform = CFrame.Angles(ELBOW_REST + math.abs(swing) * ELBOW_SWING, 0, 0)
+					joints.leftElbow.Transform = if bowAiming then CFrame.identity else CFrame.Angles(ELBOW_REST + math.abs(swing) * ELBOW_SWING, 0, 0)
 				end
 				if crawl then
 					-- Pulling itself along with both arms
@@ -110,6 +123,8 @@ function ZombieAnimator.start(tag: string)
 					if joints.rightShoulder then
 						joints.rightShoulder.Transform = CFrame.Angles(math.rad(40) + (1 - pull) * math.rad(50) * amount, 0, 0)
 					end
+				elseif bowAiming and joints.leftShoulder then
+					joints.leftShoulder.Transform = CFrame.identity
 				elseif joints.leftShoulder then
 					joints.leftShoulder.Transform = CFrame.Angles(swing * ARM_SWING * (if limp then 2 else 1), 0, 0)
 				end

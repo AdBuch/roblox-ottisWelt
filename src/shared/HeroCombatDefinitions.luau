@@ -6,9 +6,9 @@ type Move = Moves.OttiMove
 
 local HeroCombatDefinitions = {}
 HeroCombatDefinitions.Movement = table.freeze({
-	Otti = table.freeze({ Ring = 6.5, Walk = 10, Strafe = 9, Quad = true }),
-	Kroko = table.freeze({ Ring = 4.8, Walk = 13, Strafe = 10, Quad = false }),
-	Schili = table.freeze({ Ring = 5.2, Walk = 8, Strafe = 6, Quad = false }),
+	Otti = table.freeze({ Ring = 6.5, Walk = 14, Strafe = 12, Quad = true }),
+	Kroko = table.freeze({ Ring = 4.8, Walk = 17, Strafe = 13, Quad = false }),
+	Schili = table.freeze({ Ring = 5.2, Walk = 14, Strafe = 12, Quad = false }),
 })
 
 function HeroCombatDefinitions.move(hero: string, role: string, phase: number): Move?
@@ -40,7 +40,7 @@ function HeroCombatDefinitions.move(hero: string, role: string, phase: number): 
 		move.StraightDash = true
 		move.Active = if kroko then 0.8 else 1.1
 		move.Radius = 3.8
-		move.Warning = if kroko then "KROKO STÜRMT — SEITLICH AUSWEICHEN!" else "SCHILIS KURZSPRINT — SEITLICH AUSWEICHEN!"
+		move.Warning = if kroko then "KROKO STÜRMT — SEITLICH AUSWEICHEN!" else "PANZERROLLE — SEITLICH AUSWEICHEN!"
 		move.MissRecovery = 0.6
 	elseif role == "Sweep" and not kroko then
 		-- A tortoise has a short tail. Schili sweeps the staff, never an invisible otter tail.

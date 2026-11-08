@@ -86,6 +86,28 @@ function CombatEffects.netThrow(from: Vector3, to: Vector3)
 end
 
 -- The folder for temporary combat visuals (detached zombie parts, markers). Cleared on cleanup.
+function CombatEffects.clayShatter(parts: { BasePart }, rng: Random)
+	for _, bodyPart in parts do
+		for _ = 1, 4 do
+			local offset = Vector3.new(rng:NextNumber(-.3, .3), rng:NextNumber(-.3, .3), rng:NextNumber(-.3, .3))
+			local shard = Instance.new("WedgePart")
+			shard.Name = "ClayShard"
+			shard.Size = bodyPart.Size * rng:NextNumber(.22, .42)
+			shard.CFrame = bodyPart.CFrame * CFrame.new(offset * bodyPart.Size)
+				* CFrame.Angles(rng:NextNumber(0, math.tau), rng:NextNumber(0, math.tau), 0)
+			shard.Color = bodyPart.Color:Lerp(Color3.fromRGB(132, 66, 42), rng:NextNumber(.12, .48))
+			shard.Material = Enum.Material.Slate
+			shard.CanCollide = false
+			shard.CanTouch = false
+			shard.CanQuery = false
+			shard.Parent = getContainer()
+			shard.AssemblyLinearVelocity = Vector3.new(rng:NextNumber(-14, 14), rng:NextNumber(9, 23), rng:NextNumber(-14, 14))
+			shard.AssemblyAngularVelocity = Vector3.new(rng:NextNumber(-8, 8), rng:NextNumber(-8, 8), rng:NextNumber(-8, 8))
+			Debris:AddItem(shard, 1.4)
+		end
+	end
+end
+
 function CombatEffects.container(): Instance
 	return getContainer()
 end

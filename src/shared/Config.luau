@@ -28,6 +28,7 @@ local Config = {
 	PlayersAliveAttribute = "PlayersAlive",
 	PlayersTotalAttribute = "PlayersTotal",
 	WavePhaseAttribute = "WavePhase", -- Idle | Starting | Fighting | Intermission | Victory
+	CampaignStageAttribute = "CampaignStage",
 	CountdownAttribute = "Countdown",
 	ArenaBusyAttribute = "ArenaBusy",
 	RedScoreAttribute = "RedScore",

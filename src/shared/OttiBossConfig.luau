@@ -9,7 +9,7 @@ local OttiBossConfig = {
 	RoundTitle = "ROUND 7 — FINAL BOSS",
 
 	-- Health by number of participating players (1-4). Damage never scales with players.
-	HealthByPlayers = table.freeze({ 1200, 1850, 2450, 3000 }),
+	HealthByPlayers = table.freeze({ 2200, 3400, 4600, 5800 }),
 
 	-- Rewards (paid exactly once per encounter)
 	SoloReward = 500,
@@ -25,12 +25,12 @@ local OttiBossConfig = {
 
 	-- Body
 	Scale = 1.15, -- about 9.5 studs tall standing; a champion, not a giant
-	WalkSpeedBiped = 10,
-	StrafeSpeed = 9,
-	RunSpeedQuad = 30,
+	WalkSpeedBiped = 14,
+	StrafeSpeed = 12,
+	RunSpeedQuad = 36,
 	DashSpeed = 40,
 	TurnRateQuad = 9, -- radians per second (fast otter turns)
-	TurnRateBiped = 5,
+	TurnRateBiped = 7,
 	TailReach = 10.5, -- from the root centre to the tail tip during sweeps (validated volume)
 	ContactRadius = 3.6, -- River Dash contact volume
 	JumpClearance = 1.8, -- a player whose root is this high above standing height clears low tail attacks

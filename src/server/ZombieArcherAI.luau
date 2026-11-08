@@ -15,6 +15,7 @@
 -- A dead archer never deals delayed damage: its arrows check that the shooter is still alive.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
 local ProjectileDefinitions = require(ReplicatedStorage.Shared.ProjectileDefinitions)
@@ -171,16 +172,48 @@ local function shoot(z: any, kit: any, state: ArcherState, player: Player, shotT
 		aimedOn[player] = (aimedOn[player] or 0) + 1
 	end
 	local drawSeconds = (def.DrawSeconds or 0.75) * shot.Draw
-	-- Telegraph: bow raised, string drawn, glowing outline and a faint aim line
-	kit.setPose(rig.leftShoulder, rig.leftShoulderRest, 90, drawSeconds * 0.4)
-	kit.setPose(rig.rightShoulder, rig.rightShoulderRest, 95, drawSeconds * 0.6)
-	CombatEffects.glow(z.model, Color3.fromRGB(255, 190, 90), drawSeconds)
-	local _, _, startRoot = CombatUtil.getLivingCharacter(player)
-	if startRoot then
-		kit.faceTowards(z, startRoot.Position)
-		CombatEffects.aimLine(eyeOf(z.root.Position), startRoot.Position, drawSeconds)
+	local pivot: Motor6D? = rig.bowPivot
+	local pivotRest = pivot and pivot.C0
+	local elbow: Motor6D? = rig.rightElbow
+	local elbowRest = elbow and elbow.C0
+	local nock: Attachment? = rig.bowNock
+	local nockRest = nock and nock.Position
+	local arrowRest: Attachment? = rig.bowArrowRest
+	local function align(aim: Vector3): Vector3
+		local arm = pivot and pivot.Part0
+		if not pivot or not pivotRest or not arrowRest or not arm then
+			return eyeOf(z.root.Position)
+		end
+		local grip = arm.CFrame:PointToWorldSpace(pivotRest.Position)
+		if (aim - grip).Magnitude < 0.05 then return grip end
+		local direction = (aim - grip).Unit
+		local up = if math.abs(direction.Y) < 0.98 then Vector3.yAxis else z.root.CFrame.RightVector
+		local upright = CFrame.lookAt(grip, aim, up)
+		pivot.C0 = arm.CFrame:ToObjectSpace(upright)
+		return upright:PointToWorldSpace(arrowRest.Position)
 	end
-	task.wait(drawSeconds)
+	-- Telegraph: bow raised, string drawn, glowing outline and a faint aim line
+	z.model:SetAttribute("BowAiming", true)
+	kit.setPose(rig.leftShoulder, rig.leftShoulderRest, 90, drawSeconds * 0.4)
+	kit.setPose(rig.rightShoulder, rig.rightShoulderRest * CFrame.Angles(0, math.rad(24), 0), 65, drawSeconds * 0.6)
+	if elbow and elbowRest then kit.setPose(elbow, elbowRest, 95, drawSeconds * 0.6) end
+	CombatEffects.glow(z.model, Color3.fromRGB(255, 190, 90), drawSeconds)
+	local elapsed = 0
+	local lineShown = false
+	while elapsed < drawSeconds and z.alive and not z.unarmed do
+		local _, _, target = CombatUtil.getLivingCharacter(player)
+		if not target then break end
+		kit.faceTowards(z, target.Position)
+		local origin = align(target.Position)
+		if nock and nockRest then
+			nock.Position = nockRest + Vector3.new(0, 0, math.min(1, elapsed / drawSeconds) * 1.1)
+		end
+		if not lineShown and elapsed >= drawSeconds * 0.42 then
+			lineShown = true
+			CombatEffects.aimLine(origin, target.Position, drawSeconds - elapsed)
+		end
+		elapsed += RunService.Heartbeat:Wait()
+	end
 	drawing = math.max(0, drawing - 1)
 	if aimed then
 		aimedOn[player] = math.max(0, (aimedOn[player] or 1) - 1)
@@ -190,8 +223,10 @@ local function shoot(z: any, kit: any, state: ArcherState, player: Player, shotT
 	local character, _, targetRoot = CombatUtil.getLivingCharacter(player)
 	if z.alive and not z.unarmed and character and targetRoot and kit.isValidTarget(player) then
 		kit.faceTowards(z, targetRoot.Position)
-		local origin = eyeOf(z.root.Position) + CombatUtil.flat(z.root.CFrame.LookVector) * 1.2
-		if CombatUtil.hasLineOfSight(origin, targetRoot.Position, kit.ignoreList(character)) then
+		local origin = align(targetRoot.Position)
+		local ignore = kit.ignoreList(character)
+		if CombatUtil.hasLineOfSight(eyeOf(z.root.Position), origin, ignore)
+			and CombatUtil.hasLineOfSight(origin, targetRoot.Position, ignore) then
 			local arrowDef = ProjectileDefinitions.EnemyArrow
 			local distance = (targetRoot.Position - origin).Magnitude
 			-- Slight lead on moving targets, limited accuracy (more error when wounded)
@@ -200,8 +235,10 @@ local function shoot(z: any, kit: any, state: ArcherState, player: Player, shotT
 			local aim = targetRoot.Position + lead + Vector3.new(0, 0.4, 0)
 			local errorRad = math.rad((def.AimErrorDegrees or 2.2) * z.mods.AimErrorMultiplier * shot.Error)
 			local direction = (aim - origin).Unit
+			local side = direction:Cross(Vector3.yAxis)
 			direction = (CFrame.fromAxisAngle(Vector3.yAxis, z.rng:NextNumber(-1, 1) * errorRad)
-				* CFrame.fromAxisAngle(CombatUtil.flat(direction).Unit:Cross(Vector3.yAxis), z.rng:NextNumber(-0.6, 0.6) * errorRad)):VectorToWorldSpace(direction)
+				* CFrame.fromAxisAngle(if side.Magnitude > 0.001 then side.Unit else Vector3.xAxis, z.rng:NextNumber(-0.6, 0.6) * errorRad)):VectorToWorldSpace(direction)
+			origin = align(origin + direction * 50)
 			kit.handlers().fireArrow({
 				origin = origin,
 				direction = direction,
@@ -216,10 +253,14 @@ local function shoot(z: any, kit: any, state: ArcherState, player: Player, shotT
 		end
 	end
 	if z.alive then
+		if nock and nockRest then nock.Position = nockRest end
 		kit.setPose(rig.rightShoulder, rig.rightShoulderRest, if fired then 60 else 0, 0.1)
 		task.wait(0.25)
 		kit.setPose(rig.rightShoulder, rig.rightShoulderRest, 0, 0.3)
 		kit.setPose(rig.leftShoulder, rig.leftShoulderRest, 0, 0.3)
+		if pivot and pivotRest then kit.setPose(pivot, pivotRest, 0, 0.3) end
+		if elbow and elbowRest then kit.setPose(elbow, elbowRest, 0, 0.3) end
+		z.model:SetAttribute("BowAiming", false)
 	end
 	local cooldown = (def.FireCooldown or 2.2) * z.mods.FireCooldownMultiplier * (0.85 + z.rng:NextNumber() * 0.3)
 	if #state.plan > 0 and fired then

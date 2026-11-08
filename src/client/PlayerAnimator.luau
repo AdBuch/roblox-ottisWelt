@@ -109,7 +109,10 @@ local POSES: { [string]: { Pose } } = {
 	Rise = { pose(v(-26, 24, -6), v(-32, 0, 28), v(24, 0, -18), v(36, 0, 0), v(32, 0, 0), 0.5), pose(v(20, -28, 8), v(142, 0, -24), v(48, 0, -28), v(-26, 0, 0), v(34, 0, 0)) },
 	Spin = { pose(v(0, 58, -8), v(54, 0, 70), v(30, 0, -48), v(-24, 20, 0), v(26, -20, 0), 0.18), pose(v(-12, -125, 10), v(48, 0, -80), v(36, 0, -52), v(28, -26, 0), v(-28, 24, 0), 0.22) },
 	Flurry = { pose(v(4, 32, -6), v(68, 0, 34), v(24, 0, -36), v(-16, 0, 0), v(22, 0, 0), 0.12), pose(v(-12, -38, 8), v(-22, 0, -42), v(82, 0, 36), v(24, 0, 0), v(-24, 0, 0), 0.16) },
-	Draw = { pose(v(0, 40, 0), v(60, 0, 0), v(85, 0, 0)), pose(v(0, 38, 0), v(70, 0, 0), v(85, 0, 0)) },
+	Draw = {
+		pose(nil, v(62, 25, 0), v(83, 0, 0), nil, nil, 0, { re = 100, le = 0, lw = v(-83, 0, 0) }),
+		pose(nil, v(52, 18, 0), v(83, 0, 0), nil, nil, 0, { re = 110, le = 0, lw = v(-83, 0, 0) }),
+	},
 	Guard = { pose(v(-8, 10, 0), nil, v(88, -15, -18), nil, v(-10, 0, 0), 0.3), pose(v(-8, 10, 0), nil, v(88, -15, -18), nil, v(-10, 0, 0), 0.3) },
 	Bash = { pose(v(4, -20, 0), nil, v(40, 0, 0)), pose(v(-14, 24, 0), nil, v(80, 0, 0), nil, v(-25, 0, 0), 0.2) },
 	RetreatCut = { pose(v(-8, 30, -8), v(62, 0, 42), v(25, 0, -20), v(24, 0, 0), v(-12, 0, 0), 0.2), pose(v(12, -42, 8), v(-24, 0, -56), v(42, 0, -18), v(-32, 0, 0), v(28, 0, 0), 0.28) },
@@ -394,6 +397,51 @@ local function applyAdditive(motor: Joint?, offset: CFrame?)
 	end
 end
 
+-- Predict the animated arm in the same frame as our additive writes. Reading the
+-- hand's live part frame here would use last frame's Motor6D transforms.
+local function jointFrames(joint: Joint?): (BasePart?, CFrame?, CFrame?)
+	if joint and joint:IsA("Motor6D") then
+		return joint.Part0, joint.C0, joint.C1
+	elseif joint and joint:IsA("AnimationConstraint") then
+		local from, to = joint.Attachment0, joint.Attachment1
+		local parent = from and from.Parent
+		if from and to and parent and parent:IsA("BasePart") then
+			return parent, from.CFrame, to.CFrame
+		end
+	end
+	return nil, nil, nil
+end
+
+local function childFrame(joint: Joint?, parentFrame: CFrame?): CFrame?
+	if not joint then return nil end
+	local parent, c0, c1 = jointFrames(joint)
+	if not parent or not c0 or not c1 then return nil end
+	return (parentFrame or parent.CFrame) * c0 * joint.Transform * c1:Inverse()
+end
+
+local function bowWrist(character: Model, motors: Motors, aim: Vector3): CFrame?
+	local wrist = motors.leftWrist
+	local _, c0, c1 = jointFrames(wrist)
+	local grip = character:FindFirstChild("LeftGripAttachment", true)
+	if not wrist or not c0 or not c1 or not grip or not grip:IsA("Attachment") then return nil end
+	local arm = childFrame(motors.leftShoulder, nil)
+	local forearm = childFrame(motors.leftElbow, arm)
+	if not forearm then return nil end
+	local pivot = forearm * c0
+	local direction = aim - pivot.Position
+	if direction.Magnitude < 0.1 then return nil end
+	local forward = direction.Unit
+	local up = if math.abs(forward.Y) < 0.98 then Vector3.yAxis else Vector3.zAxis
+	local right = forward:Cross(up).Unit
+	local bowRotation = CFrame.fromMatrix(Vector3.zero, right, forward, right:Cross(forward))
+	local handRotation = bowRotation * grip.CFrame.Rotation:Inverse()
+	local target = pivot.Rotation:ToObjectSpace(handRotation * c1.Rotation)
+	local previous = written[wrist]
+	local current = wrist.Transform
+	local base = if previous and current == previous.written then previous.base else current
+	return base.Rotation:ToObjectSpace(target)
+end
+
 local function residualOf(p: Pose): number
 	return p.waist.Magnitude + p.rightShoulder.Magnitude + p.leftShoulder.Magnitude + p.rightHip.Magnitude
 		+ p.leftHip.Magnitude + math.abs(p.crouch) + math.abs(p.rightElbow) + math.abs(p.leftElbow)
@@ -402,6 +450,7 @@ end
 
 function PlayerAnimator.start()
 	local cache: { [Model]: Motors } = setmetatable({}, { __mode = "k" }) :: any
+	local bowStrings: { [Model]: Attachment } = setmetatable({}, { __mode = "k" }) :: any
 	local blocks: { [Model]: BlockState } = setmetatable({}, { __mode = "k" }) :: any
 	local attacks: { [Model]: AttackState } = setmetatable({}, { __mode = "k" }) :: any
 	-- Remove our previous offsets BEFORE Animator evaluation, including joints it skips.
@@ -425,6 +474,23 @@ function PlayerAnimator.start()
 
 			-- Attack: a special move's own choreography, otherwise the basic attack pose
 			local anim = character:GetAttribute("AttackAnim")
+			local elapsed = now - (tonumber(character:GetAttribute("AttackStart")) or 0)
+			local bowWind = tonumber(character:GetAttribute("AttackWind")) or 0.1
+			local bowLength = tonumber(character:GetAttribute("AttackLength")) or 0.5
+			local aimingBow = anim == "Draw" and elapsed >= 0 and elapsed < bowLength
+				and character:GetAttribute("WeaponDrawn") == true and character:GetAttribute("Blocking") ~= true
+			if aimingBow then
+				local bow = character:FindFirstChild("HunterBow")
+				local nock = bow and bow:FindFirstChild("BowNock", true)
+				if nock and nock:IsA("Attachment") then
+					bowStrings[character] = nock
+					local draw = if elapsed < bowWind then math.clamp(elapsed / math.max(bowWind, 0.04), 0, 1) else 0
+					nock.Position = Vector3.new(0, -0.65 - 1.1 * draw, 0.3)
+				end
+			elseif bowStrings[character] then
+				bowStrings[character].Position = Vector3.new(0, -0.65, 0.3)
+				bowStrings[character] = nil
+			end
 			local attackState = attacks[character]
 			local special, specialSpin = specialPose(character, now)
 			if special then
@@ -613,7 +679,24 @@ function PlayerAnimator.start()
 			applyAdditive(m.rightElbow, angles(Vector3.new(math.clamp(total.rightElbow, 0, 120), 0, 0)))
 			applyAdditive(m.leftElbow, angles(Vector3.new(math.clamp(total.leftElbow, 0, 120), 0, 0)))
 			applyAdditive(m.rightWrist, angles(total.rightWrist))
-			applyAdditive(m.leftWrist, angles(total.leftWrist))
+			local wristOffset = angles(total.leftWrist)
+			local aim = character:GetAttribute("BowAimPoint")
+			if aimingBow and typeof(aim) == "Vector3" then
+				local specialName = character:GetAttribute("SpecialAnimation")
+				local root = character:FindFirstChild("HumanoidRootPart")
+				local aimPoint = aim
+				if specialName == "Bow:ArrowRain" and root and root:IsA("BasePart") then
+					local flat = Vector3.new(aim.X - root.Position.X, 0, aim.Z - root.Position.Z)
+					local forward = if flat.Magnitude > 0.1 then flat.Unit else root.CFrame.LookVector
+					aimPoint = root.Position + (forward + Vector3.yAxis * 2.5) * 30
+				end
+				local align = bowWrist(character, m, aimPoint)
+				if align then
+					local weight = math.clamp(math.min(elapsed / math.max(0.04, bowWind * 0.8), (bowLength - elapsed) / 0.12), 0, 1)
+					wristOffset = wristOffset:Lerp(align, weight)
+				end
+			end
+			applyAdditive(m.leftWrist, wristOffset)
 			applyAdditive(m.rightKnee, angles(Vector3.new(-math.min(140, math.min(55, math.abs(total.rightHip.X) * 0.5 + total.crouch * 25) + 2 * fold), 0, 0)))
 			applyAdditive(m.leftKnee, angles(Vector3.new(-math.min(140, math.min(55, math.abs(total.leftHip.X) * 0.5 + total.crouch * 25) + 2 * fold), 0, 0)))
 		end
