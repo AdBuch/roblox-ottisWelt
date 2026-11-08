@@ -59,6 +59,7 @@ export type LobbyMenu = {
 type Kind = "Weapon" | "Shield" | "Armor"
 
 local LobbyMenuController = {}
+LobbyMenuController.active = nil :: LobbyMenu?
 
 local KIND_TABS: { { kind: Kind, label: string } } = {
 	{ kind = "Weapon", label = "WAFFEN" },
@@ -277,18 +278,18 @@ function LobbyMenuController.start(deps: Deps): LobbyMenu
 		Font = THEME.TitleFont,
 		TextSize = 15,
 		TextColor3 = THEME.Gold,
-		Text = "☰  MENÜ",
+		Text = "MENÜ",
 	}, accessGui)
 	MenuSystem.corner(access, 10)
 	MenuSystem.stroke(access, THEME.Bronze, 0.1, 2)
 	accessGui.Parent = player:WaitForChild("PlayerGui")
-	-- narrow phones: a compact two-line button, so it never touches the level capsule (top right)
+	-- narrow phones: a compact button, so it never touches the level capsule (top right).
+	-- Plain text only: icon glyphs like ☰ have no font fallback on Roblox and show as a box.
 	local function fitAccess()
 		local camera = workspace.CurrentCamera
 		local narrow = camera ~= nil and camera.ViewportSize.X < 460
-		access.Size = UDim2.fromOffset(if narrow then 56 else 112, THEME.TouchTarget)
-		access.Text = if narrow then "☰\nMENÜ" else "☰  MENÜ"
-		access.TextSize = if narrow then 11 else 15
+		access.Size = UDim2.fromOffset(if narrow then 64 else 112, THEME.TouchTarget)
+		access.TextSize = if narrow then 13 else 15
 	end
 	if workspace.CurrentCamera then
 		workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(fitAccess)
@@ -700,7 +701,7 @@ function LobbyMenuController.start(deps: Deps): LobbyMenu
 		for i, group in GladiatorLevelDefinitions.Groups do
 			local reached = current.Level >= group.First
 			local active = current.Level >= group.First and current.Level <= group.Last
-			local mark = if active then "►" elseif reached then "✓" else "·"
+			local mark = if active then "▶" elseif reached then "✓" else "·"
 			local color = if active then THEME.Gold elseif reached then THEME.Text else THEME.TextMuted
 			local range = if group.First == group.Last then ("Level %d"):format(group.First) else ("Level %d–%d"):format(group.First, group.Last)
 			MenuSystem.label(groups, ("%s  <b>%s</b>  ·  %s  ·  %s"):format(mark, group.Name, range, group.Description), 13, THEME.BodyFont, color, 1 + i)
@@ -895,12 +896,14 @@ function LobbyMenuController.start(deps: Deps): LobbyMenu
 		end
 	end)
 
-	return {
+	local menu: LobbyMenu = {
 		open = open,
 		close = window.close,
 		isOpen = window.isOpen,
 		accessButton = access,
 	}
+	LobbyMenuController.active = menu -- the running menu (read by the Studio menu QA script only)
+	return menu
 end
 
 return LobbyMenuController

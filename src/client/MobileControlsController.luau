@@ -43,6 +43,7 @@ local EMPTY = Color3.fromRGB(65, 57, 46)
 local DOT_COUNT = 40
 local MENU = UiConfig.Menu
 local BLOCK_ACCENT = Color3.fromRGB(120, 170, 255)
+local EDGE_GAP = 10 -- px between the rhombus and the right edge button column
 
 -- A ring of small dots inside a round button (decorative: never consumes touch input)
 local function makeRing(button: TextButton, prefix: string): { Frame }
@@ -166,14 +167,14 @@ local function nativeJumpGuard(playerGui: Instance, suppressed: () -> boolean): 
 	end
 end
 
-function MobileControlsController.start(group: (string, Vector2, UDim2, UDim2?) -> Frame, visibility: Visibility, onLayout: ((Layout) -> ()) -> (), shown: () -> boolean): Controls
+function MobileControlsController.start(group: (string, Vector2, UDim2, UDim2?) -> Frame, visibility: Visibility, onLayout: ((Layout) -> ()) -> (), shown: () -> boolean, avoid: GuiObject?): Controls
 	local player = Players.LocalPlayer
 	local phone = UiConfig.TouchRhombus.Phone
 	local phoneBox = UiConfig.rhombusBox(phone.Size, phone.Radius)
 	local frame = group("TouchControls", Vector2.new(1, 1), UDim2.new(1, -phone.Margin, 1, -phone.Margin), UDim2.fromOffset(phoneBox, phoneBox))
 
 	local block = makeButton(frame, "Block", "🛡", "BLOCK", BLOCK_ACCENT)
-	local special = makeButton(frame, "Special", "✦", "SPEZIAL", MENU.Gold)
+	local special = makeButton(frame, "Special", "⚡", "SPEZIAL", MENU.Gold) -- emoji glyphs render; ✦ did not
 	local attack = makeButton(frame, "Attack", "⚔", "ANGRIFF", Color3.fromRGB(255, 140, 110))
 	local jump = makeButton(frame, "Jump", "▲", "SPRUNG", Color3.fromRGB(150, 225, 150))
 	local faces: { [string]: Face } = { Block = block, Special = special, Attack = attack, Jump = jump }
@@ -183,17 +184,63 @@ function MobileControlsController.start(group: (string, Vector2, UDim2, UDim2?) 
 	local blockDots = makeRing(block.button, "BlockStage_")
 
 	-- Layout: one centre (the container's middle), one radius, the same size for every button
+	local margin = phone.Margin
+	-- Keeps the whole rhombus left of the right edge column (PLAY / eye / i / CAM) when that column
+	-- reaches down to the rhombus on short landscape screens; the rhombus itself never changes shape.
+	local function clearEdge()
+		local parent = frame.Parent :: GuiBase2d?
+		local right = margin
+		if avoid and parent and avoid.Visible then
+			local parentRight = parent.AbsolutePosition.X + parent.AbsoluteSize.X
+			local parentBottom = parent.AbsolutePosition.Y + parent.AbsoluteSize.Y
+			local top = parentBottom - margin - frame.AbsoluteSize.Y
+			local bottom = -math.huge
+			for _, child in avoid:GetChildren() do
+				if child:IsA("GuiObject") and child.Visible then
+					bottom = math.max(bottom, child.AbsolutePosition.Y + child.AbsoluteSize.Y)
+				end
+			end
+			if bottom + EDGE_GAP > top then
+				right = math.max(margin, parentRight - avoid.AbsolutePosition.X + EDGE_GAP)
+			end
+		end
+		local position = UDim2.new(1, -right, 1, -margin)
+		if frame.Position ~= position then
+			frame.Position = position
+		end
+	end
 	onLayout(function(layout: Layout)
 		local rhombus = if layout.device == "Phone" then UiConfig.TouchRhombus.Phone else UiConfig.TouchRhombus.Tablet
 		local box = UiConfig.rhombusBox(rhombus.Size, rhombus.Radius)
+		margin = rhombus.Margin
 		frame.Size = UDim2.fromOffset(box, box)
-		frame.Position = UDim2.new(1, -rhombus.Margin, 1, -rhombus.Margin)
 		for id, offset in UiConfig.rhombusOffsets(rhombus.Radius) do
 			local face = faces[id]
 			face.button.Size = UDim2.fromOffset(rhombus.Size, rhombus.Size)
 			face.button.Position = UDim2.new(0.5, offset.X, 0.5, offset.Y)
 		end
+		task.defer(clearEdge) -- after the UIScale and the edge column applied the new layout
 	end)
+	frame:GetPropertyChangedSignal("AbsoluteSize"):Connect(clearEdge)
+	if avoid then
+		avoid:GetPropertyChangedSignal("AbsoluteSize"):Connect(clearEdge)
+		avoid:GetPropertyChangedSignal("AbsolutePosition"):Connect(clearEdge)
+		avoid:GetPropertyChangedSignal("Visible"):Connect(clearEdge)
+		local function watchChild(child: Instance)
+			if child:IsA("GuiObject") then
+				child:GetPropertyChangedSignal("Visible"):Connect(clearEdge)
+				child:GetPropertyChangedSignal("AbsoluteSize"):Connect(clearEdge)
+			end
+			task.defer(clearEdge)
+		end
+		avoid.ChildAdded:Connect(watchChild)
+		avoid.ChildRemoved:Connect(function()
+			task.defer(clearEdge)
+		end)
+		for _, child in avoid:GetChildren() do
+			watchChild(child)
+		end
+	end
 	visibility.register("Controls", frame, shown)
 
 	------------------------------------------------------------------ JUMP (replaces the native button)
@@ -269,7 +316,7 @@ function MobileControlsController.start(group: (string, Vector2, UDim2, UDim2?) 
 			tierName = if ultimate then "ULT" elseif selected then selected.Name else "..."
 		end
 		fillRing(dots, value / MomentumConfig.Max, color)
-		special.sub.Text = ("%s · %d%%"):format(tierName, math.floor(value))
+		special.sub.Text = if tierName == "..." then ("%d%%"):format(math.floor(value)) else ("%s · %d%%"):format(tierName, math.floor(value))
 		if held ~= nil then
 			local preview = Preview.text(player, held, value)
 			local failure = preview:match("fail %d+%%") or ""

@@ -88,7 +88,11 @@ function ItemInfo.describe(kind: string, id: string): Card?
 			end
 		end
 		if #specials > 0 then
-			table.insert(notes, "Spezialangriffe: " .. table.concat(specials, ", "))
+			-- one short line per special: wraps cleanly on narrow phone screens
+			table.insert(notes, "Spezialangriffe:")
+			for _, special in specials do
+				table.insert(notes, "  · " .. special)
+			end
 		end
 		return {
 			title = weapon.DisplayName,

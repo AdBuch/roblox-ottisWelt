@@ -202,7 +202,7 @@ local aura = AuraDisplayController.start(hud.group, visibility, notify, function
 end)
 local controls = MobileControlsController.start(hud.group, visibility, hud.onLayout, function()
 	return hud.layout.touch and not MenuSystem.isOpen() -- hidden (and released) while a big menu is open
-end)
+end, edge) -- the rhombus keeps clear of the right edge buttons (PLAY / eye / i / CAM)
 MomentumHudController.start(hud.group, visibility, hud.onLayout, player, function() return hud.layout.touch end)
 
 local function controlHint(): string
