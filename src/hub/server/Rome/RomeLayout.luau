@@ -7,7 +7,7 @@
 --   UPPER  y  1   x >= -232     Colosseum, its plaza and the west forecourt (Kolosseumsvorplatz)
 --   LOWER  y -2   -508..-232    Handwerksgasse, forum and temple, living quarter (north), villas (south)
 --   HARBOR y -6   x < -508      fortified harbour: quays, warehouses, the two moles
--- Sea level is y -10. Retaining walls separate the terraces; streets ramp through them.
+-- Sea level is y -12 (a voxel boundary: the sea surface is flat). Retaining walls separate the terraces; streets ramp through them.
 --
 -- SCALE (docs/ROM_INSEL.md): the Colosseum is fixed at about 0.56 m per stud (189 m <-> 338 studs),
 -- avatars at about 0.35 m per stud. The town keeps avatar-sized houses (doors 8 studs, storeys
@@ -50,7 +50,7 @@ export type House = {
 
 local RomeLayout = {}
 
-RomeLayout.Levels = table.freeze({ Upper = 1, Lower = -2, Harbor = -6, Water = -10, SeaFloor = -42 })
+RomeLayout.Levels = table.freeze({ Upper = 1, Lower = -2, Harbor = -6, Water = -12, SeaFloor = -42 })
 RomeLayout.Terraces = table.freeze({ UpperLowerX = -232, LowerHarborX = -508 })
 
 -- Street cross sections (studs): carriageway, each sidewalk incl. its kerb, sidewalk height.
@@ -185,6 +185,37 @@ RomeLayout.Squares = table.freeze({
 })
 RomeLayout.Plaza = table.freeze({ inner = 92, outer = 118 }) -- paved ring round the Colosseum (ring offsets)
 
+-- Lower work yards (Werkhöfe) behind the shop fronts of the Handwerksgasse: private, walled, with
+-- lean-to sheds along one side (`shed`: "N" | "S" | "E" | "W" edge of the yard).
+export type Yard = { id: string, block: string, x0: number, x1: number, z0: number, z1: number, level: number, shed: string }
+RomeLayout.Yards = table.freeze({
+	{ id = "WerkhofNord", block = "BN1", x0 = -290, x1 = -238, z0 = -92, z1 = -38, level = L, shed = "N" },
+	{ id = "WerkhofSued", block = "BS1", x0 = -281, x1 = -238, z0 = 29, z1 = 75, level = L, shed = "S" },
+} :: { Yard })
+-- Low walls (2.4 studs, an invisible guard above) that close private yards and gardens toward the
+-- public way; `gate` (0..1 along the wall) puts a closed arched gate (Torbogen) into it.
+export type YardWall = { id: string, a: Point, b: Point, level: number, gate: number? }
+RomeLayout.YardWalls = table.freeze({
+	{ id = "BN1-Ost", a = { x = -235.6, z = -11.6 }, b = { x = -235.6, z = -94 }, level = L },
+	{ id = "BN1-Sued", a = { x = -259.4, z = -11.6 }, b = { x = -235.6, z = -11.6 }, level = L, gate = 0.5 },
+	{ id = "BS1-Ost", a = { x = -235.6, z = 11.6 }, b = { x = -235.6, z = 92.6 }, level = L },
+	{ id = "BS1-Nord", a = { x = -261.4, z = 11.6 }, b = { x = -235.6, z = 11.6 }, level = L, gate = 0.5 },
+	{ id = "BS1-Sued", a = { x = -265.4, z = 92.6 }, b = { x = -235.6, z = 92.6 }, level = L, gate = 0.55 },
+	{ id = "BS1-Luecke", a = { x = -282.6, z = 92.6 }, b = { x = -279.4, z = 92.6 }, level = L },
+	{ id = "BS6-Garten", a = { x = -358, z = 162.6 }, b = { x = -270, z = 162.6 }, level = L, gate = 0.5 },
+	{ id = "BS6-West", a = { x = -364.6, z = 108 }, b = { x = -364.6, z = 162.6 }, level = L, gate = 0.5 },
+	{ id = "BS3-West", a = { x = -423.6, z = 35 }, b = { x = -423.6, z = 92.6 }, level = L, gate = 0.5 },
+	{ id = "BS4-Nord", a = { x = -505, z = 26.6 }, b = { x = -467, z = 26.6 }, level = L, gate = 0.5 },
+	{ id = "BS5-Ost", a = { x = -383.6, z = 108 }, b = { x = -383.6, z = 181 }, level = L, gate = 0.6 },
+} :: { YardWall })
+RomeLayout.YardWallHeight = 2.4
+-- Storage arcades (horrea) along the east quay: with the warehouses and the quay wall they close
+-- the harbour front. They face the water (west).
+RomeLayout.QuayArcades = table.freeze({
+	{ id = "HorreaSued", x0 = -516, x1 = -510, z0 = -28, z1 = 60 },
+	{ id = "HorreaNord", x0 = -516, x1 = -510, z0 = -90, z1 = -56 },
+})
+
 ----------------------------------------------------------------------------- anchors
 -- Named anchors (x, z, y = floor height, yaw = facing in degrees: 0 = north/-z, 90 = east/+x).
 export type Anchor = { x: number, z: number, y: number, yaw: number }
@@ -197,7 +228,7 @@ RomeLayout.Anchors = table.freeze({
 	QuestFigureB = { x = -358, z = -19, y = -1, yaw = 180 },
 	TempleDoor = { x = -466, z = 0, y = 4, yaw = 90 },
 	OracleSpot = { x = -486, z = 0, y = 4, yaw = 90 },
-	Berth = { x = -608, z = -68, y = -10, yaw = 270 }, -- trireme placeholder centre (on the water)
+	Berth = { x = -608, z = -68, y = -12, yaw = 270 }, -- trireme placeholder centre (on the water)
 	TravelPoint = { x = -608, z = -84, y = H, yaw = 0 }, -- later: boarding / travel interaction
 	SecretRuin = { x = -698, z = -330, y = 0, yaw = 270 }, -- later: a hidden stair below the disc
 	Viewpoint = { x = -712, z = -300, y = 0, yaw = 270 }, -- safe cliff with a view of the rim

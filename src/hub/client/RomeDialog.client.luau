@@ -29,12 +29,12 @@ gui.Parent = player:WaitForChild("PlayerGui")
 local panel = Instance.new("Frame")
 panel.AnchorPoint = Vector2.new(0.5, 0.5)
 panel.Position = UDim2.fromScale(0.5, 0.5)
-panel.Size = UDim2.new(0.92, 0, 0, 380)
+panel.Size = UDim2.new(0.94, 0, 0.86, 0)
 panel.BackgroundColor3 = THEME.Panel
 panel.BorderSizePixel = 0
 panel.Parent = gui
 local limit = Instance.new("UISizeConstraint")
-limit.MaxSize = Vector2.new(560, 520)
+limit.MaxSize = Vector2.new(660, 640)
 limit.Parent = panel
 local corner = Instance.new("UICorner")
 corner.CornerRadius = UDim.new(0, THEME.Corner)
@@ -150,67 +150,240 @@ local function row(height: number): Frame
 	return f
 end
 
-local function showForge(payload: any)
+-- A wrapping row of action buttons inside a card.
+local function actionBar(parent: Instance): Frame
+	local bar = Instance.new("Frame")
+	bar.Name = "Actions"
+	bar.BackgroundTransparency = 1
+	bar.Size = UDim2.new(1, -20, 0, 0)
+	bar.AutomaticSize = Enum.AutomaticSize.Y
+	bar.LayoutOrder = 10
+	bar.Parent = parent
+	local grid = Instance.new("UIGridLayout")
+	grid.CellSize = UDim2.fromOffset(138, THEME.TouchTarget)
+	grid.CellPadding = UDim2.fromOffset(6, 6)
+	grid.SortOrder = Enum.SortOrder.LayoutOrder
+	grid.Parent = bar
+	return bar
+end
+
+-- A card that grows with its content (title line, value lines, action buttons).
+local function card(order: number): Frame
+	local f = Instance.new("Frame")
+	f.BackgroundColor3 = THEME.Surface
+	f.BorderSizePixel = 0
+	f.Size = UDim2.new(1, -8, 0, 0)
+	f.AutomaticSize = Enum.AutomaticSize.Y
+	f.LayoutOrder = order
+	f.Parent = list
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, 8)
+	c.Parent = f
+	local pad = Instance.new("UIPadding")
+	pad.PaddingLeft, pad.PaddingRight, pad.PaddingTop, pad.PaddingBottom = UDim.new(0, 10), UDim.new(0, 10), UDim.new(0, 6), UDim.new(0, 8)
+	pad.Parent = f
+	local l = Instance.new("UIListLayout")
+	l.Padding = UDim.new(0, 4)
+	l.SortOrder = Enum.SortOrder.LayoutOrder
+	l.Parent = f
+	return f
+end
+
+local function line(parent: Instance, order: number, value: string, size: number, color: Color3, font: Enum.Font?)
+	local label = text(parent, "Line", size, font or THEME.BodyFont, color, 0)
+	label.AutomaticSize = Enum.AutomaticSize.Y
+	label.Size = UDim2.new(1, -20, 0, 0)
+	label.LayoutOrder = order
+	label.Text = value
+end
+
+local function clock(seconds: number): string
+	local s = math.max(0, math.floor(seconds))
+	return ("%d:%02d"):format(s // 60, s % 60)
+end
+
+local MarketplaceService = game:GetService("MarketplaceService")
+local forgeToken: string? = nil
+local forgeOpen = false
+local renderForge: (state: any) -> () = function() end
+
+-- Sends one smith request; renders the answer; follows a Robux or Denarii hint.
+local function forgeCall(action: string, data: { [string]: any })
+	if pending then
+		return
+	end
+	lock(true)
+	status.TextColor3 = THEME.Text
+	status.Text = "Der Schmied hört zu ..."
+	data.token = forgeToken
+	local ok, result = pcall(function()
+		return request:InvokeServer(action, data)
+	end)
+	lock(false)
+	if not ok or typeof(result) ~= "table" then
+		status.Text = "Keine Antwort vom Server."
+		return
+	end
+	if result.state then
+		renderForge(result.state)
+	end
+	if result.productId then
+		pcall(function()
+			MarketplaceService:PromptProductPurchase(player, result.productId)
+		end)
+	end
+	status.Text = result.message or ""
+	status.TextColor3 = if result.ok then THEME.Positive else THEME.Negative
+	if result.needProduct then
+		-- the server remembered what this purchase is for; confirm the Robux purchase
+		local state = result.state
+		for _, p in (if state then state.products else {}) :: { any } do
+			if p.key == result.needProduct then
+				local c = card(-1)
+				line(c, 1, ("%s für %d Robux?"):format(p.label, p.robux), 15, THEME.Gold, THEME.LabelFont)
+				local bar = actionBar(c)
+				local buy = button(bar, if p.ready then ("KAUFEN · R$%d"):format(p.robux) else "NOCH NICHT VERFÜGBAR", THEME.Primary, UDim.new(0, 0))
+				table.insert(actionButtons, buy)
+				buy.Activated:Connect(function()
+					if p.ready then
+						forgeCall("Buy", { key = p.key })
+					end
+				end)
+			end
+		end
+	elseif result.needDenarii then
+		status.Text ..= (" Es fehlen %d Denarii: unten kannst du Denarii kaufen."):format(result.needDenarii)
+	end
+end
+
+renderForge = function(state: any)
+	if not forgeOpen or not gui.Enabled then
+		return
+	end
 	clear()
 	title.Text = "SCHMIEDE · FABER"
-	subtitle.Text = ("Erste Verbesserungsstufe: +%d %% Schaden gegen Zombies und Bosse. Im PvP bleibt jede Waffe ausgeglichen. Helme folgen später."):format(math.floor(payload.bonus * 100 + 0.5))
-	local function fill(items: { any }, denarii: number)
-		clear()
-		status.Text = ("Dein Guthaben: %d Denarii"):format(denarii)
-		if #items == 0 then
-			local empty = text(list, "Empty", 15, THEME.BodyFont, THEME.TextMuted, 40)
-			empty.Text = "Du besitzt noch keine Waffe, die der Schmied verbessern kann."
-		end
-		for i, item in items do
-			local r = row(70)
-			r.LayoutOrder = i
-			local name = text(r, "Name", 17, THEME.LabelFont, THEME.Text, 24)
-			name.Position = UDim2.fromOffset(10, 6)
-			name.Size = UDim2.new(1, -180, 0, 24)
-			name.Text = item.name .. (if item.level >= item.maxLevel then "  · verbessert" else "")
-			local values = text(r, "Values", 14, THEME.BodyFont, THEME.TextMuted, 36)
-			values.Position = UDim2.fromOffset(10, 30)
-			values.Size = UDim2.new(1, -180, 0, 36)
-			if item.level >= item.maxLevel then
-				values.Text = ("Grundschlag gegen Zombies: %d (höchste Stufe)"):format(item.basicNow)
+	subtitle.Text = ("Härten +%d %% gegen Zombies und Bosse · Schleifen und Reparieren gegen Verschleiss · Designs und Vorspulen mit Robux. Ein Exemplar beim Schmied kannst du nicht benutzen."):format(math.floor(state.bonus * 100 + 0.5))
+	status.Text = ("Guthaben: %d Denarii · Gutschriften: %d× Vorspulen, %d× Design"):format(state.denarii, state.credits.Skip, state.credits.Design)
+	local order = 0
+	local function nextOrder(): number
+		order += 1
+		return order
+	end
+	local note = card(nextOrder())
+	line(note, 1, state.note, 12, THEME.TextMuted)
+	for _, weapon in state.weapons :: { any } do
+		for _, c in weapon.copies :: { any } do
+			local box = card(nextOrder())
+			local head = ("%s · Exemplar %d%s"):format(weapon.name, c.index, if c.inHand then " · in der Hand" elseif c.active then " · gewählt" else "")
+			line(box, 1, head, 16, THEME.Text, THEME.LabelFont)
+			line(box, 2, ("Härtung %d/%d · Zustand %s (%d %% Verschleiss) · Design: %s"):format(c.forge, state.maxLevel, c.wearLabel, c.wear, c.designText), 13, THEME.TextMuted)
+			line(box, 3, ("Grundschlag gegen Zombies: %d%s"):format(c.basic, if c.prices.Harden then (" · gehärtet %d"):format(c.basicHardened) else ""), 13, THEME.TextMuted)
+			local bar = actionBar(box)
+			if c.job then
+				local timer = text(box, "Job", 14, THEME.LabelFont, THEME.Gold, 20)
+				timer.LayoutOrder = 4
+				local started, remaining = os.clock(), c.job.remaining
+				timer.Text = ("Beim Schmied: %s · noch %s"):format(c.job.label, clock(remaining))
+				task.spawn(function()
+					while timer.Parent and forgeOpen do
+						task.wait(1)
+						timer.Text = ("Beim Schmied: %s · noch %s"):format(c.job.label, clock(remaining - (os.clock() - started)))
+					end
+				end)
+				local skip = button(bar, "VORSPULEN · ROBUX", THEME.Primary, UDim.new(0, 0))
+				table.insert(actionButtons, skip)
+				skip.Activated:Connect(function()
+					forgeCall("Skip", { weaponId = weapon.weaponId, uid = c.uid })
+				end)
 			else
-				values.Text = ("Grundschlag gegen Zombies: %d → %d\nPreis: %d Denarii"):format(item.basicNow, item.basicNext, item.price)
+				local function job(label: string, kind: string, price: number?)
+					if price then
+						local b = button(bar, ("%s · %d D"):format(label, price), THEME.SurfaceRaised, UDim.new(0, 0))
+						table.insert(actionButtons, b)
+						b.Activated:Connect(function()
+							forgeCall("ForgeJob", { weaponId = weapon.weaponId, uid = c.uid, kind = kind })
+						end)
+					end
+				end
+				job("HÄRTEN", "Harden", c.prices.Harden)
+				job("SCHLEIFEN", "Sharpen", c.prices.Sharpen)
+				job("REPARIEREN", "Repair", c.prices.Repair)
+				if not c.active then
+					local choose = button(bar, "BENUTZEN", THEME.SurfaceRaised, UDim.new(0, 0))
+					table.insert(actionButtons, choose)
+					choose.Activated:Connect(function()
+						forgeCall("SetActive", { weaponId = weapon.weaponId, uid = c.uid })
+					end)
+				end
+				-- designs: one button per option, grouped by slot (paid with Robux)
+				for _, slot in state.slots :: { any } do
+					for _, option in slot.options :: { any } do
+						if c.design[slot.id] ~= option.id then
+							local d = button(bar, option.label, Color3.fromRGB(70, 58, 40), UDim.new(0, 0))
+							d.TextSize = 13
+							table.insert(actionButtons, d)
+							d.Activated:Connect(function()
+								forgeCall("ForgeJob", { weaponId = weapon.weaponId, uid = c.uid, kind = "Design", slot = slot.id, option = option.id })
+							end)
+						end
+					end
+				end
 			end
-			if item.level < item.maxLevel then
-				local b = button(r, "VERBESSERN", THEME.Primary, UDim.new(0, 150))
-				b.AnchorPoint = Vector2.new(1, 0.5)
-				b.Position = UDim2.new(1, -10, 0.5, 0)
+		end
+		if weapon.copyPrice then
+			local more = card(nextOrder())
+			line(more, 1, ("Weiteres Exemplar %s: %d Denarii (jedes weitere kostet das Doppelte)"):format(weapon.name, weapon.copyPrice), 13, THEME.TextMuted)
+			local bar = actionBar(more)
+			local b = button(bar, "SCHMIEDEN LASSEN", THEME.Primary, UDim.new(0, 0))
+			table.insert(actionButtons, b)
+			b.Activated:Connect(function()
+				forgeCall("ForgeJob", { weaponId = weapon.weaponId, kind = "Copy" })
+			end)
+		end
+	end
+	for _, shield in state.shields :: { any } do
+		local box = card(nextOrder())
+		line(box, 1, ("%s · Bemalung: %s"):format(shield.name, shield.paintText), 15, THEME.Text, THEME.LabelFont)
+		local bar = actionBar(box)
+		for _, option in state.paints :: { any } do
+			if shield.paint ~= option.id then
+				local b = button(bar, option.label, Color3.fromRGB(70, 58, 40), UDim.new(0, 0))
+				b.TextSize = 13
 				table.insert(actionButtons, b)
 				b.Activated:Connect(function()
-					if pending then
-						return
-					end
-					lock(true)
-					status.Text = "Der Schmied arbeitet ..."
-					local ok, result = pcall(function()
-						return request:InvokeServer("ForgeUpgrade", { token = payload.token, weaponId = item.weaponId, level = item.level })
-					end)
-					lock(false)
-					if not ok or typeof(result) ~= "table" then
-						status.Text = "Keine Antwort vom Server."
-						return
-					end
-					if result.items then
-						fill(result.items, result.denarii or denarii)
-					end
-					status.Text = result.message
-					status.TextColor3 = if result.ok then THEME.Positive else THEME.Negative
+					forgeCall("Paint", { shieldId = shield.shieldId, option = option.id })
 				end)
 			end
 		end
 	end
-	fill(payload.items, payload.denarii)
-	status.TextColor3 = THEME.Text
+	local packs = card(nextOrder())
+	line(packs, 1, "Denarii kaufen", 15, THEME.Gold, THEME.LabelFont)
+	local bar = actionBar(packs)
+	for _, p in state.products :: { any } do
+		if p.denarii then
+			local b = button(bar, if p.ready then ("%s · R$%d"):format(p.label, p.robux) else (p.label .. " · bald"), if p.ready then THEME.Primary else THEME.Locked, UDim.new(0, 0))
+			b.TextSize = 13
+			table.insert(actionButtons, b)
+			b.Activated:Connect(function()
+				if p.ready then
+					forgeCall("Buy", { key = p.key })
+				end
+			end)
+		end
+	end
+end
+
+local function showForge(payload: any)
+	forgeToken = payload.token
+	forgeOpen = true
 	open()
+	status.TextColor3 = THEME.Text
+	renderForge(payload)
 end
 
 local function showOracle(payload: any)
 	clear()
+	forgeOpen = false
 	title.Text = "ORAKEL · AUGUR"
 	subtitle.Text = ("Eine Weissagung kostet %d Denarii. Die Götter sprechen über deinen Weg zum nächsten Titel."):format(payload.price)
 	status.TextColor3 = THEME.Text
@@ -263,9 +436,17 @@ end
 event.OnClientEvent:Connect(function(kind: string, payload: any)
 	if kind == "ForgeOffer" then
 		showForge(payload)
+	elseif kind == "ForgeUpdate" then
+		-- a job ended or a Robux purchase was granted: refresh the open smith dialog
+		if forgeOpen and gui.Enabled and payload.state then
+			renderForge(payload.state)
+			status.Text = payload.message or ""
+			status.TextColor3 = THEME.Positive
+		end
 	elseif kind == "OracleOffer" then
 		showOracle(payload)
 	elseif kind == "Refused" then
+		forgeOpen = false
 		clear()
 		title.Text = payload.title
 		subtitle.Text = payload.text

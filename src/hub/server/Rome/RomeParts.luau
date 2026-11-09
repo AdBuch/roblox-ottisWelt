@@ -66,7 +66,13 @@ function RomeParts.part(parent: Instance, name: string, cf: CFrame, size: Vector
 		if options.material then
 			p.Material = options.material
 		end
-		if options.shape then
+		if options.shape == Enum.PartType.Ball and (math.abs(size.X - size.Y) > 1e-3 or math.abs(size.X - size.Z) > 1e-3) then
+			-- Roblox shrinks a Ball to its smallest side: an oblong crown, amphora or cloud is an
+			-- ellipsoid instead (a block with a sphere mesh that follows the part's size)
+			local mesh = Instance.new("SpecialMesh")
+			mesh.MeshType = Enum.MeshType.Sphere
+			mesh.Parent = p
+		elseif options.shape then
 			p.Shape = options.shape
 		end
 		if options.collide == false then

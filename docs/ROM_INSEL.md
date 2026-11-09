@@ -41,7 +41,7 @@ dem Trigger; Laden oder Respawn starten keinen Kampf.
 - Insel (Küstenpolygon) 971 591 Stud², also ≈ 2× die Stadt draußen. Weltscheibe Radius 1080
   (Zentrum −150/−140), mindestens 300 Studs offenes Meer bis zum Rand.
 - Terrassen: Oben y 1 (Kolosseum, Vorplatz), Unten y −2 (Handwerk, Forum, Wohnviertel, Villen),
-  Hafen y −6, Meer y −10. Stützmauern bei x −232 und −508; Straßen führen als Rampen (≤ 14 %) durch.
+  Hafen y −6, Meer y −12 (auf der Voxelgrenze). Stützmauern bei x −232 und −508; Straßen führen als Rampen (≤ 14 %) durch.
 
 Alles steht als deterministische Daten in `src/hub/server/Rome/RomeLayout.luau`: Mauer, Becken,
 Küste, Tore, Straßen mit Höhen, Querungen, Plätze, Anker, Blöcke mit Fronten und die 80 Häuser
@@ -98,29 +98,48 @@ der Landtorstraße), *Zum Letzten Meilenstein* (BN4b-W1, am Landtor), *Zum Salzi
 `FacesStreet`, `OpenInMVP` und `DoorAnchor` (CFrame auf der Schwelle, −Z zur Straße).
 Geschlossene Türen sind fest; dahinter liegt der volle Baukörper.
 
-## 6. Schmiede (Spielwert)
+## 6. Schmiede: Exemplare, Aufträge, Verschleiss, Designs, Robux
 
-`src/shared/ForgeDefinitions.luau`:
+`src/shared/ForgeDefinitions.luau`, `InventoryService` (Profil v10), `src/hub/server/Rome/TownServices.luau`,
+Dialog `src/hub/client/RomeDialog.client.luau`.
 
-- Eine Stufe für jede **besessene** Waffe: **+10 % PvE-Schaden** (Zombies, Bosse, Trainingspuppen).
-- Preis: 50 % des Waffenpreises, auf 5 gerundet, mindestens 40 Denarii.
-  Rusty Gladius 40, Legion Sword 40, Hunter Bow 65, Morning Star 95, Trident 130, Hoplite Spear 150,
-  Twin Daggers 170, Battle Axe 190.
-- Der Dialog zeigt den echten Grundschlag gegen Zombies vorher/nachher (Basis-Move ×
-  `WeaponBalanceConfig.pveFactor` × Schmiedefaktor), denselben Wert, den der Server rechnet.
-- Wirkung: `PlayerCombatService` gibt `forgeFactor` an `SpecialMoveService`; er steckt im
-  PvE-Faktor, den `pvpMultiplier` gegen Spieler wieder herausteilt. **PvP bleibt unverändert.**
-- Helme haben keinen Slot: drei Helme stehen als Schaustücke auf einem Regal
-  (`ExpansionPoint = "Helmets"`).
-- Ablauf: Prompt am Schmied → Server prüft und sendet ein Angebot mit Einmal-Token → Client
-  bestätigt → `RomeRequest("ForgeUpgrade", {token, weaponId, level})` → Server prüft Token (60 s),
-  Nähe (16 Studs), Lobby-Zustand, geladene Daten, Waffe, Besitz, erwartete Stufe, Preis und Guthaben,
-  dann `InventoryService.forgeUpgrade`: Abbuchung und Stufe in einem Schritt ohne Yield.
-  Doppelklick: Sperre + Mindestabstand 0,35 s; zweite Bestätigung scheitert an der Stufe.
+- **Exemplare:** Jede besessene Waffe besteht aus einem oder mehreren Exemplaren mit eigener
+  Härtung, eigenem Verschleiss, eigenem Design und ggf. einem Auftrag beim Schmied. Ein Exemplar
+  wird gewählt (BENUTZEN). Weitere Exemplare derselben Waffe: Grundpreis (Waffenpreis, mind. 40)
+  × 2, × 4, × 8 … (jedes weitere das Doppelte), höchstens 6.
+- **Aufträge brauchen Zeit** (`os.time`, laufen über Teleport und Rejoin weiter): Härten 15 min,
+  Schleifen 2 min, Reparieren 5 min, Design 10 min, neues Exemplar 20 min. Solange ein Exemplar
+  beim Schmied ist, ist es nicht benutzbar: ein anderes freies Exemplar derselben Waffe kommt in die
+  Hand, sonst die Startergladius (als schlichte Leihwaffe, falls auch die beim Schmied ist).
+  Fertige Aufträge schliessen sich selbst ab; im Hub prüft eine Schleife alle 5 s und rüstet neu aus.
+- **Preise (Denarii):** Härten 50 % des Waffenpreises (mind. 40; Rusty Gladius 40 … Battle Axe 190),
+  Schleifen 10 + 4 % des Waffenpreises, Reparieren 15 + 20 % des Waffenpreises × Verschleissanteil.
+- **Härten:** +10 % PvE-Schaden pro Stufe (eine Stufe).
+- **Verschleiss (nur PvE):** +0,25 je gelandetem Treffer auf Zombie oder Boss (nie gegen Spieler oder
+  Trainingspuppen). Stufen: unter 60 voller Schaden, ab 60 → 85 %, ab 90 → 70 % (die Waffe bleibt
+  benutzbar). Schleifen −35, Reparieren → 0.
+- **Wirkung:** Härtung × Verschleiss bilden den Exemplarfaktor im PvE-Faktor (`SpecialMoveService`),
+  den der PvP-Multiplikator wieder herausteilt: **PvP unverändert.** Der Dialog zeigt den
+  Grundschlag gegen Zombies mit diesem Faktor und erklärt, was erst beim Treffer wirkt
+  (`ForgeDefinitions.ValueNote`).
+- **Designs (kosmetisch, Robux):** Griff (Gold, Silber, Purpurleder), Klinge (Poliert, Geschwärzt,
+  Bronze), Beschläge (Gold, Silber, Bronze) je Exemplar; Schildbemalung (Legionsrot, Kaiserblau,
+  Gold) je Schild. Färbt die benannten Teile des Waffen-/Schildmodells beim Ausrüsten.
+- **Robux (Platzhalter):** `ForgeDefinitions.Products`: 250 / 1200 / 3000 Denarii (25 / 99 / 199 R$),
+  Auftrag sofort fertig (15 R$), Design anfertigen (49 R$). `productId = 0` bis die Produkte im
+  Creator Hub angelegt sind: in Studio laufen Testkäufe über denselben Gewährungsweg, ausserhalb
+  werden sie abgelehnt. `MarketplaceService.ProcessReceipt` (nur Hub) gewährt jede Quittung einmal
+  (gespeicherte Kaufnummern), wandelt Vorspulen/Design in Gutschriften, löst die vorgemerkte Aktion
+  aus, speichert (`PlayerDataService.flush`) und meldet erst dann `PurchaseGranted`.
+- **Prüfungen des Servers** bei jeder Aktion: Angebots-Token (60 s), Nähe zum Schmied (16), Lobbyzustand,
+  geladene Daten, Waffe, Besitz des Exemplars, freier Zustand, Vorbedingung, Serverpreis, Guthaben;
+  Abbuchung und Auftrag in einem Schritt ohne Yield; Mindestabstand 0,35 s zwischen Anfragen.
+- Helme haben keinen Slot: drei Helme stehen als Schaustücke (`ExpansionPoint = "Helmets"`).
 
-**Datenmigration:** `PlayerDataSchema.Version` 9, neues Feld `forge` (Waffen-ID → Stufe).
-Ältere Profile starten ohne verbesserte Waffe; unbekannte IDs fallen weg, Stufen werden begrenzt.
-Gespeichert über `InventoryService.serialize` → bleibt nach Rejoin und Hub-Arena-Wechsel erhalten.
+**Datenmigration:** `PlayerDataSchema.Version` 10. Neu: `weaponCopies`, `activeCopy`, `nextCopy`,
+`shieldDesigns`, `forgeCredits`, `receipts`. Jede besessene Waffe erhält ein Exemplar; die v9-Stufe
+(`forge`) geht auf das erste Exemplar über, das v9-Feld entfällt. Ungültige Exemplare, Designs und
+Aufträge werden bereinigt, Stufe und Verschleiss begrenzt. Nichts wird weggenommen.
 
 ## 7. Tempel und Orakel
 
@@ -134,32 +153,89 @@ Titel (und bis zur nächsten Ranggruppe), am Höchstrang CÄSAR ein eigener Text
 
 ## 8. Weltrand und Respawn
 
-Wasser über die ganze Scheibe (y −40 bis −10). Am Rand: Felslippe, überlaufendes Wasser, ein
+Wasser über die ganze Scheibe (y −42 bis −12). Am Rand: Felslippe, überlaufendes Wasser, ein
 Wasservorhang 240 Studs in die Tiefe, Gischt, Wolken darunter. Sichtbar vom Strand und vom
 Aussichtspunkt (Mauer, Schild „Am Rand der Welt"). `WorldEdgeService` prüft viermal pro Sekunde:
 außerhalb des Radius und unter dem Meer, oder tiefer als −45 → einmal zum Forumsbrunnen
 (kein Tod, nichts geht verloren), danach 3 s Schonzeit. Sand der Arena im Hub → Lobby-Respawn.
 Arena-Todeslogik, Spawnwahl, Intro und Rückkehr bleiben unberührt.
 
+Ergänzt in der Abnahmerunde (9. November 2026): `Yards.luau` mit zwei Werkhöfen hinter den
+Ladenfronten der Handwerksgasse (Schuppen eingeschossig, Karren, Brennholz, Schleifstein) und
+niedrigen Mauern mit geschlossenen Torbögen vor Werkhöfen und Villengärten
+(`RomeLayout.Yards`/`YardWalls`); am Hafen Seile an den Pollern und zwei Lagerarkaden (Horrea)
+hinter dem Ostkai (`RomeLayout.QuayArcades`), die mit Speichern und Kaimauer die Uferfront
+schließen; im Schmiededialog die Erklärung, welcher Kampfwert angezeigt wird
+(`ForgeDefinitions.ValueNote`); Terrain-Kalibrierung (`IslandBuilder.calibrate`) gegen die in
+Studio gemessene Höhenabweichung von 2 Studs; die unzulässige `FallenPartsDestroyHeight`-Zuweisung
+entfernt.
+
 ## 9. Prüfungen
 
 ```powershell
-./scripts/test-rome-layout.ps1 -LuauPath <luau.exe>    # Plan: Zählung, Überlappung, Straßen, Mauer, Wasser, Fläche
-./scripts/test-rome-geometry.ps1 -LuauPath <luau.exe>  # Builder: Begehbarkeit, Querungen, Tempel, Schmiede, Insel
-./scripts/test-rome-services.ps1 -LuauPath <luau.exe>  # Schmied und Orakel (Mock-Spieler, echte Logik)
+./scripts/test-rome-layout.ps1 -LuauPath <luau.exe>    # Plan: Zählung, Überlappung, Straßen, Mauern, Höfe, Wasser, Fläche
+./scripts/test-rome-geometry.ps1 -LuauPath <luau.exe>  # Builder: Begehbarkeit, Querungen, Tempel, Schmiede, Höfe, Inselhöhen
+./scripts/test-rome-services.ps1 -LuauPath <luau.exe>  # Schmied, Orakel, Weltrand-Regel (Mock-Spieler, echte Logik)
 ./scripts/test-lobby-ring.ps1 -LuauPath <luau.exe>     # Lobbys im Kolosseum, keine Kollision, Wegmessung
 ```
 
-Stand 9. November 2026: alle Projekttests grün (Progression 1747, Specials 2118, Pads 51,
-Momentum 95, Heldenkampf 66, Kampagne, Animationen 149, Rom-Layout 141 495, Rom-Geometrie
-13 734, Rom-Dienste 34, Lobby-Ring). Typprüfung ohne neue Fehler. Hub und Arena mit Rojo gebaut.
+### 9.1 Stand der Prüfungen (9. November 2026)
 
-Nur mit Mock-Daten bzw. Geometrie-Adapter geprüft (nicht in Roblox Studio):
-Begehbarkeit (Adapter statt Physik), Schmied/Orakel (Mock-Spieler, -Zeit, -Charakter),
-Inselhöhen (Höhenfunktion, nicht das geschriebene Terrain).
+**Automatisiert (echter Quellcode, Mock-Roblox):** Lobby-Ring (326 Lobbyteile gegen 3722
+Kolosseum-Kollisionskörper, keine Überschneidung; Gap-Walk ohne Loch), Rom-Layout 150 036,
+Rom-Geometrie 13 743 (alle 7 Querungen quer und längs in beiden Richtungen, auch entlang der
+Raddurchlässe, Randsteine aller Hauptstraßen, Tempeltreppe und Seitenrampe bis zum Orakel, beide
+Priesterrouten, Schmiede bis vor den Amboss, Forum → Hafenstraße → Kai, Handwerksgasse, alle Tore
+der Gartenmauern geschlossen, Inselpfade trocken und höchstens 0,31 steil), Rom-Dienste 44,
+Progression 1747, Specials 2118, Team-Pads 51, Momentum 95, Heldenkampf 66, Arena-Kampagne,
+Kampfanimationen 149. Rom-Dienste nach dem Schmiede-Ausbau: 70 (Exemplare, Aufträge mit Zeitsprung, Verschleiss, Designs, Vorspulen, Bemalung, Quittungen einmalig, Studio-Testkauf, Migration v9→v10). Strict-Analyse (luau-lsp, Sourcemap `default.project.json`): 62 Meldungen,
+alle in sechs vorbestehenden, unberührten Dateien (Ausgangsstand 62). Hub und Arena mit Rojo gebaut.
+`Arena.luau`, `ColosseumGate.luau`, `ColosseumLayout.luau`, `src/arena` und
+`places/arena.project.json` sind identisch mit dem Stand vor dem Rom-Commit.
 
-**Offen / in Studio zu prüfen:** Aufbauzeit von RomeWorld (Terrain), Bildrate mit ~6000 Teilen,
-NPC-Laufen (R15 über `CreateHumanoidModelFromDescriptionAsync`, Ausweich-Rig R6), Wasserfall-Optik,
-Touch-Laufen über die Querungen, ein voller Arena-Durchlauf mit Rückkehr, Aufnahmen
-(Insel, Querung aus Spielerhöhe, Forum mit Tempel, Hafen).
+**Gemessen im Studio-Spieltest (Log 9. 11. 07:19, Hub, Mock-Daten):** Rom in 2,6 s aufgebaut,
+60 Bilder/s bei 6128 Rom-Teilen (Übersicht und Straße), Augur und Flamen als R15 mit
+Gehanimation unterwegs (36 und 85 Studs), Schmied steht. Daraus zwei Mängel, behoben:
+Terrain 2 Studs zu hoch (Straßen teils verschüttet) und der Abbruch durch
+`FallenPartsDestroyHeight` in einer früheren Sitzung. **Nach diesen Korrekturen noch nicht erneut in
+Studio gestartet.**
+
+**Rechnerisch (nicht gestoppt):** Weg Ankunft → Tor-Trigger vorher 139,5, nachher 43,5 Studs
+(Gitter-BFS im Geometrietest); bei WalkSpeed 16 ≈ 8,7 s → 2,7 s.
+
+**Nur Mock / Serialisierung:** Schmied und Orakel (Mock-Spieler, -Uhr, -Charakter); Speicherung
+nach Rejoin und Hub-Arena-Wechsel über `InventoryService.serialize`/`load` (in Studio sind die
+Daten ohnehin MOCK, Teleports nur simuliert, siehe Hub-Log).
+
+### 9.2 Abnahmematrix
+
+| Bereich | Status | Prüfmethode | Mängel / Stelle |
+|---|---|---|---|
+| 1 Hub, Kolosseum, Abläufe | teilweise verifiziert | Lobby-Harness (Kollision, Kopffreiheit, Gap-Walk, Wegmessung), Git-Vergleich Arena-Dateien, Regressionstests | Studio: Ankunft, Respawn, Kampfrückkehr, Zuschauerrückkehr, drei Lobbys, Weg gestoppt — offen |
+| 2 Maßstab, Stadtgestalt | teilweise verifiziert | Layouttest, Flächen aus Polygonen; Studio-Log (Aufbau, FPS) | Wirkung auf Avatarhöhe, Blickachsen visuell — offen |
+| 3 Viertel, Wege, Blickachsen | behoben und erneut geprüft (automatisch) | Layout- und Geometrietest, Inselhöhen | Werkhöfe, Gartenmauern/Torbögen, Uferfront (Horrea), Taue ergänzt (`Yards.luau`, `Harbor.luau`); Inselrunde in Studio — offen |
+| 4 Pompeji-Straßen | behoben und erneut geprüft (automatisch) | Geometrietest alle Querungen/Randsteine; Studio-Log (Terrain über Deck) | Terrain-Höhe (`IslandBuilder.luau`) korrigiert; Touch, Kamera, NPC über Querung in Studio — offen |
+| 5 Häuser, Bausteine | bestanden (automatisch) | Layouttest (80, Verteilung, IDs, Türanker), Geometrietest (Türen fest) | Fassadenwirkung visuell — offen |
+| 6 Schmiede, Tempel, Server | behoben und erneut geprüft (Mock) | Dienste-Test 44, Progression (Migration v9), Schadenspfad im Code belegt | Dialogkennzeichnung ergänzt (`ForgeDefinitions.ValueNote`); UI-Bestätigung und echter PvE-Schaden in Studio — offen |
+| 7 Insel, Meer, Respawn | behoben und erneut geprüft (teilweise) | Weltrand-Klassifizierung, Inselhöhen, Studio-Log | `FallenPartsDestroyHeight` entfernt; Sturz, Wasserfall, Grenzzone in Studio — offen |
+
+**Gesamt: nicht vollständig abgenommen.** Es fehlen der Studio-Spieltest nach den Korrekturen und
+die vier Aufnahmen (Insel, Forumsquerung aus Spielerhöhe, Forum mit Tempel, Hafen).
+
+Außerhalb des Auftrags, vorbestehend: `PlayerAnimator:193` (arithmetic on nil) im Studio-Log vom
+8. 11., Datei unverändert.
+
 Später: Questfiguren/Anschlagtafel, Hausinnenräume, Trireme und Reisen, geheime Treppe an der Ruine.
+
+### 9.3 Spieltest-Rückmeldungen vom 9. November (Studio), umgesetzt
+
+- Terrain-Kalibrierung gemessen: 1,28 Studs Versatz, korrigiert (der harte Wert 2 wäre falsch gewesen).
+- Weltrand: die Felslippe trägt keine Spieler mehr (keine Kollision, tiefer unter der Oberfläche).
+- Meer: Meeresspiegel auf der Voxelgrenze (−12), nur volle Wasservoxel, Insel- und Meeresfüllung
+  gleich: flache Oberfläche; Wellen über `WaterWaveSize 0.35`, `WaterWaveSpeed 14`.
+- Bäume, Zypressen, Amphoren, Wolken: längliche Kugeln sind jetzt Ellipsoide (vorher von Roblox auf
+  die kleinste Seite verkleinert: Kugeln auf Stummeln).
+- Gehsteige enden an Einmündungen, Lücken und Plätzen halbrund mit hellem Randstein; Trittsteine
+  0,25 unter Gehsteighöhe, die Begehungsplanke folgt; Randsteinrampen überlappen den Gehsteig 0,1.
+- Schmiede-Ausbau wie in Abschnitt 6.
+- `ContentId rbxassetid://203785492` im Log stammt nicht aus dem Projekt (weder Quellen noch Build).

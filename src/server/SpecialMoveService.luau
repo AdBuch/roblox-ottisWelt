@@ -57,7 +57,8 @@ export type Attacker = {
 	stillValid: () -> boolean,
 	reject: (reason: string) -> (),
 	pvpScale: number?, -- PvP damage scale (Special tiers use flatter PvP multipliers)
-	forgeFactor: number?, -- forge of Rome stage (ForgeDefinitions.pveFactor): PvE only
+	forgeFactor: number?, -- forge of Rome: the copy's hardening x wear (ForgeDefinitions): PvE only
+	onPveHit: (() -> ())?, -- a landed hit on a zombie or boss (weapon wear)
 	onLanded: ((target: Target, dealt: number, blocked: boolean, killed: boolean) -> ())?,
 }
 
@@ -151,6 +152,9 @@ local function apply(execution: Execution, target: Target, damage: number, hitPo
 	local info = hitInfo(execution, damage, nil)
 	info.hitPosition = hitPosition
 	local dealt, blocked = CombatTargets.applyHit(execution.attacker.player, target, info)
+	if dealt > 0 and (target.kind == "Zombie" or target.kind == "Boss") and execution.attacker.onPveHit then
+		execution.attacker.onPveHit() -- weapon wear: PvE only (no players, no training dummies)
+	end
 	landed(execution, target, dealt, blocked)
 	return dealt, blocked
 end

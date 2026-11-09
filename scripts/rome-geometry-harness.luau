@@ -83,7 +83,7 @@ local NumberSequenceKeypoint={new=function(...) return {...} end}
 local NumberRange={new=function(...) return {...} end}
 local Workspace=Instance.new("Workspace")
 local ReplicatedStorage={Shared={ColosseumLayout="ColosseumLayout"}}
-local script={Parent={RomeLayout="RomeLayout",RomeParts="RomeParts",StreetBuilder="StreetBuilder",HouseKit="HouseKit",Smithy="Smithy",ForumTemple="ForumTemple",CityShell="CityShell",Harbor="Harbor",IslandBuilder="IslandBuilder"}}
+local script={Parent={RomeLayout="RomeLayout",RomeParts="RomeParts",StreetBuilder="StreetBuilder",HouseKit="HouseKit",Smithy="Smithy",ForumTemple="ForumTemple",CityShell="CityShell",Harbor="Harbor",IslandBuilder="IslandBuilder",Yards="Yards"}}
 local Lighting={}
 local game={GetService=function(_,name) return ({Workspace=Workspace,ReplicatedStorage=ReplicatedStorage,Lighting=Lighting})[name] end}
 local modules={}
@@ -98,6 +98,7 @@ local crossings=modules.StreetBuilder.build(root)
 local forum=modules.ForumTemple.build(root)
 modules.CityShell.build(root)
 modules.Harbor.build(root)
+modules.Yards.build(root)
 local houses={}
 for _,h in modules.RomeLayout.houses() do table.insert(houses,modules.HouseKit.build(root,h,modules.Smithy.build)) end
 local R=modules.RomeLayout
@@ -287,6 +288,23 @@ end
 walk("Hafenstrasse",{vector(-410,0,-20),vector(-430,0,-42),vector(-496,0,-40),vector(-526,0,-40),vector(-534,0,-40),vector(-536,0,-66),vector(-552,0,-86),vector(-590,0,-84)},F.top)
 -- 6 the Handwerksgasse ramp from the forecourt
 walk("Handwerksgasse",{vector(-200,0,0),vector(-232,0,0),vector(-262,0,0),vector(-326,0,0)},1)
+-- private yards and gardens: every gate is closed, the yards are walled toward the public way
+do
+    for _,w in R.YardWalls do
+        if w.gate then
+            local g=vector(w.a.x+(w.b.x-w.a.x)*w.gate,0,w.a.z+(w.b.z-w.a.z)*w.gate)
+            local solid=false
+            for _,s in column(g.X,g.Z) do if s[1]<R.Levels.Lower+2 and s[2]>R.Levels.Lower+4 then solid=true end end
+            check(solid,"garden gate closed: "..w.id)
+        end
+    end
+    -- from the Handwerksgasse sidewalk no walk leads into the northern work yard
+    local closed=false
+    for z=-8,-30,-0.5 do
+        for _,s in column(-248,z) do if (s[3].Name=="GardenWall" or s[3].Name=="GateLeaves") and s[2]>R.Levels.Lower+2 then closed=true end end
+    end
+    check(closed,"a wall closes the work yard toward the street")
+end
 -- houses
 local typeCount,open={},{}
 for _,m in houses do

@@ -22,9 +22,13 @@
 -- at 0 - no invented history. The migration only creates missing tables, so it can run repeatedly.
 -- v9: `forge` (weapon id -> improvement stage from the forge of Rome, ForgeDefinitions). Older
 -- profiles start with no improved weapon; unknown ids are dropped and stages are clamped.
+-- v10: weapon COPIES (`weaponCopies`: weapon id -> list of { uid, forge, wear, design, job }),
+-- `activeCopy`, `nextCopy`, `shieldDesigns`, `forgeCredits` (Robux-bought Skip / Design) and
+-- `receipts` (processed Robux purchase ids). The v9 `forge` stage moves onto each owned weapon's
+-- first copy; every owned weapon gets one copy. Nothing is taken away.
 
 local PlayerDataSchema = {
-	Version = 9,
+	Version = 10,
 
 	-- A new play session starts when the profile was not seen for this long (teleports take seconds)
 	SessionGapSeconds = 20 * 60,

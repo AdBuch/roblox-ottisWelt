@@ -413,6 +413,10 @@ function PlayerCombatService.refreshEquipment(player: Player)
 	local weapon = InventoryService.getEquippedWeapon(player)
 	local shield = InventoryService.getActiveShield(player)
 	local weaponModel, weaponCore = EquipmentModels.buildWeapon(weapon.Id)
+	local copy = InventoryService.copyInUse(player, weapon.Id)
+	if copy then
+		ForgeDefinitions.applyDesign(weaponModel, copy.design) -- the copy's design (cosmetic)
+	end
 	local bow = weapon.Kind == "Bow"
 	state.weaponGrip = if bow then leftGrip else rightGrip
 	state.offhandGrip = leftGrip
@@ -427,6 +431,10 @@ function PlayerCombatService.refreshEquipment(player: Player)
 
 	if shield then
 		local shieldModel, shieldCore = EquipmentModels.buildShield(shield.Id)
+		local paint = InventoryService.shieldDesign(player, shield.Id)
+		if paint then
+			ForgeDefinitions.applyDesign(shieldModel, { [ForgeDefinitions.ShieldSlot.id] = paint }, true)
+		end
 		local sound = Instance.new("Sound")
 		sound.Name = "BlockSound"
 		sound.SoundId = CombatConfig.ShieldSoundId
@@ -1241,7 +1249,11 @@ local function runMove(player: Player, state: PlayerState, context: CombatRules.
 		basicDamage = if basic then basic.Damage else 20,
 		basicRange = if basic then basic.Range else 7,
 		-- the forge of Rome: PvE only (SpecialMoveService removes it again against players)
-		forgeFactor = ForgeDefinitions.pveFactor(InventoryService.forgeLevel(player, weapon.Id)),
+		forgeFactor = InventoryService.copyFactor(player, weapon.Id), -- hardening x wear of the copy in use
+		-- every landed hit on a zombie or boss wears the copy (never against players or dummies)
+		onPveHit = function()
+			InventoryService.addWear(player, weapon.Id, ForgeDefinitions.WearPerHit)
+		end,
 		fromCombo = isSpecial or move.Kind == "Aerial" or options.kind == "Slide",
 		weaponModel = state.weaponModel,
 		animate = function(anim: Anim, windUp: number, duration: number)

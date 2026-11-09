@@ -113,13 +113,70 @@ local function onPath(x: number, z: number): boolean
 	return false
 end
 
+-- One voxel column: solid up to `h`, water up to `water`, air above (index j of layer tables).
+local function fillColumn(mi: { { any } }, oi: { { number } }, j: number, h: number, water: number, solid: Enum.Material)
+	for k = 1, #mi do
+		local y0 = Y0 + (k - 1) * VOXEL
+		local occ = math.clamp((h - y0) / VOXEL, 0, 1)
+		if occ > 0 then
+			mi[k][j], oi[k][j] = solid, occ
+		elseif y0 + VOXEL <= water + 0.01 then
+			mi[k][j], oi[k][j] = Enum.Material.Water, 1
+		elseif y0 < water then
+			mi[k][j], oi[k][j] = Enum.Material.Water, (water - y0) / VOXEL
+		else
+			mi[k][j], oi[k][j] = Enum.Material.Air, 0
+		end
+	end
+end
+
+local function writeColumn(x: number, z: number, h: number, water: number, solid: Enum.Material)
+	local layers = (Y1 - Y0) / VOXEL
+	local mi, oi = table.create(layers), table.create(layers)
+	for k = 1, layers do
+		mi[k], oi[k] = {}, {}
+	end
+	fillColumn(mi, oi, 1, h, water, solid)
+	local region = Region3.new(Vector3.new(x, Y0, z), Vector3.new(x + VOXEL, Y1, z + VOXEL))
+	Workspace.Terrain:WriteVoxels(region, VOXEL, { mi }, { oi })
+end
+
+-- Where does Roblox put the surface of a column written to `h`? A Studio run showed the town's
+-- terrain a constant 2 studs above the intended height (WriteVoxels occupancy vs. the voxel grid).
+-- Instead of hard-coding that, one test column far out at sea is written and measured once; the
+-- island is then written with the measured offset removed. Returns the offset (studs).
+local CALIBRATION = { x = -152, z = -1000, h = 5.3 }
+IslandBuilder.SurfaceOffset = 0
+function IslandBuilder.calibrate(): number
+	local c = CALIBRATION
+	writeColumn(c.x, c.z, c.h, L.Water, Enum.Material.Rock)
+	task.wait()
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = { Workspace.Terrain }
+	params.IgnoreWater = true
+	local hit = Workspace:Raycast(Vector3.new(c.x + VOXEL / 2, Y1 + 4, c.z + VOXEL / 2), Vector3.new(0, -(Y1 - Y0 + 8), 0), params)
+	local offset = 0
+	if hit then
+		offset = math.clamp(hit.Position.Y - c.h, -VOXEL, VOXEL)
+	else
+		warn("[OttiArena][Rome] terrain calibration found no surface; writing without a correction")
+	end
+	-- back to open sea
+	writeColumn(c.x, c.z, L.Water - 28, L.Water, Enum.Material.Sand)
+	IslandBuilder.SurfaceOffset = offset
+	print(("[OttiArena][Rome] terrain calibration: surface %.2f studs off the written height, corrected"):format(offset))
+	return offset
+end
+
 -- Writes the island and the sea. Yields between chunks.
 function IslandBuilder.buildTerrain()
 	local terrain = Workspace.Terrain
 	terrain:Clear()
 	terrain.WaterColor = Color3.fromRGB(38, 112, 132)
 	terrain.WaterTransparency = 0.55
-	terrain.WaterWaveSize = 0.12
+	terrain.WaterWaveSize = 0.35
+	terrain.WaterWaveSpeed = 14
 	terrain.WaterReflectance = 0.6
 	local disc = RomeLayout.Disc
 	-- sea floor and water over the whole disc
@@ -155,10 +212,10 @@ function IslandBuilder.buildTerrain()
 		local i, j = math.clamp(math.floor((x - X0) / GRID + 0.5), 0, nx - 1), math.clamp(math.floor((z - Z0) / GRID + 0.5), 0, nz - 1)
 		return kinds[i + 1][j + 1]
 	end
-	-- voxels, chunk by chunk
+	-- voxels, chunk by chunk (heights corrected by the measured surface offset)
 	local CHUNK = 64
 	local layers = (Y1 - Y0) / VOXEL
-	local air, water = Enum.Material.Air, Enum.Material.Water
+	local offset = IslandBuilder.calibrate()
 	for cx = X0, X1 - 1, CHUNK * VOXEL do
 		for cz = Z0, Z1 - 1, CHUNK * VOXEL do
 			local sx = math.min(CHUNK, (X1 - cx) // VOXEL)
@@ -191,19 +248,7 @@ function IslandBuilder.buildTerrain()
 							solid = Enum.Material.Ground
 						end
 					end
-					for k = 1, layers do
-						local y0 = Y0 + (k - 1) * VOXEL
-						local occ = math.clamp((h - y0) / VOXEL, 0, 1)
-						if occ > 0 then
-							mi[k][j], oi[k][j] = solid, occ
-						elseif y0 + VOXEL <= L.Water + 0.01 then
-							mi[k][j], oi[k][j] = water, 1
-						elseif y0 < L.Water then
-							mi[k][j], oi[k][j] = water, (L.Water - y0) / VOXEL
-						else
-							mi[k][j], oi[k][j] = air, 0
-						end
-					end
+					fillColumn(mi, oi, j, h - offset, L.Water, solid) -- water: whole voxels up to the grid-aligned sea level, uncorrected like the sea fill
 				end
 			end
 			local region = Region3.new(Vector3.new(cx, Y0, cz), Vector3.new(cx + sx * VOXEL, Y1, cz + sz * VOXEL))
@@ -232,7 +277,8 @@ function IslandBuilder.buildRim(parent: Instance): Folder
 			return CFrame.lookAt(p, p + dir) -- -Z points outward
 		end
 		-- the lip: rock under the edge, from deep below up to just under the water
-		Parts.part(folder, "RimRock", ringFrame(R + 4, (W - 1.2 - 160) / 2), Vector3.new(chord, W - 1.2 + 160, 14), rock, { material = Enum.Material.Rock, shadow = false })
+		-- visual only and well under the surface: nobody can stand on the rim
+		Parts.part(folder, "RimRock", ringFrame(R + 4, (W - 4 - 160) / 2), Vector3.new(chord, W - 4 + 160, 14), rock, { material = Enum.Material.Rock, shadow = false, collide = false })
 		-- water spilling over: a thin sheet curving down past the lip, then the curtain
 		local spill = Parts.wedge(folder, "SpillOver", ringFrame(R + 12, W - 1.6), Vector3.new(chord, 3.2, 6), fall, { collide = false, shadow = false, material = Enum.Material.Glass })
 		spill.Transparency = 0.35
@@ -269,7 +315,8 @@ function IslandBuilder.setupAtmosphere()
 	atmosphere.Glare = 0.1
 	atmosphere.Haze = 0.6
 	atmosphere.Parent = Lighting
-	Workspace.FallenPartsDestroyHeight = -900
+	-- (FallenPartsDestroyHeight can't be set from a game script; WorldEdgeService catches a fall at
+	-- y -45, long before the place's destroy height.)
 end
 
 return IslandBuilder

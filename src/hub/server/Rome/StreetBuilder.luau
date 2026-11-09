@@ -173,25 +173,27 @@ local function buildCrossing(parent: Instance, s: Segment, u: number, crossing: 
 	local stoneWidth = if s.street.kind == "Main" then 2.2 else 1.8
 	local gap = if s.street.kind == "Main" then 1.6 else 1.1
 	local count = crossing.stones
+	-- the stones stand a little below the sidewalks (a quarter stud), the walking plank on their tops
+	local top = section.kerb - 0.25
 	local pitch = stoneWidth + gap
 	for i = 1, count do
 		local x = (i - (count + 1) / 2) * pitch
 		-- stones stand across the street (their long side along it), tops level with the sidewalks
-		stone(model, frame * CFrame.new(x, 0, 0), stoneLength, stoneWidth, section.kerb)
+		stone(model, frame * CFrame.new(x, 0, 0), stoneLength, stoneWidth, top)
 	end
 	-- the walking profile: one plank at sidewalk height, flat run-ins along the street both ways
 	local run = 2.6
-	Parts.collider(model, "CrossingDeck", frame * CFrame.new(0, section.kerb / 2, 0), Vector3.new(section.road + 0.2, section.kerb, stoneLength))
+	Parts.collider(model, "CrossingDeck", frame * CFrame.new(0, top / 2, 0), Vector3.new(section.road + 0.2, top, stoneLength))
 	for _, dir in { -1, 1 } do
 		-- the wedge rises toward the deck: its +Z must point at the deck
-		local at = frame * CFrame.new(0, section.kerb / 2, dir * (stoneLength / 2 + run / 2))
-		Parts.colliderWedge(model, "CrossingRunIn", at * CFrame.Angles(0, if dir > 0 then math.pi else 0, 0), Vector3.new(section.road + 0.2, section.kerb, run))
+		local at = frame * CFrame.new(0, top / 2, dir * (stoneLength / 2 + run / 2))
+		Parts.colliderWedge(model, "CrossingRunIn", at * CFrame.Angles(0, if dir > 0 then math.pi else 0, 0), Vector3.new(section.road + 0.2, top, run))
 	end
 	-- and across the street at both ends: step-free even where no sidewalk meets the stones
 	-- (a lane's mouth); where a sidewalk does, the run-in stays under its surface
 	for _, dir in { -1, 1 } do
-		local at = frame * CFrame.new(dir * (section.road / 2 + 0.1 + run / 2), section.kerb / 2, 0)
-		Parts.colliderWedge(model, "CrossingRunIn", at * CFrame.Angles(0, if dir > 0 then -math.pi / 2 else math.pi / 2, 0), Vector3.new(stoneLength, section.kerb, run))
+		local at = frame * CFrame.new(dir * (section.road / 2 + 0.1 + run / 2), top / 2, 0)
+		Parts.colliderWedge(model, "CrossingRunIn", at * CFrame.Angles(0, if dir > 0 then -math.pi / 2 else math.pi / 2, 0), Vector3.new(stoneLength, top, run))
 	end
 	if crossing.id == "Forumseingang" then
 		-- the clearest example: a bronze inlay and a lamp at each end
@@ -278,14 +280,29 @@ function StreetBuilder.build(parent: Instance): { [string]: CFrame }
 					end)
 					for _, span in spans do
 						local u0, u1 = span[1], span[2]
-						slab(model, "Sidewalk", s, u0, u1, side * offset, section.walk, section.kerb - parity, 1.6 + section.kerb, C.Sidewalk, Enum.Material.Pavement, true)
+						-- where a sidewalk ends at a junction, a gap or a square (not at a bend of its own
+						-- street), it ends in a half round with a light kerb rim instead of a square corner
+						local r = section.walk / 2
+						local roundStart = not ramp and u0 > -e0 + 0.6 and u1 - u0 > 2 * r + 1
+						local roundEnd = not ramp and u1 < s.length + e1 - 0.6 and u1 - u0 > 2 * r + 1
+						local s0, s1 = if roundStart then u0 + r else u0, if roundEnd then u1 - r else u1
+						slab(model, "Sidewalk", s, s0, s1, side * offset, section.walk, section.kerb - parity, 1.6 + section.kerb, C.Sidewalk, Enum.Material.Pavement, true)
 						-- the visible kerb (lighter stone) and the invisible ramp over the step
-						slab(model, "Kerb", s, u0, u1, side * (half + 0.3), 0.7, section.kerb + 0.04 - parity, 1.6 + section.kerb, C.Kerb, Enum.Material.Limestone, false)
+						slab(model, "Kerb", s, s0, s1, side * (half + 0.3), 0.7, section.kerb + 0.04 - parity, 1.6 + section.kerb, C.Kerb, Enum.Material.Limestone, false)
+						for _, cap in { { round = roundStart, u = s0 }, { round = roundEnd, u = s1 } } do
+							if cap.round then
+								local nx, nz = -s.dz * side, s.dx * side
+								local u = cap.u
+								local base = CFrame.new(s.ax + s.dx * u + nx * offset, heightAt(s, u) - 1.6 - parity, s.az + s.dz * u + nz * offset)
+								Parts.column(model, "SidewalkEnd", base, 1.6 + section.kerb + 0.04, section.walk, C.Kerb, { material = Enum.Material.Limestone, shadow = false })
+								Parts.column(model, "SidewalkEndTop", base * CFrame.new(0, 1.6 + section.kerb + 0.02, 0), 0.04, section.walk - 1.1, C.Sidewalk, { collide = false, shadow = false, material = Enum.Material.Pavement })
+							end
+						end
 						local kerbRun = 1.2
 						local nx, nz = -s.dz * side, s.dx * side
 						local ua, ub = u0, u1
-						local a = Vector3.new(s.ax + s.dx * ua + nx * (half - kerbRun / 2), heightAt(s, ua), s.az + s.dz * ua + nz * (half - kerbRun / 2))
-						local b = Vector3.new(s.ax + s.dx * ub + nx * (half - kerbRun / 2), heightAt(s, ub), s.az + s.dz * ub + nz * (half - kerbRun / 2))
+						local a = Vector3.new(s.ax + s.dx * ua + nx * (half - kerbRun / 2 + 0.1), heightAt(s, ua), s.az + s.dz * ua + nz * (half - kerbRun / 2 + 0.1))
+						local b = Vector3.new(s.ax + s.dx * ub + nx * (half - kerbRun / 2 + 0.1), heightAt(s, ub), s.az + s.dz * ub + nz * (half - kerbRun / 2 + 0.1))
 						local along = b - a
 						local mid = (a + b) / 2 + Vector3.new(0, section.kerb / 2, 0)
 						-- X along the street (sloped on ramps), +Z across toward the sidewalk (the wedge's high side)

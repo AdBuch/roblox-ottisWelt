@@ -19,6 +19,7 @@ local Harbor = require(script.Parent.Harbor)
 local HouseKit = require(script.Parent.HouseKit)
 local Smithy = require(script.Parent.Smithy)
 local Countryside = require(script.Parent.Countryside)
+local Yards = require(script.Parent.Yards)
 local RomeNpc = require(script.Parent.RomeNpc)
 
 local PREFIX = "[OttiArena][Rome]"
@@ -76,6 +77,7 @@ function RomeWorld.build(openForge: (player: Player) -> (), openOracle: (player:
 			task.wait()
 		end
 	end
+	Yards.build(folder)
 	Countryside.build(folder)
 	-- the townspeople
 	local people = Parts.folder(folder, "Townspeople")

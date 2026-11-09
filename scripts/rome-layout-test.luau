@@ -98,6 +98,52 @@ for _, h in houses do
 	end
 end
 
+-- work yards, garden walls and quay arcades: clear of streets, houses and water, on one terrace
+local function clearOfStreets(x, z, margin)
+	for _, street in R.Streets do
+		for k = 1, #street.points - 1 do
+			local a, b = street.points[k], street.points[k + 1]
+			if R.distanceToSegment(x, z, { x = a.x, z = a.z }, { x = b.x, z = b.z }) < R.halfWidth(street.kind) + margin then return false, street.id end
+		end
+	end
+	return true
+end
+local function inHouse(x, z, margin)
+	for _, h in houses do
+		local x0, x1, z0, z1 = box(h)
+		if x > x0 + margin and x < x1 - margin and z > z0 + margin and z < z1 - margin then return h.id end
+	end
+	return nil
+end
+for _, yard in R.Yards do
+	for x = yard.x0, yard.x1, 2 do
+		for z = yard.z0, yard.z1, 2 do
+			check(inHouse(x, z, 0.01) == nil, "work yard outside the houses: " .. yard.id)
+			check((clearOfStreets(x, z, 0.4)), "work yard off the street: " .. yard.id)
+			check(R.levelAt(x, z) == yard.level and R.isInTown(x, z), "work yard on its terrace: " .. yard.id)
+		end
+	end
+end
+for _, w in R.YardWalls do
+	local length = math.sqrt((w.b.x - w.a.x) ^ 2 + (w.b.z - w.a.z) ^ 2)
+	for t = 0, length, 0.5 do
+		local x, z = w.a.x + (w.b.x - w.a.x) * t / length, w.a.z + (w.b.z - w.a.z) * t / length
+		local ok, street = clearOfStreets(x, z, 0.4 + 0.4)
+		check(ok, "garden wall " .. w.id .. " in street " .. tostring(street))
+		check(inHouse(x, z, 0.45) == nil, "garden wall " .. w.id .. " through house " .. tostring(inHouse(x, z, 0.45)))
+		check(R.levelAt(x, z) == w.level and R.isInTown(x, z) and not R.isWater(x, z), "garden wall on its terrace: " .. w.id)
+	end
+end
+for _, arcade in R.QuayArcades do
+	for x = arcade.x0, arcade.x1, 1 do
+		for z = arcade.z0, arcade.z1, 2 do
+			check(inHouse(x, z, 0.01) == nil and (clearOfStreets(x, z, 0.3)), "quay arcade clear of houses and streets: " .. arcade.id)
+			check(not R.isWater(x, z) and R.distanceToOutline(x, z, R.Basin) >= R.QuayWidth, "quay arcade behind the quay: " .. arcade.id)
+			check(R.levelAt(x, z) == R.Levels.Harbor, "quay arcade on the harbour terrace: " .. arcade.id)
+		end
+	end
+end
+
 -- terraces: no house straddles a retaining wall; streets ramp only where they cross one
 for _, street in R.Streets do
 	for k = 1, #street.points - 1 do

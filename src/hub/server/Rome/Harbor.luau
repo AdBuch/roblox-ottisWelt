@@ -53,6 +53,34 @@ function Harbor.build(parent: Instance): Result
 			local t = (k - 0.5) / count
 			local p = pa + along * t + normal * 1.4
 			bollard(p.X, p.Z)
+			-- a coil of rope beside every bollard; every other one moors a line down to the water
+			Parts.column(model, "RopeCoil", CFrame.new(p.X, H, p.Z) * CFrame.new(normal * 1.6), 0.35, 1.4, Color3.fromRGB(176, 150, 104), { collide = false, shadow = false, material = Enum.Material.Fabric })
+			if k % 2 == 0 and not mole then
+				local top = Vector3.new(p.X, H + 1.3, p.Z)
+				local low = Vector3.new(p.X, W + 0.2, p.Z) - normal * 4.5
+				Parts.decor(model, "MooringLine", CFrame.lookAt((top + low) / 2, low), Vector3.new(0.18, 0.18, (low - top).Magnitude), Color3.fromRGB(176, 150, 104), Enum.Material.Fabric)
+			end
+		end
+		-- a line along the quay edge from bollard to bollard
+		if count > 1 then
+			local a0 = pa + along * (0.5 / count) + normal * 1.4 + Vector3.new(0, 1.1, 0)
+			local a1 = pa + along * ((count - 0.5) / count) + normal * 1.4 + Vector3.new(0, 1.1, 0)
+			Parts.decor(model, "QuayRope", CFrame.lookAt((a0 + a1) / 2, a1), Vector3.new(0.15, 0.15, (a1 - a0).Magnitude), Color3.fromRGB(176, 150, 104), Enum.Material.Fabric)
+		end
+	end
+	-- storage arcades (horrea) behind the east quay: closed arches toward the water, a lean-to roof
+	for _, arcade in RomeLayout.QuayArcades do
+		local a = Parts.model(model, "Horrea_" .. arcade.id)
+		a:SetAttribute("Structure", "QuayArcade")
+		local cx, cz = (arcade.x0 + arcade.x1) / 2, (arcade.z0 + arcade.z1) / 2
+		local depth, length, height = arcade.x1 - arcade.x0, arcade.z1 - arcade.z0, 10
+		Parts.part(a, "HorreaBody", CFrame.new(cx, H + height / 2 - 1, cz), Vector3.new(depth, height + 2, length), Parts.Plaster[3], { material = Enum.Material.Plaster })
+		Parts.wedge(a, "HorreaRoof", CFrame.new(cx, H + height + 0.8, cz) * CFrame.Angles(0, math.pi / 2, 0), Vector3.new(length + 1, 1.6, depth + 1.4), Parts.Roofs[1], { material = Enum.Material.ClayRoofTiles })
+		local face = arcade.x0 - 0.05
+		for z = arcade.z0 + 3, arcade.z1 - 3, 6 do
+			Parts.decor(a, "ArcadePier", CFrame.new(face - 0.3, H + height / 2, z - 3), Vector3.new(0.6, height, 1), C.Limestone, Enum.Material.Limestone)
+			Parts.decor(a, "ArcadeDoor", CFrame.new(face, H + 3.4, z), Vector3.new(0.12, 6.8, 4), C.Timber, Enum.Material.WoodPlanks)
+			Parts.decor(a, "ArcadeArch", CFrame.new(face - 0.2, H + 7.4, z), Vector3.new(0.4, 1.2, 4.8), C.Limestone, Enum.Material.Limestone)
 		end
 	end
 	-- the berth on the straight north quay: free water, a sign, a gangway mark and the outline
