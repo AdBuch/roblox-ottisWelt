@@ -25,6 +25,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ArmorDefinitions = require(ReplicatedStorage.Shared.ArmorDefinitions)
 local Config = require(ReplicatedStorage.Shared.Config)
 local CurrencyConfig = require(ReplicatedStorage.Shared.CurrencyConfig)
+local ForgeDefinitions = require(ReplicatedStorage.Shared.ForgeDefinitions)
 local GladiatorLevelDefinitions = require(ReplicatedStorage.Shared.GladiatorLevelDefinitions)
 local PlayerDataSchema = require(ReplicatedStorage.Shared.PlayerDataSchema)
 local ShieldDefinitions = require(ReplicatedStorage.Shared.ShieldDefinitions)
@@ -76,6 +77,7 @@ export type Profile = {
 	session: Session,
 	lastBattle: LastBattle?,
 	activity: Activity,
+	forge: { [string]: number }, -- weapon id -> forge stage (v9, ForgeDefinitions; PvE only)
 }
 
 local PROFILE_VERSION = PlayerDataSchema.Version
@@ -120,6 +122,7 @@ local function newProfile(): Profile
 		session = { aura = 0, denarii = 0, startedAt = os.time(), lastSeen = os.time() },
 		lastBattle = nil,
 		activity = { aura = 0, seconds = 0, rewards = 0 },
+		forge = {},
 	}
 end
 
@@ -266,6 +269,21 @@ function InventoryService.migrateProfile(profile: Profile): Profile
 		seconds = if hasActivity then wholeNumber(activity.seconds) else 0,
 		rewards = if hasActivity then wholeNumber(activity.rewards) else 0,
 	}
+	-- v9: forge stages. Unknown weapons are dropped and stages clamped; a forged weapon that is
+	-- not owned any more keeps its stage (it counts again once the weapon is owned).
+	local forge: { [string]: number } = {}
+	local savedForge: any = profile.forge
+	if typeof(savedForge) == "table" then
+		for id, level in savedForge do
+			if ForgeDefinitions.isSupported(id) then
+				local clamped = ForgeDefinitions.clampLevel(level)
+				if clamped > 0 then
+					forge[id] = clamped
+				end
+			end
+		end
+	end
+	profile.forge = forge
 	profile.version = math.max(PROFILE_VERSION, savedVersion)
 	return profile
 end
@@ -332,6 +350,7 @@ function InventoryService.publish(player: Player)
 	player:SetAttribute(Config.LastBattleDenariiAttribute, if last then last.denarii else nil)
 	player:SetAttribute(Config.LastBattleModeAttribute, if last then last.mode else nil)
 	player:SetAttribute(Config.AuraPerHourAttribute, InventoryService.auraPerActiveHour(player))
+	player:SetAttribute(ForgeDefinitions.Attribute, ForgeDefinitions.encode(profile.forge))
 end
 
 -- Replaces the in-memory profile with a loaded one. Aura and Denarii earned before the load
@@ -679,6 +698,61 @@ function InventoryService.getPreference(player: Player, key: string): string?
 	return getProfile(player).preferences[key]
 end
 
+-- Forge stage of a weapon (0 = not improved). Counts only while the weapon is owned.
+function InventoryService.forgeLevel(player: Player, weaponId: string): number
+	local profile = getProfile(player)
+	if not profile.ownedWeapons[weaponId] then
+		return 0
+	end
+	return ForgeDefinitions.clampLevel(profile.forge[weaponId])
+end
+
+-- The forge's improvement as ONE operation: checks the weapon, ownership, the expected current
+-- stage (a stale or repeated confirmation is refused), the server price and the balance, then
+-- takes the Denarii and raises the stage together. Nothing yields in between, so a request can
+-- never be charged twice or charged without the improvement. Returns (success, message, price).
+function InventoryService.forgeUpgrade(player: Player, weaponId: string, expectedLevel: number): (boolean, string, number)
+	if not ForgeDefinitions.isSupported(weaponId) then
+		return false, "Diese Waffe kennt der Schmied nicht.", 0
+	end
+	local profile = getProfile(player)
+	local name = WeaponDefinitions.ById[weaponId].DisplayName
+	if not profile.ownedWeapons[weaponId] then
+		return false, name .. " gehört dir nicht.", 0
+	end
+	local current = ForgeDefinitions.clampLevel(profile.forge[weaponId])
+	if current >= ForgeDefinitions.MaxLevel then
+		return false, name .. " ist bereits verbessert.", 0
+	end
+	if current ~= expectedLevel then
+		return false, "Das Angebot ist nicht mehr aktuell.", 0
+	end
+	local price = ForgeDefinitions.price(weaponId, current)
+	if price <= 0 or profile.denarii < price then
+		return false, ("Zu wenig Denarii: %d nötig, du hast %d."):format(price, profile.denarii), price
+	end
+	profile.denarii -= price
+	profile.forge[weaponId] = current + 1
+	InventoryService.publish(player)
+	changed(player)
+	return true, ("%s verbessert (Stufe %d) für %d Denarii."):format(name, current + 1, price), price
+end
+
+-- Pays a fixed service price (e.g. the oracle) exactly once. Never makes the balance negative.
+function InventoryService.spendDenarii(player: Player, amount: number): boolean
+	if amount ~= amount or amount <= 0 or amount % 1 ~= 0 then
+		return false
+	end
+	local profile = getProfile(player)
+	if profile.denarii < amount then
+		return false
+	end
+	profile.denarii -= amount
+	InventoryService.publish(player)
+	changed(player)
+	return true
+end
+
 -- Plain table for the DataStore (only JSON-safe values).
 -- Day number in UTC; the daily allowance resets when it changes.
 local function currentDay(): number
@@ -762,6 +836,7 @@ function InventoryService.serialize(player: Player): { [string]: any }
 		session = { aura = profile.session.aura, denarii = profile.session.denarii, startedAt = profile.session.startedAt, lastSeen = os.time() },
 		lastBattle = if profile.lastBattle then table.clone(profile.lastBattle) else nil,
 		activity = table.clone(profile.activity),
+		forge = table.clone(profile.forge),
 	}
 end
 

@@ -1,7 +1,7 @@
 param([string]$LuauPath = 'luau')
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$modules = @('SpecialMoveDefinitions', 'WeaponAttackDefinitions', 'WeaponSpecialDefinitions', 'SpecialPracticeDefinitions', 'SpecialAnimationDefinitions', 'WeaponDefinitions', 'GladiatorLevelDefinitions', 'PlayerDataSchema', 'ArmorDefinitions', 'ShieldDefinitions', 'CurrencyConfig', 'Config')
+$modules = @('SpecialMoveDefinitions', 'WeaponAttackDefinitions', 'WeaponSpecialDefinitions', 'SpecialPracticeDefinitions', 'SpecialAnimationDefinitions', 'WeaponDefinitions', 'GladiatorLevelDefinitions', 'PlayerDataSchema', 'ArmorDefinitions', 'ShieldDefinitions', 'CurrencyConfig', 'Config', 'WeaponBalanceConfig', 'ForgeDefinitions')
 $source = @'
 local modules = {}
 local paths = setmetatable({}, { __index = function(_, key) return key end })

@@ -1,7 +1,7 @@
 --!strict
--- OTTI HUB (start place) server entry. Builds the three hero lobbies on the ground in front of
--- the Colosseum: Otti's main hall with the zombie archive, the shop street and the training
--- yard, and the smaller Schili and Krokero halls with their groups. Starts the Hub
+-- OTTI HUB (start place) server entry. Builds the three hero lobbies INTO the Colosseum's ground
+-- hall (Otti's lobby with the zombie archive, the shop street, the training yard, Schili's and
+-- Krokero's lobbies with their groups) and Rome around it (Rome/RomeWorld). Starts the Hub
 -- services: persistent data, equipment, training combat, parties, matchmaking, live battles and
 -- the teleports to reserved Arena servers. No arena match ever runs in the Hub.
 
@@ -20,6 +20,7 @@ for _, name in { "Config", "CombatConfig", "GameStates", "ExperienceConfig", "En
 end
 
 local GameStates = require(ReplicatedStorage.Shared.GameStates)
+local Config = require(ReplicatedStorage.Shared.Config)
 local EnvironmentConfig = require(ReplicatedStorage.Shared.EnvironmentConfig)
 local Server = script.Parent.Parent
 local CombatRules = require(Server.CombatRules)
@@ -93,18 +94,36 @@ TrainingService.build(lobby.folder, lobby.trainingSlots, lobby.trainingCFrame, l
 ZombieDisplayService.build(lobby.folder, lobby.archiveSlots, lobby.archivePlaques)
 HubMatchService.init(lobby)
 
--- Safety net: lobby players who fell out of the basement return to the spawn
-task.spawn(function()
-	while true do
-		task.wait(1)
-		for _, player in Players:GetPlayers() do
-			local character, _, root = CombatUtil.getLivingCharacter(player)
-			if character and root and not LobbyService.isInside(root.Position) then
-				root.AssemblyLinearVelocity = Vector3.zero
-				character:PivotTo(lobby.spawnCFrame + Vector3.new(0, 3.5, 0))
-			end
-		end
+-- Rome around the Colosseum (island, town, smithy, temple, harbour) and its two counters. The
+-- lobbies are ready first; the town follows in the background, players can already play.
+local Rome = script.Parent.Rome
+local RomeWorld = require(Rome.RomeWorld)
+local TownServices = require(Rome.TownServices)
+local WorldEdgeService = require(Rome.WorldEdgeService)
+local function remote(name: string, class: string): Instance
+	local folder = ReplicatedStorage:WaitForChild(Config.RemotesFolderName)
+	local existing = folder:FindFirstChild(name)
+	if existing and existing.ClassName == class then
+		return existing
 	end
+	local created = Instance.new(class)
+	created.Name = name
+	created.Parent = folder
+	return created
+end
+local romeRequest = remote("RomeRequest", "RemoteFunction") :: RemoteFunction
+local romeEvent = remote("RomeEvent", "RemoteEvent") :: RemoteEvent
+local forumRespawn: CFrame? = nil
+-- Safety: a fall over the world's rim -> once to the forum fountain; the sand -> lobby respawn
+WorldEdgeService.start(function()
+	return forumRespawn
+end, lobby.spawnCFrame, function(player: Player, kind: string)
+	romeEvent:FireClient(player, "Respawned", { kind = kind })
+end)
+task.spawn(function()
+	local world = RomeWorld.build(TownServices.openForge, TownServices.openOracle)
+	forumRespawn = world.forumRespawn
+	TownServices.start(romeRequest, romeEvent, world.smith.root, world.oracle.root)
 end)
 
 Players.PlayerAdded:Connect(setupLeaderstats)

@@ -31,6 +31,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local DamageConfig = require(ReplicatedStorage.Shared.DamageConfig)
 local BlockDefinitions = require(ReplicatedStorage.Shared.BlockDefinitions)
 local PvPBalanceConfig = require(ReplicatedStorage.Shared.PvPBalanceConfig)
+local ForgeDefinitions = require(ReplicatedStorage.Shared.ForgeDefinitions)
 local ShieldDefenseConfig = require(ReplicatedStorage.Shared.ShieldDefenseConfig)
 local SlideDefinitions = require(ReplicatedStorage.Shared.SlideDefinitions)
 local SpecialChargeDefinitions = require(ReplicatedStorage.Shared.SpecialChargeDefinitions)
@@ -1239,6 +1240,8 @@ local function runMove(player: Player, state: PlayerState, context: CombatRules.
 		bashMultiplier = if shield then shield.BashMultiplier else 1,
 		basicDamage = if basic then basic.Damage else 20,
 		basicRange = if basic then basic.Range else 7,
+		-- the forge of Rome: PvE only (SpecialMoveService removes it again against players)
+		forgeFactor = ForgeDefinitions.pveFactor(InventoryService.forgeLevel(player, weapon.Id)),
 		fromCombo = isSpecial or move.Kind == "Aerial" or options.kind == "Slide",
 		weaponModel = state.weaponModel,
 		animate = function(anim: Anim, windUp: number, duration: number)

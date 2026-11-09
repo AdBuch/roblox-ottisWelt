@@ -119,19 +119,81 @@ for _,cf in layout.trainingSlots do
 end
 check(not modules.LobbyService.isInArmory(layout.arrivalSpawn.Position+vector(0,3,0)),"no purchases outside shops")
 for name,cf in layout.shopFrames do check(modules.LobbyService.isInArmory(cf.Position+vector(0,3,0)),"shop region "..name) end
--- The lobbies stand at the arena's height on the ground in front of the Colosseum: nothing of
--- them lies below the ground, and only the gate approaches reach in under the stands.
+-- The lobbies are built INTO the Colosseum: every lobby part stands on the hall floor inside the
+-- facade, and no lobby part cuts into the Colosseum's own structure (stands, piers, stair houses,
+-- vomitoria, galleries, facade, gates). Colliding fittings may only touch it; decoration may
+-- graze it by half a stud at most (the gate approach signs are older and keep their place).
 local facade=L.facadeEnd()
+local galleryEnd=A.Layout.SeatsEnd+L.GalleryWidth
+local function axes(p) local r=p.CFrame.r; return {vector(r[1],r[4],r[7]),vector(r[2],r[5],r[8]),vector(r[3],r[6],r[9])} end
+local function halfOf(p) return {p.Size.X/2,p.Size.Y/2,p.Size.Z/2} end
+local function extent(p)
+    local r,s=p.CFrame.r,p.Size
+    return vector((math.abs(r[1])*s.X+math.abs(r[2])*s.Y+math.abs(r[3])*s.Z)/2,(math.abs(r[4])*s.X+math.abs(r[5])*s.Y+math.abs(r[6])*s.Z)/2,(math.abs(r[7])*s.X+math.abs(r[8])*s.Y+math.abs(r[9])*s.Z)/2)
+end
+-- Separating-axis test of two boxes; true when they overlap deeper than `tolerance`.
+local function penetrates(a,b,tolerance)
+    local aa,ba,ha,hb=axes(a),axes(b),halfOf(a),halfOf(b)
+    local d=b.CFrame.Position-a.CFrame.Position
+    local list={aa[1],aa[2],aa[3],ba[1],ba[2],ba[3]}
+    for i=1,3 do for j=1,3 do local c=aa[i]:Cross(ba[j]); if c.Magnitude>1e-4 then table.insert(list,c.Unit) end end end
+    for _,l in list do
+        local ra=math.abs(l:Dot(aa[1]))*ha[1]+math.abs(l:Dot(aa[2]))*ha[2]+math.abs(l:Dot(aa[3]))*ha[3]
+        local rb=math.abs(l:Dot(ba[1]))*hb[1]+math.abs(l:Dot(ba[2]))*hb[2]+math.abs(l:Dot(ba[3]))*hb[3]
+        if math.abs(l:Dot(d))>ra+rb-tolerance then return false end
+    end
+    return true
+end
+local arenaSolids,grid={}, {}
+local GRID=16
+local function cells(c,e,fn)
+    for gx=math.floor((c.X-e.X)/GRID),math.floor((c.X+e.X)/GRID) do
+        for gz=math.floor((c.Z-e.Z)/GRID),math.floor((c.Z+e.Z)/GRID) do fn(gx..":"..gz) end
+    end
+end
 for _,p in all do
-    if not p.dead and p.ClassName=="Part" and p.CFrame and p.Size and under(p,"GeneratedLobby") then
-        local r=p.CFrame.r
-        local bottom=p.CFrame.Position.Y-(math.abs(r[4])*p.Size.X+math.abs(r[5])*p.Size.Y+math.abs(r[6])*p.Size.Z)/2
-        check(bottom>=FLOOR-2.05,"lobby at the arena's height: "..p.Name.." reaches down to "..bottom)
-        if not (p.Parent and p.Parent.Name and p.Parent.Name:match("ArenaApproach$")) then
-            check(not A.isInside(p.CFrame.Position,facade),"lobby outside the Colosseum: "..p.Name)
+    if not p.dead and p.ClassName=="Part" and p.CanCollide~=false and p.CFrame and p.Size and under(p,"GeneratedArena") and p.Parent and p.Parent.Name~="Ground" then
+        table.insert(arenaSolids,p)
+        local e=extent(p)
+        cells(p.CFrame.Position,e,function(key) grid[key]=grid[key] or {}; table.insert(grid[key],p) end)
+    end
+end
+local lobbyParts,clashes=0,{}
+for _,p in all do
+    if not p.dead and (p.ClassName=="Part" or p.ClassName=="SpawnLocation") and p.CFrame and p.Size and under(p,"GeneratedLobby") then
+        lobbyParts+=1
+        local e=extent(p)
+        local c=p.CFrame.Position
+        check(c.Y-e.Y>=FLOOR-2.05,"lobby at the arena's height: "..p.Name.." reaches down to "..(c.Y-e.Y))
+        check(A.isInside(c,galleryEnd),"lobby inside the Colosseum's facade: "..p.Name)
+        local approach=p.Parent and p.Parent.Name and p.Parent.Name:match("ArenaApproach$")
+        if not approach and p.Transparency~=1 then
+            local tolerance=if p.CanCollide~=false then 0.05 else 0.5
+            local seen={}
+            cells(c,e,function(key)
+                for _,s in grid[key] or {} do
+                    if not seen[s] then
+                        seen[s]=true
+                        local se=extent(s)
+                        local sc=s.CFrame.Position
+                        if math.abs(sc.X-c.X)<se.X+e.X and math.abs(sc.Y-c.Y)<se.Y+e.Y and math.abs(sc.Z-c.Z)<se.Z+e.Z and penetrates(p,s,tolerance) then
+                            table.insert(clashes,("%s (%s) cuts into %s at %.0f,%.0f,%.0f"):format(p.Name,p.Parent and p.Parent.Name or "?",s.Name,c.X,c.Y,c.Z))
+                        end
+                    end
+                end
+            end)
         end
     end
 end
+do -- the detector itself: a box inside a pier clashes, one beside it does not
+    local pier
+    for _,s in arenaSolids do if s.Name=="Pier" and s.Size.Y<20 then pier=s; break end end
+    check(pier and penetrates({CFrame=pier.CFrame,Size=vector(1,1,1)},pier,0.05),"clash detector finds a box inside a pier")
+    check(pier and not penetrates({CFrame=pier.CFrame*CFrame.new(4,0,0),Size=vector(1,1,1)},pier,0.05),"clash detector ignores a box beside a pier")
+end
+for i,line in clashes do if i<=25 then print("CLASH "..line) end end
+check(#clashes==0,#clashes.." lobby parts cut into the Colosseum's structure")
+print(("lobby fittings: %d parts checked against %d Colosseum colliders"):format(lobbyParts,#arenaSolids))
 -- Steeper stands: about 34 degrees below, over 40 above the praecinctio
 for k=1,L.SeatTiers do
     local slope=(L.tierTop(k)-L.tierTop(k-1))/L.tierDepth(k)
@@ -179,13 +241,25 @@ for _,flight in A.Layout.StairFlights do
         tested+=1
     end
 end
--- Shop racks stay on the solid walls: the doors at local x = +-27 carry the street through the aisle.
+-- Shop displays (EquipmentShopService spreads them along each line, at most `max` apart): every
+-- display, a rack 4 wide, 14 high and 3 deep standing behind its slot, fits between the piers
+-- under the stands, and every slot lies in its shop's purchase zone.
 local armory=layout.armory
-for name,line in {blades=armory.blades,heavy=armory.heavy,ranged=armory.ranged,light=armory.shields.Light,balanced=armory.shields.Balanced,heavyShields=armory.shields.Heavy,armor=armory.armor} do
-    local frame=if name=="armor" then layout.shopFrames.Armor elseif name=="light" or name=="balanced" or name=="heavyShields" then layout.shopFrames.Shields else layout.shopFrames.Weapons
-    for _,x in {-line.length/2,0,line.length/2} do
-        local o=frame:PointToObjectSpace(line.cframe*vector(x,0,0))
-        check(math.abs(o.Z)>=10 and math.abs(o.X)<=24,"shop display "..name.." keeps the door aisle free")
+for name,spec in {blades={armory.blades,3,10},heavy={armory.heavy,4,12},ranged={armory.ranged,1,11},light={armory.shields.Light,3,7.5},balanced={armory.shields.Balanced,2,7.5},heavyShields={armory.shields.Heavy,3,7.5},armor={armory.armor,4,9}} do
+    local line,count,max=spec[1],spec[2],spec[3]
+    local spacing=math.min(max,line.length/count)
+    check(spacing>=4.2,"shop line "..name.." leaves room for every display ("..spacing..")")
+    for i=1,count do
+        local slot=line.cframe*CFrame.new((i-(count+1)/2)*spacing,0,0)
+        check(modules.LobbyService.isInArmory(slot.Position+vector(0,3,0)),"display "..name.." "..i.." inside its shop")
+        local box={CFrame=slot*CFrame.new(0,7.05,1.5),Size=vector(4,14,3)}
+        local e=extent(box)
+        local c=box.CFrame.Position
+        cells(c,e,function(key)
+            for _,s in grid[key] or {} do
+                check(not penetrates(box,s,0.05),"display "..name.." "..i.." cuts into "..s.Name)
+            end
+        end)
     end
 end
 -- Start pedestals stand beside the walk-on pad, never on the mosaic.
@@ -322,17 +396,18 @@ for key,c in columns do
 end
 local function above(c,k) local next=c and c[k+1]; return if next then next[1] else math.huge end
 local reached={}
+local steps={}
 local queue={}
 local voids,drops={},{}
-local function visit(key,k)
+local function visit(key,k,d)
     local id=key*64+k
-    if not reached[id] then reached[id]=true; table.insert(queue,{key,k}) end
+    if not reached[id] then reached[id]=true; steps[id]=d or 0; table.insert(queue,{key,k}) end
 end
 local function seed(position)
     local i,j=cellOf(position.X,position.Z)
     local c=columns[i*N+j]
     for k=#(c or {}),1,-1 do
-        if c[k][2]<=position.Y+1 and above(c,k)-c[k][2]>=BODY then visit(i*N+j,k); return true end
+        if c[k][2]<=position.Y+1 and above(c,k)-c[k][2]>=BODY then visit(i*N+j,k,0); return true end
     end
     return false
 end
@@ -354,7 +429,7 @@ while head<=#queue do
                 local land=n[best][2]
                 if above(n,best)>=math.max(land,top)+BODY and room>=math.max(land,top)+BODY then
                     if top-land>DROP then table.insert(drops,{x=-HALF+(ni+0.5)*CELL,z=-HALF+(nj+0.5)*CELL,from=top,to=land}) end
-                    visit(nkey,best)
+                    visit(nkey,best,steps[key*64+k]+1)
                 end
             elseif (if n then n[1][1] else math.huge)>=top+BODY then
                 table.insert(voids,{x=-HALF+(ni+0.5)*CELL,z=-HALF+(nj+0.5)*CELL,y=top})
@@ -373,7 +448,37 @@ end
 -- ambulatory, each stair house up to the top tier and both vomitorium terraces
 check(seed(layout.arrivalSpawn.Position+vector(0,0.5,0)),"walkable floor at the hall spawn")
 walk()
-local targets={grounds=vector(330,0.95,330),topGallery=L.point(math.rad(90),seatsEnd+7)+vector(0,A.Layout.GalleryTop,0),trainingYard=layout.trainingCFrame.Position-vector(0,8,0)}
+-- The walk from the arrival spawn to the walk-in trigger at Otti's gate (grid steps of CELL)
+local function stepsTo(position,half)
+    local best=math.huge
+    for x=position.X-half.X,position.X+half.X,CELL/2 do
+        for z=position.Z-half.Z,position.Z+half.Z,CELL/2 do
+            local i,j=cellOf(x,z)
+            local c=columns[i*N+j]
+            for k=1,#(c or {}) do local id=(i*N+j)*64+k; if reached[id] and math.abs(c[k][2]-FLOOR)<0.6 then best=math.min(best,steps[id]) end end
+        end
+    end
+    return best*CELL
+end
+local gate=layout.arenaTriggers[1]
+local gateWalk=stepsTo(gate.Position,vector(gate.Size.X/2-1,0,gate.Size.Z/2))
+local straight=(vector(gate.Position.X,0,gate.Position.Z)-vector(layout.arrivalSpawn.Position.X,0,layout.arrivalSpawn.Position.Z)).Magnitude-gate.Size.Z/2
+print(("arrival spawn -> Otti gate trigger: %.1f studs walked on the grid, %.1f straight (%.1f s at walk speed 16)"):format(gateWalk,straight,straight/16))
+check(gateWalk<=70,"the arena start is a short walk from the arrival spawn")
+for _,spawn in {layout.arrivalSpawn,layout.respawnSpawn} do
+    local o=gate.CFrame:PointToObjectSpace(spawn.Position)
+    check(not (math.abs(o.X)<=gate.Size.X/2+3 and math.abs(o.Z)<=gate.Size.Z/2+3),"spawn stays clear of the gate trigger")
+    local floor,blocked=probe(spawn.Position.X,spawn.Position.Z,FLOOR+0.01)
+    check(math.abs(floor-FLOOR)<0.1 and blocked==nil,"spawn on the floor with headroom: "..spawn.Name)
+end
+for _,pad in layout.pads do
+    for _,o in {vector(0,0,0),vector(9,0,5),vector(-9,0,-5),vector(9,0,-5),vector(-9,0,5)} do
+        local p=pad.cframe*o
+        local floor,blocked=probe(p.X,p.Z,FLOOR+0.5)
+        check(math.abs(floor-FLOOR)<0.3 and blocked==nil,"pad "..pad.def.Id.." on the floor with headroom ("..tostring(blocked)..")")
+    end
+end
+local targets={cityExit=layout.cityExit.Position+vector(0,FLOOR-layout.cityExit.Position.Y-0.05,0),grounds=vector(330,0.95,330),topGallery=L.point(math.rad(90),seatsEnd+7)+vector(0,A.Layout.GalleryTop,0),trainingYard=layout.trainingCFrame.Position-vector(0,8,0)}
 for name,cf in layout.shopFrames do targets["shop "..name]=cf.Position end
 for id,cf in layout.hallFrames do targets["hall "..id]=cf.Position end
 for i,trigger in layout.arenaTriggers do targets["gate "..i]=trigger.Position-vector(0,4,0) end

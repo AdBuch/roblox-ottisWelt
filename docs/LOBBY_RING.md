@@ -1,6 +1,12 @@
-# Drei Heldenlobbys vor dem Kolosseum
+# Drei Heldenlobbys (historisch: vor dem Kolosseum)
 
 Branch: `feature/lobby-und-rom`.
+
+> **Stand 9. November 2026: überholt.** Die Lobbys sind jetzt **im** Kolosseum unter den Rängen
+> eingebaut, die freistehenden Hallen und die endlose Granitplatte im Hub sind entfernt, rundherum
+> liegt Rom. Aufbau, Anker, Wegmessung (8,7 s → 2,7 s) und Prüfungen: `docs/ROM_INSEL.md`.
+> Die Abschnitte zum Kolosseum, zu Treppenhäusern, Vomitorien, Toren und zum Nach-dem-Kampf-Ablauf
+> unten gelten weiter; die Beschreibung der Hallen darunter ist der alte Stand.
 
 Die Lobbys liegen wieder auf Arenahöhe. Sie stehen auf der Granitplatte vor dem Kolosseum,
 jede gegenüber ihrem Heldentor (Otti 90°, Schili 330°, Kroko 210°). Der Weg in die Arena führt

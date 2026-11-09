@@ -20,9 +20,11 @@
 -- from their start), `session` (current play session across teleports), `lastBattle` and
 -- `activity` (active fighting seconds + Aura for the play-time estimate). Old profiles start these
 -- at 0 - no invented history. The migration only creates missing tables, so it can run repeatedly.
+-- v9: `forge` (weapon id -> improvement stage from the forge of Rome, ForgeDefinitions). Older
+-- profiles start with no improved weapon; unknown ids are dropped and stages are clamped.
 
 local PlayerDataSchema = {
-	Version = 8,
+	Version = 9,
 
 	-- A new play session starts when the profile was not seen for this long (teleports take seconds)
 	SessionGapSeconds = 20 * 60,
