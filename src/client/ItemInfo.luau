@@ -10,6 +10,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local ArmorDefinitions = require(Shared:WaitForChild("ArmorDefinitions"))
+local HelmetDefinitions = require(Shared:WaitForChild("HelmetDefinitions"))
 local DamageConfig = require(Shared:WaitForChild("DamageConfig"))
 local ShieldDefinitions = require(Shared:WaitForChild("ShieldDefinitions"))
 local Practice = require(Shared:WaitForChild("SpecialPracticeDefinitions"))
@@ -19,7 +20,7 @@ local WeaponBalanceConfig = require(Shared:WaitForChild("WeaponBalanceConfig"))
 local WeaponDefinitions = require(Shared:WaitForChild("WeaponDefinitions"))
 local WeaponSpecialDefinitions = require(Shared:WaitForChild("WeaponSpecialDefinitions"))
 
-export type Kind = "Weapon" | "Shield" | "Armor"
+export type Kind = "Weapon" | "Shield" | "Armor" | "Helmet"
 
 -- One comparable value. `better`: +1 higher is better, -1 lower is better, 0 neutral.
 export type Value = { key: string, label: string, value: number, text: string, better: number }
@@ -129,6 +130,22 @@ function ItemInfo.describe(kind: string, id: string): Card?
 			notes = { "Ein Schild zur Zeit · mit Zweihandwaffen unbenutzt" },
 			levelRequired = shield.LevelRequired,
 			price = shield.Price,
+		}
+	elseif kind == "Helmet" then
+		local helmet = HelmetDefinitions.ById[id]
+		if not helmet then
+			return nil
+		end
+		return {
+			title = helmet.DisplayName,
+			section = "HELM",
+			description = helmet.Description,
+			values = {
+				value("reduction", "Schadensminderung", helmet.Reduction, pct(helmet.Reduction), 1),
+			},
+			notes = { "Ein Helm zur Zeit · Wechsel nur in der Lobby" },
+			levelRequired = helmet.LevelRequired,
+			price = helmet.Price,
 		}
 	elseif kind == "Armor" then
 		local armor = ArmorDefinitions.ById[id]

@@ -25,6 +25,7 @@ local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local ArmorDefinitions = require(Shared:WaitForChild("ArmorDefinitions"))
+local HelmetDefinitions = require(Shared:WaitForChild("HelmetDefinitions"))
 local Config = require(Shared:WaitForChild("Config"))
 local GameStates = require(Shared:WaitForChild("GameStates"))
 local GladiatorLevelDefinitions = require(Shared:WaitForChild("GladiatorLevelDefinitions"))
@@ -56,7 +57,7 @@ export type LobbyMenu = {
 	accessButton: TextButton,
 }
 
-type Kind = "Weapon" | "Shield" | "Armor"
+type Kind = "Weapon" | "Shield" | "Armor" | "Helmet"
 
 local LobbyMenuController = {}
 LobbyMenuController.active = nil :: LobbyMenu?
@@ -65,8 +66,9 @@ local KIND_TABS: { { kind: Kind, label: string } } = {
 	{ kind = "Weapon", label = "WAFFEN" },
 	{ kind = "Shield", label = "SCHILDE" },
 	{ kind = "Armor", label = "RÜSTUNGEN" },
+	{ kind = "Helmet", label = "HELME" },
 }
-local KIND_WORD: { [string]: string } = { Weapon = "Waffe", Shield = "Schild", Armor = "Rüstung" }
+local KIND_WORD: { [string]: string } = { Weapon = "Waffe", Shield = "Schild", Armor = "Rüstung", Helmet = "Helm" }
 local MODE_NAMES: { [string]: string } = {
 	Solo = "Solo-Arena",
 	Coop = "Co-op-Legionen",
@@ -101,7 +103,7 @@ local function splitSet(value: unknown): { [string]: boolean }
 end
 
 local function definitionsOf(kind: Kind): { any }
-	return if kind == "Weapon" then WeaponDefinitions.Ordered :: any elseif kind == "Shield" then ShieldDefinitions.Ordered :: any else ArmorDefinitions.Ordered :: any
+	return if kind == "Weapon" then WeaponDefinitions.Ordered :: any elseif kind == "Shield" then ShieldDefinitions.Ordered :: any elseif kind == "Helmet" then HelmetDefinitions.Ordered :: any else ArmorDefinitions.Ordered :: any
 end
 
 local function attrNames(kind: Kind): (string, string)
@@ -109,6 +111,9 @@ local function attrNames(kind: Kind): (string, string)
 		return Config.OwnedWeaponsAttribute, Config.EquippedWeaponAttribute
 	elseif kind == "Shield" then
 		return Config.OwnedShieldsAttribute, Config.EquippedShieldAttribute
+	end
+	if kind == "Helmet" then
+		return Config.OwnedHelmetsAttribute, Config.EquippedHelmetAttribute
 	end
 	return Config.OwnedArmorAttribute, Config.EquippedArmorAttribute
 end
@@ -234,7 +239,7 @@ local function itemPreview(parent: Instance, kind: Kind, id: string, size: UDim2
 		local model = Instance.new("Model")
 		local copy = display:Clone()
 		copy.Parent = model
-		if kind == "Armor" then
+		if kind == "Armor" or kind == "Helmet" then
 			local mannequin = source:FindFirstChild("Mannequin")
 			if mannequin then
 				mannequin:Clone().Parent = model
@@ -448,13 +453,13 @@ function LobbyMenuController.start(deps: Deps): LobbyMenu
 		if attr ~= "" then
 			return attr
 		end
-		return if kind == "Weapon" then WeaponDefinitions.Starter elseif kind == "Shield" then ShieldDefinitions.Starter else ArmorDefinitions.Starter
+		return if kind == "Weapon" then WeaponDefinitions.Starter elseif kind == "Shield" then ShieldDefinitions.Starter elseif kind == "Helmet" then HelmetDefinitions.Starter else ArmorDefinitions.Starter
 	end
 
 	local function ownedList(kind: Kind): ({ any }, number)
 		local ownedAttr = attrNames(kind)
 		local owned = splitSet(player:GetAttribute(ownedAttr))
-		local starter = if kind == "Weapon" then WeaponDefinitions.Starter elseif kind == "Shield" then ShieldDefinitions.Starter else ArmorDefinitions.Starter
+		local starter = if kind == "Weapon" then WeaponDefinitions.Starter elseif kind == "Shield" then ShieldDefinitions.Starter elseif kind == "Helmet" then HelmetDefinitions.Starter else ArmorDefinitions.Starter
 		owned[starter] = true -- the starter can never be lost
 		local list = {}
 		local all = definitionsOf(kind)
@@ -713,6 +718,7 @@ function LobbyMenuController.start(deps: Deps): LobbyMenu
 			{ kind = "Weapon", defs = WeaponDefinitions.Ordered :: any },
 			{ kind = "Shield", defs = ShieldDefinitions.Ordered :: any },
 			{ kind = "Armor", defs = ArmorDefinitions.Ordered :: any },
+			{ kind = "Helmet", defs = HelmetDefinitions.Ordered :: any },
 		}
 		for _, entry in sources do
 			for _, def in entry.defs do
@@ -859,6 +865,7 @@ function LobbyMenuController.start(deps: Deps): LobbyMenu
 	for _, attribute in {
 		Config.AuraAttribute, Config.DenariiAttribute, Config.EquippedWeaponAttribute, Config.EquippedShieldAttribute,
 		Config.EquippedArmorAttribute, Config.OwnedWeaponsAttribute, Config.OwnedShieldsAttribute, Config.OwnedArmorAttribute,
+		Config.EquippedHelmetAttribute, Config.OwnedHelmetsAttribute,
 		Config.DataStatusAttribute, Config.SessionAuraAttribute, Config.EarnedAuraAttribute, Config.LastBattleAuraAttribute,
 		Config.AuraPerHourAttribute, Config.MatchTransitionAttribute, GameStates.StateAttribute, GameStates.LocationAttribute,
 	} do

@@ -3,8 +3,8 @@
 -- player always enters the arena with armor. Armor reduces incoming damage after the shield
 -- (DamageConfig: PvP uses only part of it) and may slow the wearer a little.
 -- Armor can only be changed in the lobby / Gladiator Armory, never during a match.
--- Look: EquipmentModels.buildArmor (pieces on the torso, shoulders, arms and legs; no helmet,
--- so the player stays recognisable). Cloth pieces take the team color in Team Battle.
+-- Look: EquipmentModels.buildArmor (pieces on the torso, shoulders, arms and legs; helmets are
+-- their own slot, HelmetDefinitions). Cloth pieces take the team color in Team Battle.
 
 export type ArmorDefinition = {
 	Id: string,

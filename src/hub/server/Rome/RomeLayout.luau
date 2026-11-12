@@ -253,7 +253,7 @@ end
 RomeLayout.Blocks = table.freeze({
 	-- LOWER town, north of the main axis: crafts on the Handwerksgasse, the living quarter beyond
 	{ id = "BN1", district = "Handwerk", level = L, x0 = -311, x1 = -234, z0 = -113, z1 = -11, fronts = {
-		{ side = "S", start = -260, dir = -1, items = { item("Storehouse", 24, 24, { name = "SCHMIEDE · FABER", special = "Smithy", open = true, variant = "Workshop" }), item("Shop", 11, 16), item("Shop", 14, 16, { name = "PISTRINUM · BÄCKEREI", special = "Bakery" }) } },
+		{ side = "S", start = -260, dir = -1, items = { item("Storehouse", 24, 24, { name = "SCHMIEDE · FABER", special = "Smithy", open = true, variant = "Workshop" }), item("Shop", 11, 16, { name = "WAFFEN · ARMAMENTARIUM", special = "WeaponShop", open = true }), item("Shop", 14, 16, { name = "PISTRINUM · BÄCKEREI", special = "Bakery" }) } },
 		{ side = "W", start = -36, dir = -1, items = { item("Row", 13, 16), item("Tenement", 18, 18), item("Row", 13, 16), item("Tenement", 18, 18) } },
 		{ side = "N", start = -290, dir = 1, items = { item("Row", 13, 18), item("Shop", 12, 18), item("Row", 13, 18), item("Row", 13, 18) } },
 	} },
@@ -278,7 +278,7 @@ RomeLayout.Blocks = table.freeze({
 	} },
 	-- LOWER town, south: shops on the axis, quieter courtyard houses and the villas
 	{ id = "BS1", district = "Handwerk", level = L, x0 = -311, x1 = -234, z0 = 11, z1 = 93, fronts = {
-		{ side = "N", start = -262, dir = -1, items = { item("Shop", 11, 16), item("Shop", 11, 16), item("Row", 12, 16), item("Row", 12, 16) } },
+		{ side = "N", start = -262, dir = -1, items = { item("Shop", 11, 16, { name = "HELME · GALEAE", special = "HelmShop", open = true }), item("Shop", 11, 16, { name = "RÜSTUNG · LORICA", special = "ArmorShop", open = true }), item("Shop", 12, 16, { name = "SCHILDE · SCUTA", special = "ShieldShop", open = true }), item("Row", 12, 16) } },
 		{ side = "W", start = 31, dir = 1, items = { item("Courtyard", 28, 28), item("Tenement", 18, 18), item("Row", 12, 16) } },
 		{ side = "S", start = -266, dir = -1, items = { item("Row", 13, 16) } },
 	} },

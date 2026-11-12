@@ -458,10 +458,15 @@ function PlayerCombatService.refreshEquipment(player: Player)
 	character:SetAttribute("CombatZone", state.drawTarget)
 	placeEquipment(player, state)
 
-	-- Armor on the body (no helmet: the player stays recognisable); cloth takes the team color
+	-- Armor and helmet on the body; cloth takes the team color
 	local armorModel = EquipmentModels.buildArmor(InventoryService.getEquippedArmor(player).Id, character)
 	armorModel:SetAttribute("OttiEquipment", true)
 	armorModel.Parent = character
+	local helmetModel = EquipmentModels.buildHelmet(InventoryService.getEquippedHelmet(player).Id, character)
+	if helmetModel then
+		helmetModel:SetAttribute("OttiEquipment", true)
+		helmetModel.Parent = character
+	end
 	PlayerCombatService.applyTeamColor(player)
 	updateWalkSpeed(player) -- armor weight
 end
@@ -755,7 +760,8 @@ local function armorReduction(victim: Player, incoming: Incoming): number
 	end
 	local armor = InventoryService.getEquippedArmor(victim)
 	local effectiveness = if incoming.fromZombie then DamageConfig.PvEArmorEffectiveness else DamageConfig.PvPArmorEffectiveness
-	return math.clamp(armor.Reduction * effectiveness, 0, DamageConfig.MaxArmorReduction)
+	local helmet = InventoryService.getEquippedHelmet(victim)
+	return math.clamp((armor.Reduction + helmet.Reduction) * effectiveness, 0, DamageConfig.MaxArmorReduction)
 end
 
 -- THE player damage pipeline: every zombie blow, enemy arrow, Otti attack and PvP hit (melee,

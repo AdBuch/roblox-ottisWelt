@@ -1,8 +1,8 @@
 --!strict
 -- The Hub's first steps. A new player sees only the way to the arena; after every finished fight
 -- one more part of the lobby appears, with a short hint and a floor arrow (LobbyIntroController):
---   0 the solo start on the sand · 1 the shops · 2 the Schili / Kroko halls ·
---   3 training and group mosaics on the sand, the team queues · 4 boss fights and live battles
+--   0 the solo start on the sand · 1 the shops in Rome · 2 the Schili / Kroko halls ·
+--   3 training (Forecourt) and group gathering points (hall bays) · 4 boss fights and live battles
 -- Progress: fights = zombieRuns + teamMatches (saved by the Arena); introSeen (saved) = the last
 -- stage shown, so each return reveals exactly one new stage. Players who already fought more
 -- often than there are stages skip the intro. The IntroStage attribute tells the client which
@@ -21,9 +21,9 @@ local LAST_STAGE = 4
 local ATTRIBUTE = "IntroStage"
 local HINTS: { [number]: { title: string, text: string } } = {
 	[0] = { title = "THE ARENA", text = "Through the open gate onto the sand · stand on the SOLO mosaic · your first fight starts" },
-	[1] = { title = "THE SHOPS", text = "Spend your denarii: blades, shields and armor to the west · more in the Kroko and Schili halls" },
-	[2] = { title = "KROKO & SCHILI", text = "The Schili and Kroko halls: their fighters in cages, their shops, their gates onto the sand" },
-	[3] = { title = "CO-OP & TRAINING", text = "On the sand: straw dummies in the middle, co-op and team mosaics at the gates · team queues near the gate" },
+	[1] = { title = "THE SHOPS", text = "Spend your denarii in Rome, through the west arch: weapons beside the smithy, shields and armor and helmets opposite" },
+	[2] = { title = "KROKO & SCHILI", text = "The Schili and Kroko halls: their fighters in cages and their gates onto the sand" },
+	[3] = { title = "CO-OP & TRAINING", text = "Training on the Forecourt outside the west arch · co-op and team gathering points in the hall bays under the stands" },
 	[4] = { title = "BOSSES & LIVE BATTLES", text = "Challenge Otti, Schili or Krokero · or watch other fights live" },
 }
 

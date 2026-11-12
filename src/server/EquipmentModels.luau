@@ -428,8 +428,8 @@ end
 
 ------------------------------------------------------------------------------------------
 -- Armor (ArmorDefinitions): pieces welded to the body's limbs. Works on R15 characters, on R6
--- (mapped onto the six R6 limbs) and on the armory mannequins (R15 limb names). No helmet, so
--- the face and avatar stay visible. Cloth pieces carry the "TeamCloth" attribute: Team Battle
+-- (mapped onto the six R6 limbs) and on the armory mannequins (R15 limb names). Helmets are separate (buildHelmet).
+-- Cloth pieces carry the "TeamCloth" attribute: Team Battle
 -- recolors them (PlayerCombatService.applyTeamColor).
 ------------------------------------------------------------------------------------------
 
@@ -643,6 +643,60 @@ function EquipmentModels.buildArmor(id: string, body: Model): Model
 		end)
 		loinCloth(DARK_RED, 0.9)
 		sash(DARK_RED)
+	end
+	return model
+end
+
+------------------------------------------------------------------------------------------
+-- Helmets (HelmetDefinitions): a shell over the head plus the piece of each helmet, welded to the
+-- body's "Head" part (R15, R6 and the mannequins). "NoHelmet" builds nothing. Visual only; the
+-- protection is in the damage numbers (PlayerCombatService.armorReduction).
+------------------------------------------------------------------------------------------
+
+local HELM_BRONZE = Color3.fromRGB(176, 125, 60)
+local HELM_STEEL = Color3.fromRGB(170, 172, 180)
+local HELM_CREST = Color3.fromRGB(150, 32, 36)
+local HELM_GOLD = Color3.fromRGB(214, 176, 80)
+
+function EquipmentModels.buildHelmet(id: string, body: Model): Model?
+	if id == "NoHelmet" then
+		return nil
+	end
+	local head = body:FindFirstChild("Head")
+	if not head or not head:IsA("BasePart") then
+		return nil
+	end
+	local model = Instance.new("Model")
+	model.Name = "Helmet_" .. id
+	model:SetAttribute("HelmetId", id)
+	local s = head.Size
+	local function piece(name: string, size: Vector3, offset: CFrame, color: Color3, material: Enum.Material)
+		local p = Instance.new("Part")
+		p.Name = name
+		p.Size = size
+		p.CFrame = head.CFrame * offset
+		p.Color = color
+		p.Material = material
+		p.TopSurface, p.BottomSurface = Enum.SurfaceType.Smooth, Enum.SurfaceType.Smooth
+		p.CanCollide, p.CanQuery, p.CanTouch, p.Massless = false, false, false, true
+		p.CastShadow = false
+		p.Parent = model
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0, weld.Part1 = head, p
+		weld.Parent = p
+	end
+	-- the shell over the skull (bronze for the legionary's galea, steel for the others)
+	piece("Shell", Vector3.new(s.X * 1.18, s.Y * 0.6, s.Z * 1.18), CFrame.new(0, s.Y * 0.32, 0), if id == "Galea" then HELM_BRONZE else HELM_STEEL, Enum.Material.Metal)
+	if id == "Galea" then
+		for _, side in { -1, 1 } do
+			piece("CheekGuard", Vector3.new(s.X * 0.14, s.Y * 0.7, s.Z * 0.85), CFrame.new(side * s.X * 0.6, -s.Y * 0.15, 0), HELM_BRONZE, Enum.Material.Metal)
+		end
+	elseif id == "MurmilloHelm" then
+		piece("Visor", Vector3.new(s.X * 0.95, s.Y * 0.55, s.Z * 0.14), CFrame.new(0, -s.Y * 0.02, -s.Z * 0.6), HELM_STEEL, Enum.Material.Metal)
+		piece("FishCrest", Vector3.new(s.X * 0.16, s.Y * 0.45, s.Z * 0.9), CFrame.new(0, s.Y * 0.9, 0), HELM_BRONZE, Enum.Material.Metal)
+	elseif id == "ChampionCrest" then
+		piece("GildedRim", Vector3.new(s.X * 1.24, s.Y * 0.12, s.Z * 1.24), CFrame.new(0, s.Y * 0.05, 0), HELM_GOLD, Enum.Material.Metal)
+		piece("Crest", Vector3.new(s.X * 0.22, s.Y * 1.4, s.Z * 0.75), CFrame.new(0, s.Y * 1.0, 0), HELM_CREST, Enum.Material.Fabric)
 	end
 	return model
 end

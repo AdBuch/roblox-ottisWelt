@@ -369,7 +369,10 @@ function HouseKit.frameOf(h: House): CFrame
 	return CFrame.lookAt(p, p + Vector3.new(h.fx, 0, h.fz))
 end
 
--- Builds one house (or hands the smithy to `special`). Returns the model.
+-- Houses with an open interior of their own (Smithy.luau, ArmoryShops.luau): `special` builds them.
+local SPECIAL_INTERIORS: { [string]: boolean } = { Smithy = true, WeaponShop = true, HelmShop = true, ArmorShop = true, ShieldShop = true }
+
+-- Builds one house (or hands its special interior to `special`). Returns the model.
 function HouseKit.build(parent: Instance, h: House, special: ((model: Model, frame: CFrame, house: House) -> ())?): Model
 	local model = Instance.new("Model")
 	model.Name = ("House_%s"):format(h.id)
@@ -385,7 +388,7 @@ function HouseKit.build(parent: Instance, h: House, special: ((model: Model, fra
 		shutter = pick(SHUTTERS, h.seed, 6),
 		top = 0,
 	}
-	if h.special == "Smithy" and special then
+	if special and h.special and SPECIAL_INTERIORS[h.special] then
 		special(model, frame, h)
 	else
 		if h.type ~= "Storehouse" then

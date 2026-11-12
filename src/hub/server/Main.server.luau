@@ -23,10 +23,8 @@ local GameStates = require(ReplicatedStorage.Shared.GameStates)
 local Config = require(ReplicatedStorage.Shared.Config)
 local EnvironmentConfig = require(ReplicatedStorage.Shared.EnvironmentConfig)
 local Server = script.Parent.Parent
-local Arena = require(Server.Arena)
 local CombatRules = require(Server.CombatRules)
 local CombatUtil = require(Server.CombatUtil)
-local EquipmentShopService = require(Server.EquipmentShopService)
 local LobbyService = require(Server.LobbyService)
 local LoadoutRequestService = require(Server.LoadoutRequestService)
 local PlayerCombatService = require(Server.PlayerCombatService)
@@ -64,7 +62,7 @@ CombatRules.install({
 	getContext = function(player: Player)
 		if GameStates.isInLobby(player:GetAttribute(GameStates.StateAttribute)) then
 			local _, _, root = CombatUtil.getLivingCharacter(player)
-			if root and TrainingService.isInTrainingArea(root.Position) and Arena.isInside(root.Position) then
+			if root and TrainingService.isInTrainingArea(root.Position) then
 				return "Training"
 			end
 		end
@@ -89,7 +87,6 @@ PlayerDataService.init(function(player: Player) -- same schema and store as the 
 	LobbyIntroService.onLoaded(player)
 end)
 PlayerCombatService.init()
-EquipmentShopService.build(lobby.folder, lobby.armory)
 LoadoutRequestService.init() -- equip OWNED gear from the lobby menu (server-validated)
 TrainingService.build(lobby.folder, lobby.trainingSlots, lobby.trainingCFrame, lobby.trainingSize)
 ZombieDisplayService.build(lobby.folder, lobby.archiveSlots, lobby.archivePlaques, lobby.archiveIds)
@@ -115,7 +112,7 @@ end
 local romeRequest = remote("RomeRequest", "RemoteFunction") :: RemoteFunction
 local romeEvent = remote("RomeEvent", "RemoteEvent") :: RemoteEvent
 local forumRespawn: CFrame? = nil
--- Safety: a fall over the world's rim -> once to the forum fountain (the sand is open: training and groups)
+-- Safety: a fall over the world's rim -> once to the forum fountain (the arena sand is open; the training yard lies on the Forecourt)
 WorldEdgeService.start(function()
 	return forumRespawn
 end, lobby.spawnCFrame, function(player: Player, kind: string)

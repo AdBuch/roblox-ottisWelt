@@ -21,6 +21,10 @@ local Smithy = require(script.Parent.Smithy)
 local Countryside = require(script.Parent.Countryside)
 local Yards = require(script.Parent.Yards)
 local RomeNpc = require(script.Parent.RomeNpc)
+local ArmoryShops = require(script.Parent.ArmoryShops)
+local Server = script.Parent.Parent.Parent
+local EquipmentShopService = require(Server.EquipmentShopService)
+local LobbyArchitecture = require(Server.LobbyArchitecture)
 
 local PREFIX = "[OttiArena][Rome]"
 local RomeWorld = {}
@@ -70,9 +74,18 @@ function RomeWorld.build(openForge: (player: Player) -> (), openOracle: (player:
 	local forum = ForumTemple.build(folder)
 	Harbor.build(folder)
 	local houseFolder = Parts.folder(folder, "Houses")
+	ArmoryShops.reset()
+	-- the open interiors: the smithy, and the shops (ArmoryShops) that get their displays below
+	local function buildInterior(model: Model, frame: CFrame, h: RomeLayout.House)
+		if h.special == "Smithy" then
+			Smithy.build(model, frame, h)
+		else
+			ArmoryShops.build(model, frame, h)
+		end
+	end
 	local houses: { [string]: Model } = {}
 	for i, h in RomeLayout.houses() do
-		houses[h.id] = HouseKit.build(houseFolder, h, Smithy.build)
+		houses[h.id] = HouseKit.build(houseFolder, h, buildInterior)
 		if i % 10 == 0 then
 			task.wait()
 		end
@@ -81,7 +94,16 @@ function RomeWorld.build(openForge: (player: Player) -> (), openOracle: (player:
 	Countryside.build(folder)
 	-- the townspeople
 	local people = Parts.folder(folder, "Townspeople")
-	local smithy = assert(Smithy.result(), "smithy not built")
+	-- the shops: display racks (EquipmentShopService), the purchase volume and a shopkeeper at the counter
+local shopFolder = Parts.folder(folder, "Shops")
+for _, shop in ArmoryShops.shops() do
+	EquipmentShopService.build(shopFolder, shop.layout)
+	LobbyArchitecture.addArmoryVolume(shop.volume.cf, shop.volume.size)
+	local keeper = RomeNpc.spawn(people, "Haendler", shop.keeper, shop.look)
+	keeper.model:SetAttribute("Role", "Shopkeeper")
+	keeper.model:SetAttribute("ShopKind", shop.kind)
+end
+local smithy = assert(Smithy.result(), "smithy not built")
 	local smith = RomeNpc.spawn(people, "Faber", smithy.smithSpot, { skin = Color3.fromRGB(196, 150, 112), cloth = Color3.fromRGB(120, 92, 70), accent = Color3.fromRGB(88, 60, 40), apron = true })
 	smith.model:SetAttribute("Role", "Smith")
 	prompt(smith.root, "Waffe verbessern", "Faber · Schmied", function(player)
