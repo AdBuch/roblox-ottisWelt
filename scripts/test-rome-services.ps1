@@ -310,7 +310,7 @@ for _, case in {
 	{ vec(-300, -60, -300), "Edge", "deep below the island" },
 	{ vec(-600, -20, 0), nil, "on the floor of the harbour basin" },
 	{ vec(-346, 2, 0), nil, "at the forum fountain" },
-	{ vec(0, 3, 0), "Sand", "on the arena sand in the Hub" },
+	{ vec(0, 3, 0), nil, "on the open arena sand in the Hub (training and groups)" },
 	{ vec(0, 3, 48 + 30), nil, "in Otti's lobby under the stands" },
 	{ vec(0, 3, 48 + 52), nil, "at the arrival spawn" },
 } do

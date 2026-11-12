@@ -87,14 +87,14 @@ local layout=modules.LobbyService.build()
 local L=modules.ColosseumLayout
 local A=modules.Arena
 local FLOOR=L.FloorTop
-check(#layout.pads==5,"co-op group in Otti's yard, co-op group and team in the Schili and Kroko halls")
+check(#layout.pads==8,"on the sand: a solo start and a co-op group at every gate, the two team mosaics")
 check(#layout.tribuneDoors==3,"three live entrances")
 check(#layout.trainingSlots==6,"six training dummies")
 check(#layout.modeBoards==4,"all modes in every hall and the team selector")
-check(#layout.archiveSlots==6 and #layout.archivePlaques==6,"six cages in the zombie archive")
-check(#layout.arenaTriggers==3 and #layout.bossBoards==3,"walk-in arena gate and boss entrance for every hall")
-for _,trigger in layout.arenaTriggers do check(trigger.CanCollide==false and trigger.CanTouch~=false and trigger.Transparency==1,"invisible walk-in trigger at the gate") end
-check(layout.arenaGate==layout.arenaTriggers[1] and #layout.introTargets==5,"start hall gate and one target per intro stage")
+check(#layout.archiveSlots==12 and #layout.archivePlaques==12 and #layout.archiveIds==12,"twelve cages: six zombies, two legionaries, four ninjas")
+check(#layout.arenaTriggers==0 and #layout.bossBoards==3,"open gates without walk-in triggers, boss entrance for every hall")
+local solos=0; for _,pad in layout.pads do if pad.def.Kind=="Solo" then solos+=1; check(pad.def.Mode=="SOLO_ZOMBIES" and pad.def.Enabled,"solo start mosaic starts a solo zombie run") end end; check(solos==3,"a solo start beyond every hero gate")
+check(layout.arenaGate~=nil and #layout.introTargets==5,"solo start beyond Otti's gate and one target per intro stage")
 local function under(p,ancestorName)
     local a=p.Parent
     while a do if a.Name==ancestorName then return true end a=a.Parent end
@@ -102,8 +102,7 @@ local function under(p,ancestorName)
 end
 -- Otti's hall is the old lobby's start: groups gather in the yard and the two smaller halls
 for _,pad in layout.pads do
-    check(not under(pad.ring,"OttiHeroLobby"),"Otti's hall stays free of group pads: "..pad.def.Id)
-    if pad.def.Id=="ZombieCoop" then check(under(pad.ring,"TrainingYard"),"Otti co-op group in the training yard") end
+    check(under(pad.ring,"ArenaGrounds") and A.isInside(pad.cframe.Position,-6),"group mosaics gather on the sand: "..pad.def.Id)
 end
 local stages={}
 for _,p in all do if not p.dead and p.attrs and p.attrs.IntroStage then stages[p.attrs.IntroStage]=(stages[p.attrs.IntroStage] or 0)+1; check(p.CanCollide==false,"only decoration is hidden by the intro") end end
@@ -113,7 +112,7 @@ for _,p in all do byName[p.Name or ""]=true end
 for _,id in {"Otti","Schili","Kroko"} do check(byName[id.."Statue"],"statue "..id) end
 for _,name in {"TrainingZombie1","PrisonerCell","HypogeumMaze"} do check(not byName[name],"no "..name.." any more") end
 for _,cf in layout.trainingSlots do
-    check(modules.LobbyService.isInside(cf.Position+vector(0,3,0)),"training safety zone")
+    check(modules.LobbyService.isInside(cf.Position+vector(0,3,0)) and A.isInside(cf.Position,-8),"training dummies stand on the open sand")
     local o=layout.trainingCFrame:PointToObjectSpace(cf.Position+vector(0,3,0))
     check(math.abs(o.X)<=layout.trainingSize.X/2 and math.abs(o.Y)<=layout.trainingSize.Y/2 and math.abs(o.Z)<=layout.trainingSize.Z/2,"dummy inside the training area")
 end
@@ -321,7 +320,7 @@ for _,v in vomitoria do
 end
 -- From every lobby straight to its gate: level paving and free headroom along the hero axis
 for _,angle in L.HeroAngles do
-    for o=6,facade+8,2 do
+    for o=-8,facade+8,2 do
         local p=L.point(math.rad(angle),o)
         local floor=probe(p.X,p.Z,FLOOR+0.01)
         check(floor>=FLOOR-0.06,"floor on the way to the "..angle.." gate at offset "..o.." is "..floor)
@@ -460,11 +459,12 @@ local function stepsTo(position,half)
     end
     return best*CELL
 end
-local gate=layout.arenaTriggers[1]
+local soloPad; for _,pad in layout.pads do if pad.def.Id=="OttiSolo" then soloPad=pad end end
+local gate={Position=soloPad.cframe.Position,CFrame=soloPad.cframe,Size=vector(soloPad.size.X,0,soloPad.size.Z)}
 local gateWalk=stepsTo(gate.Position,vector(gate.Size.X/2-1,0,gate.Size.Z/2))
 local straight=(vector(gate.Position.X,0,gate.Position.Z)-vector(layout.arrivalSpawn.Position.X,0,layout.arrivalSpawn.Position.Z)).Magnitude-gate.Size.Z/2
-print(("arrival spawn -> Otti gate trigger: %.1f studs walked on the grid, %.1f straight (%.1f s at walk speed 16)"):format(gateWalk,straight,straight/16))
-check(gateWalk<=70,"the arena start is a short walk from the arrival spawn")
+print(("arrival spawn -> solo start beyond Otti's gate: %.1f studs walked on the grid, %.1f straight (%.1f s at walk speed 16)"):format(gateWalk,straight,straight/16))
+check(gateWalk<=85,"the solo start is a short walk from the arrival spawn")
 for _,spawn in {layout.arrivalSpawn,layout.respawnSpawn} do
     local o=gate.CFrame:PointToObjectSpace(spawn.Position)
     check(not (math.abs(o.X)<=gate.Size.X/2+3 and math.abs(o.Z)<=gate.Size.Z/2+3),"spawn stays clear of the gate trigger")
@@ -519,4 +519,4 @@ check(solid.Transparency==1 and solid.CanCollide~=false,"solid gate still blocks
 check(solid.Parent:FindFirstChild("TimberLeaves")~=nil,"opaque gate variant has timber leaves")
 local grille=modules.ColosseumGate.build(Workspace,CFrame.new(600,1,500),"Grille")
 check(grille.Parent:FindFirstChild("TimberLeaves")==nil and grille.Parent:FindFirstChild("IronBar")~=nil,"grille variant keeps the view open")
-print("PASS: actual Arena and Lobby builders, three hero lobbies at the arena's height, shop street, training yard, five group pads, steep stands on an open substructure, four stair houses, eight level vomitoria, open ways to the gates and no gap to fall through; "..tested.." stair positions checked ("..checks.." checks)")
+print("PASS: actual Arena and Lobby builders, three hero lobbies at the arena's height, a shop bay and its chapter's cages in every hall, open gates, training and eight mosaics on the sand, steep stands on an open substructure, four stair houses, eight level vomitoria, open ways to the gates and no gap to fall through; "..tested.." stair positions checked ("..checks.." checks)")

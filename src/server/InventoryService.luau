@@ -1062,9 +1062,9 @@ function InventoryService.credits(player: Player, key: string): number
 	return getProfile(player).forgeCredits[key] or 0
 end
 
-function InventoryService.addCredit(player: Player, key: string)
+function InventoryService.addCredit(player: Player, key: string, count: number?)
 	local profile = getProfile(player)
-	profile.forgeCredits[key] = (profile.forgeCredits[key] or 0) + 1
+	profile.forgeCredits[key] = (profile.forgeCredits[key] or 0) + (count or 1)
 	changed(player)
 end
 

@@ -247,10 +247,9 @@ function TownServices.grant(player: Player, product: ForgeDefinitions.Product, p
 	end
 	if product.denarii then
 		inv.addDenarii(player, product.denarii)
-	elseif product.key == "ForgeSkip" then
-		inv.addCredit(player, "Skip")
-	elseif product.key == "DesignToken" then
-		inv.addCredit(player, "Design")
+	end
+	for key, count in product.credits or {} do
+		inv.addCredit(player, key, count)
 	end
 	inv.recordReceipt(player, purchaseId)
 	local _, message = applyPending(player)

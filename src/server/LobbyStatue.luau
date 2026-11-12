@@ -7,9 +7,8 @@
 local OttiModel = require(script.Parent.OttiModel)
 local CompanionModel = require(script.Parent.CompanionModel)
 
-local MARBLE = Color3.fromRGB(226, 218, 202)
-local MARBLE_SHADE = Color3.fromRGB(196, 186, 168)
-local BRONZE = Color3.fromRGB(184, 140, 70)
+local MARBLE = Color3.fromRGB(214, 204, 182) -- limestone
+local MARBLE_SHADE = Color3.fromRGB(190, 179, 156)
 
 local LobbyStatue = {}
 
@@ -30,7 +29,7 @@ function LobbyStatue.build(parent: Instance, base: CFrame, scale: number, bossId
 		part:Destroy() -- the statue holds the drawn gladius only
 	end
 	for _, item in model:GetDescendants() do
-		if item:IsA("PointLight") or item:IsA("ParticleEmitter") then
+		if item:IsA("Light") or item:IsA("ParticleEmitter") or item:IsA("SurfaceAppearance") or item:IsA("Trail") or item:IsA("Beam") then
 			item:Destroy()
 		elseif item:IsA("BasePart") then
 			item.Anchored = true
@@ -40,10 +39,14 @@ function LobbyStatue.build(parent: Instance, base: CFrame, scale: number, bossId
 			item.CollisionGroup = "Default"
 			if item.Transparency < 1 then
 				local metal = METALS[item.Material] == true
-				item.Material = if metal then Enum.Material.Metal else Enum.Material.Marble
+				item.Material = Enum.Material.Limestone
+				item.Reflectance = 0
+				if item:IsA("MeshPart") then
+					item.TextureID = ""
+				end
 				-- darker fur areas keep a slightly darker marble so the face stays readable
 				local dark = item.Color.R + item.Color.G + item.Color.B < 0.75
-				item.Color = if metal then BRONZE elseif dark then MARBLE_SHADE else MARBLE
+				item.Color = if metal or dark then MARBLE_SHADE else MARBLE
 			end
 		end
 	end

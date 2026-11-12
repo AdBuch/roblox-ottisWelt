@@ -47,7 +47,7 @@ export type Copy = {
 
 export type DesignOption = { id: string, label: string, color: Color3?, material: Enum.Material? }
 export type DesignSlot = { id: string, label: string, parts: { string }, options: { DesignOption } }
-export type Product = { key: string, productId: number, robux: number, label: string, denarii: number? }
+export type Product = { key: string, productId: number, robux: number, label: string, denarii: number?, credits: { [string]: number }? }
 
 local GOLD = Color3.fromRGB(232, 186, 82)
 local SILVER = Color3.fromRGB(206, 210, 216)
@@ -110,8 +110,12 @@ local ForgeDefinitions = {
 		table.freeze({ key = "DenariiSmall", productId = 0, robux = 25, label = "250 Denarii", denarii = 250 } :: Product),
 		table.freeze({ key = "DenariiMedium", productId = 0, robux = 99, label = "1200 Denarii", denarii = 1200 } :: Product),
 		table.freeze({ key = "DenariiLarge", productId = 0, robux = 199, label = "3000 Denarii", denarii = 3000 } :: Product),
-		table.freeze({ key = "ForgeSkip", productId = 0, robux = 15, label = "Auftrag sofort fertig" } :: Product),
-		table.freeze({ key = "DesignToken", productId = 0, robux = 49, label = "Design anfertigen" } :: Product),
+		table.freeze({ key = "ForgeSkip", productId = 0, robux = 15, label = "Auftrag sofort fertig", credits = table.freeze({ Skip = 1 }) } :: Product),
+		table.freeze({ key = "DesignToken", productId = 0, robux = 49, label = "Design anfertigen", credits = table.freeze({ Design = 1 }) } :: Product),
+		-- SALE bundles: cheaper than buying the parts one by one
+		table.freeze({ key = "SkipPack", productId = 0, robux = 39, label = "3× Vorspulen · SALE (statt 45 R$)", credits = table.freeze({ Skip = 3 }) } :: Product),
+		table.freeze({ key = "DesignPack", productId = 0, robux = 129, label = "3× Design · SALE (statt 147 R$)", credits = table.freeze({ Design = 3 }) } :: Product),
+		table.freeze({ key = "RomeStarter", productId = 0, robux = 149, label = "Starterpaket: 1200 Denarii + Vorspulen + Design · SALE (statt 163 R$)", denarii = 1200, credits = table.freeze({ Skip = 1, Design = 1 }) } :: Product),
 	}) :: any) :: { Product },
 	MaxReceipts = 50, -- processed purchase ids kept per profile (no double grant)
 }

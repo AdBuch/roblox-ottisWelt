@@ -6,29 +6,44 @@ Kolosseum. Der Arena-Place und der gemeinsame Arena-Builder (`src/server/Arena.l
 
 ## 1. Die drei Lobbys im Kolosseum
 
-`src/server/LobbyArchitecture.luau` baut die Lobbys jetzt **in** die offene Halle unter den Rängen,
-zwischen Podium und Fassade, in Ringkoordinaten (Ellipsenwinkel + Abstand nach außen):
+`src/server/LobbyArchitecture.luau` baut die Lobbys **in** die offene Halle unter den Rängen,
+zwischen Podium und Fassade, in Ringkoordinaten (Ellipsenwinkel + Abstand nach außen). Stand
+10. November 2026: Käfige unter Rang 1, Läden auf die drei Hallen verteilt, Arena offen.
 
 | Bereich | Ring | Inhalt |
 |---|---|---|
-| Ottis Lobby (Hauptankunft) | 70–110°, Tor 90° | Ankunft auf der Torachse, Monument, Mosaik, zwei Anschlagwände (Teams, alle Modi, Boss, Live), Zombie-Archiv hinter der Ankunft |
-| Ladenstraße | 110–170° | Waffen 112–126°, Schilde 127–148°, Rüstung 151–169°, zwei Regalreihen (Abstand 26 und 44) |
-| Trainingshof | 30–70° | Otti-Co-op-Mosaik am Eingang, sechs Strohpuppen, Kombo-Tafel |
-| Kroko | 190–250°, Tor 210° | Monument, Co-op- und Teammosaik, Tafelwand |
-| Schili | 290–350°, Tor 330° | dasselbe gespiegelt |
+| Ottis Lobby (Hauptankunft) | 70–110°, Tor 90° | Ankunft auf der Torachse, Monument, Mosaik, zwei Anschlagwände (Teams, alle Modi, Boss, Live), sechs Zombie-Käfige |
+| Ottis Laden | 112–131° | Klingen und ausgewogene Schilde innen (Abstand 26), Rüstung außen (44) |
+| Kroko | 190–250°, Tor 210° | Monument, Käfige (Legionär, berittener Prätorianer), Laden 224–238° (schwere Waffen, schwere Schilde), Tafelwand |
+| Schili | 290–350°, Tor 330° | Monument, Käfige (drei Ninjas, Terrakotta-Samurai), Laden 302–316° (Fernwaffen, leichte Schilde), Tafelwand |
+| Arena (im Hub offen) | Sand | sechs Strohpuppen im Kreis (Radius 16), Kombo-Tafel; vor jedem Tor Solo-Start, Co-op-Mosaik und (Kroko, Schili) Team-Sammelplatz |
 | Weg nach Rom | Westbogen 180° | Schild ROMA · FORUM, Wegweiser aus Kroko- und Ottis Lobby |
+
+- **Käfige:** unter dem untersten Rang (Abstand 4,5–12,6, Höhe 7,6), Rücken an der Podiumsmauer,
+  mit Rückwand und Dach, Gitter zur Halle, Tafel an der Rangkante darüber. Der Stall des
+  Prätorianers reicht bis unter Rang 2 (Abstand 21,6, Höhe 11). Je Halle die Vorkämpfer des
+  Kapitels (`HEROES[].foes` → `archiveIds` → `ZombieDisplayService`). Käfige halten den Torweg
+  (22 breit) und die Pfeilerstrahlen frei.
+- **Offene Arena:** `openHeroGates` entfernt im Hub Gitter und Kollision der drei Heldentore
+  (Rahmen bleibt; der gemeinsame Arena-Builder und der Kampf-Place sind unverändert). Training gilt
+  auf dem Sand (`TrainingService`-Zone und `Arena.isInside`).
+- **Sammelplätze auf dem Sand:** acht Mosaike. Solo-Start (`OttiSolo`, `KrokoSolo`, `SchiliSolo`,
+  `Kind = "Solo"`): drei Sekunden auf dem Mosaik stehen startet den Solo-Lauf; die früheren
+  Tor-Trigger gibt es nicht mehr (`arenaTriggers` ist leer). Co-op 24 Studs neben der Torachse,
+  Team-Sammelplatz auf der anderen Seite.
+- **Statuen:** aus den Heldenmodellen, in Kalkstein (ohne Texturen, Glanz, Lichter), Maßstab
+  `STATUE_SCALE = 2` gegenüber der Kampfgröße.
 
 Freie Felder liegen zwischen den Pfeilerstrahlen (10, 30, 70, 110, 150, 170, 190, 250, 270, 290,
 350°), außerhalb der Treppenhäuser (45/135/225/315°, Abstand 57–74) und unter der jeweiligen
-Kopffreiheit (Abstand 13–22: 15, 22–31: 21, 31–40: 27, 40–48,5: 33). Alle Einbauten stehen nur auf
-dem Hallenboden; Tribünen, Pfeiler, Umgänge, Tore und Fassade sind unverändert.
+Kopffreiheit (Abstand 4–13: 8, 13–22: 14, darüber höher). Tribünen, Pfeiler, Umgänge und Fassade
+sind unverändert.
 
 Anker: Ankunft (90°, Abstand 52) mit Blick aufs Tor, Respawn/Rückkehr (87,5°, 58). Hub-Spawn,
 Hub-Respawn und Ankunft nach dem Kampf nutzen diese Anker über `HubMatchService` (unverändert).
 
-**Fußweg Spawn → Tor-Trigger** (gleiche Gitter-Messung im Geometrietest):
-vorher 139,5 Studs (8,7 s bei Gehtempo 16), nachher 43,5 Studs (2,7 s). Der Spawn liegt 35 Studs vor
-dem Trigger; Laden oder Respawn starten keinen Kampf.
+**Fußweg Spawn → Solo-Start** (Gitter-Messung im Geometrietest): 61,5 Studs, 3,8 s bei Gehtempo 16
+(vor dem Umbau ins Kolosseum 139,5 Studs; mit Tor-Trigger 43,5 Studs).
 
 ## 2. Maßstab und Grundriss
 
@@ -126,7 +141,9 @@ Dialog `src/hub/client/RomeDialog.client.luau`.
   Bronze), Beschläge (Gold, Silber, Bronze) je Exemplar; Schildbemalung (Legionsrot, Kaiserblau,
   Gold) je Schild. Färbt die benannten Teile des Waffen-/Schildmodells beim Ausrüsten.
 - **Robux (Platzhalter):** `ForgeDefinitions.Products`: 250 / 1200 / 3000 Denarii (25 / 99 / 199 R$),
-  Auftrag sofort fertig (15 R$), Design anfertigen (49 R$). `productId = 0` bis die Produkte im
+  Auftrag sofort fertig (15 R$), Design anfertigen (49 R$). **SALE-Bundles:** 3× Vorspulen (39 R$ statt 45),
+  3× Design (129 R$ statt 147), Starterpaket 1200 Denarii + 1 Vorspulen + 1 Design (149 R$ statt 163).
+  Gutschriften stehen in `Product.credits` und werden in `TownServices.grant` je Receipt einmal gewährt. `productId = 0` bis die Produkte im
   Creator Hub angelegt sind: in Studio laufen Testkäufe über denselben Gewährungsweg, ausserhalb
   werden sie abgelehnt. `MarketplaceService.ProcessReceipt` (nur Hub) gewährt jede Quittung einmal
   (gespeicherte Kaufnummern), wandelt Vorspulen/Design in Gutschriften, löst die vorgemerkte Aktion
@@ -157,7 +174,7 @@ Wasser über die ganze Scheibe (y −42 bis −12). Am Rand: Felslippe, überlau
 Wasservorhang 240 Studs in die Tiefe, Gischt, Wolken darunter. Sichtbar vom Strand und vom
 Aussichtspunkt (Mauer, Schild „Am Rand der Welt"). `WorldEdgeService` prüft viermal pro Sekunde:
 außerhalb des Radius und unter dem Meer, oder tiefer als −45 → einmal zum Forumsbrunnen
-(kein Tod, nichts geht verloren), danach 3 s Schonzeit. Sand der Arena im Hub → Lobby-Respawn.
+(kein Tod, nichts geht verloren), danach 3 s Schonzeit. Der Sand der Arena ist im Hub offen (Training, Sammelplätze): dort greift keine Regel mehr.
 Arena-Todeslogik, Spawnwahl, Intro und Rückkehr bleiben unberührt.
 
 Ergänzt in der Abnahmerunde (9. November 2026): `Yards.luau` mit zwei Werkhöfen hinter den

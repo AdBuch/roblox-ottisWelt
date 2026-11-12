@@ -138,11 +138,21 @@ end
 
 -- slots[i]: floor CFrame in the middle of cage i, LookVector toward the gallery.
 -- plaqueSlots[i]: plaque CFrame outside cage i (front face toward the gallery).
-function ZombieDisplayService.build(parent: Instance, slots: { CFrame }, plaqueSlots: { CFrame })
+-- ids[i]: the fighter in cage i (default: the six arena zombies in order).
+function ZombieDisplayService.build(parent: Instance, slots: { CFrame }, plaqueSlots: { CFrame }, ids: { string }?)
 	local folder = Instance.new("Folder")
 	folder.Name = "ZombieArchive"
 	folder.Parent = parent
-	for i, def in ZombieDefinitions.Ordered do
+	local shown: { ZombieDefinition } = {}
+	if ids then
+		for _, id in ids do
+			local def = assert(ZombieDefinitions.ById[id], "unknown display fighter " .. id)
+			table.insert(shown, def)
+		end
+	else
+		shown = ZombieDefinitions.Ordered
+	end
+	for i, def in shown do
 		local slot = slots[i]
 		if not slot then
 			break
