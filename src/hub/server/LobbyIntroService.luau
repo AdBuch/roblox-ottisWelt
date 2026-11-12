@@ -1,8 +1,8 @@
 --!strict
 -- The Hub's first steps. A new player sees only the way to the arena; after every finished fight
 -- one more part of the lobby appears, with a short hint and a floor arrow (LobbyIntroController):
---   0 the arena gate · 1 the shops · 2 group fights in the Schili / Kroko halls ·
---   3 the co-op group, the training yard and the team queues · 4 boss fights and live battles
+--   0 the solo start on the sand · 1 the shops · 2 the Schili / Kroko halls ·
+--   3 training and group mosaics on the sand, the team queues · 4 boss fights and live battles
 -- Progress: fights = zombieRuns + teamMatches (saved by the Arena); introSeen (saved) = the last
 -- stage shown, so each return reveals exactly one new stage. Players who already fought more
 -- often than there are stages skip the intro. The IntroStage attribute tells the client which
@@ -20,10 +20,10 @@ local Remotes = require(Server.Remotes)
 local LAST_STAGE = 4
 local ATTRIBUTE = "IntroStage"
 local HINTS: { [number]: { title: string, text: string } } = {
-	[0] = { title = "THE ARENA", text = "Out through the Colosseum and through the gate · your first fight starts there" },
-	[1] = { title = "THE SHOPS", text = "Spend your denarii on weapons, shields and armor · the shop street through the left door" },
-	[2] = { title = "GROUP FIGHTS", text = "Co-op groups and team battles gather in the Schili and Kroko halls" },
-	[3] = { title = "CO-OP & TRAINING", text = "Through the right door: the co-op group and the straw dummies · team queues on the rear wall" },
+	[0] = { title = "THE ARENA", text = "Through the open gate onto the sand · stand on the SOLO mosaic · your first fight starts" },
+	[1] = { title = "THE SHOPS", text = "Spend your denarii: blades, shields and armor to the west · more in the Kroko and Schili halls" },
+	[2] = { title = "KROKO & SCHILI", text = "The Schili and Kroko halls: their fighters in cages, their shops, their gates onto the sand" },
+	[3] = { title = "CO-OP & TRAINING", text = "On the sand: straw dummies in the middle, co-op and team mosaics at the gates · team queues near the gate" },
 	[4] = { title = "BOSSES & LIVE BATTLES", text = "Challenge Otti, Schili or Krokero · or watch other fights live" },
 }
 

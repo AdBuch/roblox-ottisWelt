@@ -44,16 +44,17 @@ export type LobbyLayout = {
 	pads: { PadLayout },
 	bossBoard: BasePart,
 	bossBoards: { BasePart },
-	arenaTriggers: { BasePart }, -- invisible volumes at every arena gate: walking in starts a solo run
+	arenaTriggers: { BasePart }, -- none any more: the gates stand open, the solo start is a mosaic on the sand
 	introTargets: { Vector3 }, -- where each Hub intro stage points (index = stage + 1)
 	matchActions: { { part: BasePart, mode: string } },
 	modeBoards: { BasePart },
-	arenaGate: BasePart, -- the trigger at Otti's gate (the start hall's way into the arena)
+	arenaGate: BasePart, -- the solo start mosaic beyond Otti's gate
 	tribuneDoors: { BasePart }, -- WATCH LIVE entrances at the top of the side stairs
 	liveBoards: { TextLabel }, -- live battle count on every hall's LIVE BATTLES sign
 	liveCFrame: CFrame, -- where returning spectators arrive
 	archiveSlots: { CFrame },
 	archivePlaques: { CFrame },
+	archiveIds: { string }, -- the fighter shown in each cage (ZombieDefinitions id)
 	trainingSlots: { CFrame },
 	trainingCFrame: CFrame,
 	trainingSize: Vector3,

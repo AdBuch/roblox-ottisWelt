@@ -216,13 +216,20 @@ local function panel(parent: Instance, cf: CFrame, size: Vector2, first: string,
     host.Parent = parent
 end
 
-function ShopBattleMosaics.build(parent: Instance, shop: CFrame, theme: string, first: string, second: string)
+-- Options (the open shop street under the Colosseum's stands): `floor` / `floorSize` place the
+-- floor panel, `walls = false` leaves out the two wall panels (there are no shop walls).
+export type Options = { floor: CFrame?, floorSize: Vector2?, walls: boolean? }
+
+function ShopBattleMosaics.build(parent: Instance, shop: CFrame, theme: string, first: string, second: string, options: Options?)
     local names = { Otti = "OTTI", Schili = "SCHILI", Krokero = "KROKERO" }
     local stories = { Shields = "THE UNBROKEN SHIELD WALL", Armor = "STAND AGAINST THE LEGION", Weapons = "CHAMPIONS OF THE ARENA" }
     local title = (names :: { [string]: string })[first] .. " & " .. (names :: { [string]: string })[second]
     -- The floor panel sits above the existing rug, clear of every display plinth.
-    local floor = shop * CFrame.new(0, 0.11, -3) * CFrame.Angles(math.pi/2, 0, 0) * CFrame.Angles(0, 0, math.pi)
-    panel(parent, floor, Vector2.new(36, 18), first, second, theme, title .. " · " .. (stories :: { [string]: string })[theme])
+    local floor = (options and options.floor) or shop * CFrame.new(0, 0.11, -3) * CFrame.Angles(math.pi/2, 0, 0) * CFrame.Angles(0, 0, math.pi)
+    panel(parent, floor, (options and options.floorSize) or Vector2.new(36, 18), first, second, theme, title .. " · " .. (stories :: { [string]: string })[theme])
+    if options and options.walls == false then
+        return
+    end
     -- The side walls now have connecting doors. Paint the solid front / rear walls instead.
     panel(parent, shop * CFrame.new(0, 10, 21.92), Vector2.new(38, 11), first, nil, theme, (names :: { [string]: string })[first] .. " · ARENA LEGEND")
     panel(parent, shop * CFrame.new(0, 10, -21.92) * CFrame.Angles(0, math.pi, 0), Vector2.new(38, 11), second, nil, theme, (names :: { [string]: string })[second] .. " · ARENA LEGEND")

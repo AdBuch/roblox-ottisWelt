@@ -322,9 +322,18 @@ centre of the screen stay free; everything is small, anchored to an edge and sca
   Results (summary banner).
 
 
+## Rome on the world disc (Hub)
+
+Details, scale, values and tests: [docs/ROM_INSEL.md](docs/ROM_INSEL.md).
+
+- The three hero lobbies (Otti, Kroko, Schili) are built **into** the Colosseum's ground hall, with the shop street and training yard between them. The arrival spawn is a 2.7-second walk from Otti's arena gate.
+- The Colosseum's west arch leads into Rome: a walled island town with 80 houses on three terraces, Pompeian streets with stepping-stone crossings, the forum and a walk-in temple, a fortified harbour, fields, forest and a beach. The sea falls over the rim of the world disc; a fall over the rim returns you once to the forum fountain.
+- **Smithy** (Handwerksgasse): the smith improves an owned weapon once (+10 % PvE damage, PvP unchanged) for Denarii. **Temple:** the augur's prophecy (5 Denarii) names the Aura still missing for your next title.
+- Tests: `scripts/test-rome-layout.ps1`, `scripts/test-rome-geometry.ps1`, `scripts/test-rome-services.ps1` (all `-LuauPath <luau.exe>`).
+
 ## The lobby: the gladiator gathering hall
 
-Details and tests: [docs/LOBBY_LAYOUT.md](docs/LOBBY_LAYOUT.md).
+> Superseded layout (lobbies now inside the Colosseum, see above). Details and tests: [docs/LOBBY_LAYOUT.md](docs/LOBBY_LAYOUT.md).
 
 - **Straight ahead:** SOLO ZOMBIES. The initial spawn faces the clear path, with Otti's monument beside it. Walk into the gate pad to start; the gate prompt starts directly without choosing a mode.
 - **Left:** one shared TEAM BATTLE hall with two facing mosaics: **SCHILI (Blue)** and **KROKERO (Red)**. Stand on one to join that team. Both captains press READY; equal teams of 1-4 fight a timed battle on one reserved Arena server.

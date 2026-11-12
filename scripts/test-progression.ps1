@@ -59,7 +59,7 @@ local function newPlayer(id)
 	return p
 end
 '@
-foreach ($name in 'ArmorDefinitions','Config','CurrencyConfig','GladiatorLevelDefinitions','PlayerDataSchema','ShieldDefinitions','WeaponDefinitions','SpecialMoveDefinitions','GameStates','WeaponBalanceConfig','WeaponSpecialDefinitions','WeaponAttackDefinitions','SpecialPracticeDefinitions') {
+foreach ($name in 'ArmorDefinitions','Config','CurrencyConfig','GladiatorLevelDefinitions','PlayerDataSchema','ShieldDefinitions','WeaponDefinitions','SpecialMoveDefinitions','GameStates','WeaponBalanceConfig','WeaponSpecialDefinitions','WeaponAttackDefinitions','SpecialPracticeDefinitions','ForgeDefinitions') {
     $harness += Wrap "Shared/$name" "src/shared/$name.luau"
 }
 foreach ($name in 'InventoryService','LoadoutRequestService','RateLimiter') {
@@ -133,7 +133,7 @@ check(Weapons.ById[Weapons.Starter].LevelRequired == 1 and Shields.ById[Shields.
 check(math.abs(Balance.pveFactor("BattleAxe") - (1 + 4 * Balance.PvELevelStep)) < 1e-9, "PvE damage unchanged by the new level numbers (tier 5)")
 
 ------------------------------------------------------------------ migration of older profiles
-check(Schema.Version == 8, "schema v8")
+check(Schema.Version == 10, "schema v10")
 local v6 = { version = 6, auraPoints = 3200, denarii = 540, ownedWeapons = "RustyGladius,BattleAxe", ownedShields = "WoodenBuckler,ThraexShield", ownedArmor = "RecruitLeather,ChampionArmor", equippedWeapon = "BattleAxe", equippedShield = "ThraexShield", equippedArmor = "ChampionArmor", preferences = { HudMode = "Minimal" }, stats = { zombieKills = 40 } }
 Inv.migrateProfile(v6)
 check(v6.auraPoints == 3200 and v6.denarii == 540, "v6 keeps Aura and Denarii")
@@ -145,7 +145,7 @@ Inv.migrateProfile(v6)
 check(v6.auraPoints == 3200 and v6.denarii == 540 and v6.earnings.aura == 0 and v6.earnings.since == since, "migration repeatable without double values")
 local v7 = { version = 7, specialAttempts = { ["RustyGladius:Gladius_SpecCleave"] = 12 } }
 Inv.migrateProfile(v7)
-check(v7.version == 8 and v7.specialAttempts["RustyGladius:Gladius_SpecCleave"] == 12 and v7.earnings.complete == false, "v7 keeps special practice and starts earnings tracking")
+check(v7.version == 10 and v7.specialAttempts["RustyGladius:Gladius_SpecCleave"] == 12 and v7.earnings.complete == false, "v7 keeps special practice and starts earnings tracking")
 local v4 = { version = 4, auraPoints = 300, ownedWeapons = "RustyGladius,LegionSword", ownedShields = "", ownedArmor = "" }
 Inv.migrateProfile(v4)
 check(v4.denarii == 300 and v4.auraPoints == 380 and v4.earnings.complete == false, "v4 -> v8 keeps the Denarii conversion")

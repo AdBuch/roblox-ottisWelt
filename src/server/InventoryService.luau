@@ -25,6 +25,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ArmorDefinitions = require(ReplicatedStorage.Shared.ArmorDefinitions)
 local Config = require(ReplicatedStorage.Shared.Config)
 local CurrencyConfig = require(ReplicatedStorage.Shared.CurrencyConfig)
+local ForgeDefinitions = require(ReplicatedStorage.Shared.ForgeDefinitions)
 local GladiatorLevelDefinitions = require(ReplicatedStorage.Shared.GladiatorLevelDefinitions)
 local PlayerDataSchema = require(ReplicatedStorage.Shared.PlayerDataSchema)
 local ShieldDefinitions = require(ReplicatedStorage.Shared.ShieldDefinitions)
@@ -76,6 +77,14 @@ export type Profile = {
 	session: Session,
 	lastBattle: LastBattle?,
 	activity: Activity,
+	-- v10 (ForgeDefinitions): every owned weapon as copies with stage, wear, design and smith job
+	weaponCopies: { [string]: { ForgeDefinitions.Copy } },
+	activeCopy: { [string]: string }, -- weapon id -> uid of the copy in use
+	nextCopy: number, -- uid counter
+	shieldDesigns: { [string]: string }, -- shield id -> paint option
+	forgeCredits: { [string]: number }, -- Robux-bought, not yet used: Skip, Design
+	receipts: { string }, -- processed Robux purchase ids (newest last)
+	forge: { [string]: number }?, -- v9 stages, folded into the copies on migration
 }
 
 local PROFILE_VERSION = PlayerDataSchema.Version
@@ -120,6 +129,12 @@ local function newProfile(): Profile
 		session = { aura = 0, denarii = 0, startedAt = os.time(), lastSeen = os.time() },
 		lastBattle = nil,
 		activity = { aura = 0, seconds = 0, rewards = 0 },
+		weaponCopies = { [WeaponDefinitions.Starter] = { { uid = WeaponDefinitions.Starter .. "-1", forge = 0, wear = 0, design = {} } } },
+		activeCopy = { [WeaponDefinitions.Starter] = WeaponDefinitions.Starter .. "-1" },
+		nextCopy = 2,
+		shieldDesigns = {},
+		forgeCredits = {},
+		receipts = {},
 	}
 end
 
@@ -159,6 +174,81 @@ local function spentOn(profile: Profile): number
 		total += ArmorDefinitions.ById[id].Price
 	end
 	return total
+end
+
+-- WEAPON COPIES (ForgeDefinitions). A job ends by itself once its time is over: `settle` applies
+-- the work when a copy is next looked at (so the result is the same in the Hub and the Arena).
+local function newCopy(profile: Profile, weaponId: string, stage: number): ForgeDefinitions.Copy
+	local copy: ForgeDefinitions.Copy = { uid = ("%s-%d"):format(weaponId, profile.nextCopy), forge = stage, wear = 0, design = {} }
+	profile.nextCopy += 1
+	local list = profile.weaponCopies[weaponId]
+	if not list then
+		list = {}
+		profile.weaponCopies[weaponId] = list
+		profile.activeCopy[weaponId] = copy.uid
+	end
+	table.insert(list, copy)
+	return copy
+end
+
+local function finishJob(copy: ForgeDefinitions.Copy)
+	local job = copy.job
+	if not job then
+		return
+	end
+	if job.kind == "Harden" then
+		copy.forge = math.min(ForgeDefinitions.MaxLevel, copy.forge + 1)
+	elseif job.kind == "Sharpen" then
+		copy.wear = math.max(0, copy.wear - ForgeDefinitions.SharpenAmount)
+	elseif job.kind == "Repair" then
+		copy.wear = 0
+	elseif job.kind == "Design" and job.slot and job.option then
+		copy.design[job.slot] = job.option
+	end -- "Copy": the new copy is simply ready
+	copy.job = nil
+end
+
+-- Completes every job whose time is over. Returns true when something changed.
+local function settle(profile: Profile, now: number): boolean
+	local any = false
+	for _, list in profile.weaponCopies do
+		for _, copy in list do
+			if copy.job and copy.job.untilTime <= now then
+				finishJob(copy)
+				any = true
+			end
+		end
+	end
+	return any
+end
+
+-- The copy of a weapon the player fights with: the chosen one if it is free, else any free one.
+local function usableCopy(profile: Profile, weaponId: string): ForgeDefinitions.Copy?
+	local list = profile.weaponCopies[weaponId]
+	if not list then
+		return nil
+	end
+	settle(profile, os.time())
+	local chosen = profile.activeCopy[weaponId]
+	local fallback: ForgeDefinitions.Copy? = nil
+	for _, copy in list do
+		if not copy.job then
+			if copy.uid == chosen then
+				return copy
+			end
+			fallback = fallback or copy
+		end
+	end
+	return fallback
+end
+
+local function findCopy(profile: Profile, weaponId: string, uid: string): ForgeDefinitions.Copy?
+	for _, copy in (profile.weaponCopies[weaponId] or {}) :: { ForgeDefinitions.Copy } do
+		if copy.uid == uid then
+			return copy
+		end
+	end
+	return nil
 end
 
 -- Brings any profile (new, legacy, or loaded from the DataStore) to the current version.
@@ -266,6 +356,100 @@ function InventoryService.migrateProfile(profile: Profile): Profile
 		seconds = if hasActivity then wholeNumber(activity.seconds) else 0,
 		rewards = if hasActivity then wholeNumber(activity.rewards) else 0,
 	}
+	-- v10: weapon copies. Saved copies are cleaned (unknown weapons dropped, stage and wear clamped,
+	-- broken jobs removed, uids unique); every owned weapon gets at least one copy, and the v9 stage
+	-- of a weapon (`forge`) goes onto its first copy, once (the v9 table is cleared in the same step).
+	local savedForge: any = profile.forge
+	local savedCopies: any = profile.weaponCopies
+	local copies: { [string]: { ForgeDefinitions.Copy } } = {}
+	local seen: { [string]: boolean } = {}
+	local counter = math.max(1, wholeNumber(profile.nextCopy))
+	local jobKinds = ForgeDefinitions.JobSeconds :: any
+	if typeof(savedCopies) == "table" then
+		for id, list in savedCopies do
+			if ForgeDefinitions.isSupported(id) and typeof(list) == "table" then
+				local clean: { ForgeDefinitions.Copy } = {}
+				for _, c in list do
+					if typeof(c) == "table" and typeof(c.uid) == "string" and not seen[c.uid] and #clean < ForgeDefinitions.MaxCopies then
+						seen[c.uid] = true
+						local design: { [string]: string } = {}
+						if typeof(c.design) == "table" then
+							for slotId, optionId in c.design do
+								local slot = ForgeDefinitions.designSlot(slotId)
+								if slot and ForgeDefinitions.designOption(slot, optionId) then
+									design[slotId] = optionId
+								end
+							end
+						end
+						local job: ForgeDefinitions.Job? = nil
+						local j = c.job
+						if typeof(j) == "table" and typeof(j.kind) == "string" and jobKinds[j.kind] and typeof(j.untilTime) == "number" then
+							job = { kind = j.kind :: any, untilTime = j.untilTime, slot = if typeof(j.slot) == "string" then j.slot else nil, option = if typeof(j.option) == "string" then j.option else nil }
+						end
+						table.insert(clean, { uid = c.uid, forge = ForgeDefinitions.clampLevel(c.forge), wear = ForgeDefinitions.clampWear(c.wear), design = design, job = job })
+					end
+				end
+				if #clean > 0 then
+					copies[id] = clean
+				end
+			end
+		end
+	end
+	for id in profile.ownedWeapons do
+		if not copies[id] then
+			local uid = id .. "-" .. counter
+			counter += 1
+			local stage = if typeof(savedForge) == "table" then ForgeDefinitions.clampLevel(savedForge[id]) else 0
+			copies[id] = { { uid = uid, forge = stage, wear = 0, design = {} } }
+		end
+	end
+	for id in copies do
+		profile.ownedWeapons[id] = true -- a copy is ownership
+	end
+	profile.weaponCopies = copies
+	profile.nextCopy = counter
+	profile.forge = nil
+	local active: { [string]: string } = {}
+	local savedActive: any = profile.activeCopy
+	for id, list in copies do
+		local chosen = if typeof(savedActive) == "table" then savedActive[id] else nil
+		local valid = false
+		for _, c in list do
+			if c.uid == chosen then
+				valid = true
+			end
+		end
+		active[id] = if valid then chosen else list[1].uid
+	end
+	profile.activeCopy = active
+	local shieldDesigns: { [string]: string } = {}
+	if typeof(profile.shieldDesigns) == "table" then
+		for id, option in profile.shieldDesigns :: any do
+			if ShieldDefinitions.ById[id] and ForgeDefinitions.designOption(ForgeDefinitions.ShieldSlot, option) then
+				shieldDesigns[id] = option
+			end
+		end
+	end
+	profile.shieldDesigns = shieldDesigns
+	local credits: { [string]: number } = {}
+	if typeof(profile.forgeCredits) == "table" then
+		for _, key in { "Skip", "Design" } do
+			credits[key] = wholeNumber((profile.forgeCredits :: any)[key])
+		end
+	end
+	profile.forgeCredits = credits
+	local receipts: { string } = {}
+	if typeof(profile.receipts) == "table" then
+		for _, r in profile.receipts :: any do
+			if typeof(r) == "string" then
+				table.insert(receipts, r)
+			end
+		end
+	end
+	while #receipts > ForgeDefinitions.MaxReceipts do
+		table.remove(receipts, 1)
+	end
+	profile.receipts = receipts
 	profile.version = math.max(PROFILE_VERSION, savedVersion)
 	return profile
 end
@@ -332,6 +516,12 @@ function InventoryService.publish(player: Player)
 	player:SetAttribute(Config.LastBattleDenariiAttribute, if last then last.denarii else nil)
 	player:SetAttribute(Config.LastBattleModeAttribute, if last then last.mode else nil)
 	player:SetAttribute(Config.AuraPerHourAttribute, InventoryService.auraPerActiveHour(player))
+	local levels: { [string]: number } = {}
+	for id in profile.weaponCopies do
+		local copy = usableCopy(profile, id)
+		levels[id] = if copy then copy.forge else 0
+	end
+	player:SetAttribute(ForgeDefinitions.Attribute, ForgeDefinitions.encode(levels))
 end
 
 -- Replaces the in-memory profile with a loaded one. Aura and Denarii earned before the load
@@ -368,6 +558,9 @@ function InventoryService.unlockAll(player: Player)
 	local profile = getProfile(player)
 	for id in WeaponDefinitions.ById do
 		profile.ownedWeapons[id] = true
+		if not profile.weaponCopies[id] then
+			newCopy(profile, id, 0)
+		end
 	end
 	for id in ShieldDefinitions.ById do
 		profile.ownedShields[id] = true
@@ -548,6 +741,9 @@ function InventoryService.purchase(player: Player, kind: ItemKind, id: string): 
 	end
 	profile.denarii -= price
 	ownedSet(profile, kind)[id] = true
+	if kind == "Weapon" and not profile.weaponCopies[id] then
+		newCopy(profile, id, 0) -- the first copy of a bought weapon
+	end
 	InventoryService.publish(player)
 	changed(player)
 	return true, ("Bought %s for %d Denarii"):format(name, price)
@@ -586,10 +782,12 @@ function InventoryService.equip(player: Player, kind: ItemKind, id: string): (bo
 	return true, message
 end
 
+-- The weapon in the hand: the equipped weapon while a copy of it is free (not at the smith),
+-- otherwise the starter gladius (a plain loaner if every starter copy is at the smith, too).
 function InventoryService.getEquippedWeapon(player: Player): WeaponDefinition
 	local profile = getProfile(player)
 	local def = WeaponDefinitions.ById[profile.equippedWeapon]
-	if def and profile.ownedWeapons[def.Id] then
+	if def and profile.ownedWeapons[def.Id] and usableCopy(profile, def.Id) then
 		return def
 	end
 	return WeaponDefinitions.ById[WeaponDefinitions.Starter]
@@ -679,6 +877,236 @@ function InventoryService.getPreference(player: Player, key: string): string?
 	return getProfile(player).preferences[key]
 end
 
+-- Hardening stage of the copy the player fights with (0 = none or no free copy).
+function InventoryService.forgeLevel(player: Player, weaponId: string): number
+	local copy = usableCopy(getProfile(player), weaponId)
+	return if copy then copy.forge else 0
+end
+
+-- The PvE factor of the copy in use (hardening x wear); 1 for a loaner or without a copy.
+function InventoryService.copyFactor(player: Player, weaponId: string): number
+	local copy = usableCopy(getProfile(player), weaponId)
+	return if copy then ForgeDefinitions.copyFactor(copy.forge, copy.wear) else 1
+end
+
+-- The copy in use (read-only for callers: designs for the weapon model, values for dialogs).
+function InventoryService.copyInUse(player: Player, weaponId: string): ForgeDefinitions.Copy?
+	return usableCopy(getProfile(player), weaponId)
+end
+
+-- Every copy of a weapon (jobs settled), oldest first.
+function InventoryService.copies(player: Player, weaponId: string): { ForgeDefinitions.Copy }
+	local profile = getProfile(player)
+	if settle(profile, os.time()) then
+		InventoryService.publish(player)
+		changed(player)
+	end
+	return profile.weaponCopies[weaponId] or {}
+end
+
+function InventoryService.activeCopyId(player: Player, weaponId: string): string?
+	return getProfile(player).activeCopy[weaponId]
+end
+
+-- Completes due jobs. Returns true when a job ended (callers refresh the equipment).
+function InventoryService.settleJobs(player: Player): boolean
+	local profile = getProfile(player)
+	if settle(profile, os.time()) then
+		InventoryService.publish(player)
+		changed(player)
+		return true
+	end
+	return false
+end
+
+-- PvE wear on the copy in use (hits on zombies and bosses only; PlayerCombatService). Publishes
+-- only when the copy passes into another wear step.
+function InventoryService.addWear(player: Player, weaponId: string, amount: number)
+	if amount ~= amount or amount <= 0 then
+		return
+	end
+	local copy = usableCopy(getProfile(player), weaponId)
+	if not copy then
+		return
+	end
+	local before = ForgeDefinitions.wearStep(copy.wear)
+	copy.wear = ForgeDefinitions.clampWear(copy.wear + amount)
+	if ForgeDefinitions.wearStep(copy.wear) ~= before then
+		InventoryService.publish(player)
+	end
+	changed(player)
+end
+
+-- Which copy to fight with (a free one of the player's own).
+function InventoryService.setActiveCopy(player: Player, weaponId: string, uid: string): (boolean, string)
+	local profile = getProfile(player)
+	local copy = findCopy(profile, weaponId, uid)
+	if not copy then
+		return false, "Dieses Exemplar gehört dir nicht."
+	end
+	settle(profile, os.time())
+	if copy.job then
+		return false, "Dieses Exemplar ist noch beim Schmied."
+	end
+	profile.activeCopy[weaponId] = uid
+	InventoryService.publish(player)
+	changed(player)
+	return true, "Exemplar gewählt."
+end
+
+-- A job at the smith as ONE operation: checks weapon, copy, ownership, that the copy is free,
+-- the job's precondition and the server price, then takes the Denarii and starts the job together
+-- (nothing yields in between, so nothing is charged twice or without the job). `Copy` makes a new
+-- copy (uid ignored). `Design` is paid with a Robux credit (TownServices), so its price here is 0.
+-- Returns (success, message, price, uid of the copy worked on).
+function InventoryService.startJob(player: Player, weaponId: string, uid: string?, kind: ForgeDefinitions.JobKind, slot: string?, option: string?): (boolean, string, number, string?)
+	if not ForgeDefinitions.isSupported(weaponId) then
+		return false, "Diese Waffe kennt der Schmied nicht.", 0, nil
+	end
+	local profile = getProfile(player)
+	local name = WeaponDefinitions.ById[weaponId].DisplayName
+	if not profile.ownedWeapons[weaponId] then
+		return false, name .. " gehört dir nicht.", 0, nil
+	end
+	local now = os.time()
+	settle(profile, now)
+	local seconds = (ForgeDefinitions.JobSeconds :: any)[kind]
+	if not seconds then
+		return false, "Diese Arbeit kennt der Schmied nicht.", 0, nil
+	end
+	local price = 0
+	local copy: ForgeDefinitions.Copy? = nil
+	if kind == "Copy" then
+		local owned = #(profile.weaponCopies[weaponId] or {})
+		if owned >= ForgeDefinitions.MaxCopies then
+			return false, ("Mehr als %d Exemplare nimmt der Schmied nicht an."):format(ForgeDefinitions.MaxCopies), 0, nil
+		end
+		price = ForgeDefinitions.copyPrice(weaponId, owned)
+	else
+		copy = if uid then findCopy(profile, weaponId, uid) else nil
+		if not copy then
+			return false, "Dieses Exemplar gehört dir nicht.", 0, nil
+		end
+		local c = copy :: ForgeDefinitions.Copy
+		if c.job then
+			return false, "Dieses Exemplar ist schon beim Schmied.", 0, nil
+		end
+		if kind == "Harden" then
+			if c.forge >= ForgeDefinitions.MaxLevel then
+				return false, name .. " ist bereits gehärtet.", 0, nil
+			end
+			price = ForgeDefinitions.price(weaponId, c.forge)
+		elseif kind == "Sharpen" or kind == "Repair" then
+			if c.wear <= 0 then
+				return false, name .. " ist in gutem Zustand.", 0, nil
+			end
+			price = if kind == "Sharpen" then ForgeDefinitions.sharpenPrice(weaponId) else ForgeDefinitions.repairPrice(weaponId, c.wear)
+		elseif kind == "Design" then
+			local designSlot = ForgeDefinitions.designSlot(slot)
+			if not designSlot or not ForgeDefinitions.designOption(designSlot, option) then
+				return false, "Dieses Design gibt es nicht.", 0, nil
+			end
+			if c.design[slot :: string] == option then
+				return false, "Dieses Exemplar hat das Design schon.", 0, nil
+			end
+		end
+	end
+	if profile.denarii < price then
+		return false, ("Zu wenig Denarii: %d nötig, du hast %d."):format(price, profile.denarii), price, nil
+	end
+	profile.denarii -= price
+	if kind == "Copy" then
+		copy = newCopy(profile, weaponId, 0)
+	end
+	local worked = copy :: ForgeDefinitions.Copy
+	worked.job = { kind = kind, untilTime = now + seconds, slot = slot, option = option }
+	InventoryService.publish(player)
+	changed(player)
+	local label = (ForgeDefinitions.JobLabels :: any)[kind]
+	return true, ("%s: %s, fertig in %d Minuten%s."):format(name, label, math.ceil(seconds / 60), if price > 0 then (" (%d Denarii)"):format(price) else ""), price, worked.uid
+end
+
+-- Finishes a running job now (a ForgeSkip purchase). Returns (success, message).
+function InventoryService.finishJobNow(player: Player, weaponId: string, uid: string): (boolean, string)
+	local profile = getProfile(player)
+	local copy = findCopy(profile, weaponId, uid)
+	if not copy or not copy.job then
+		return false, "Für dieses Exemplar läuft keine Arbeit."
+	end
+	finishJob(copy)
+	InventoryService.publish(player)
+	changed(player)
+	return true, "Der Schmied ist fertig."
+end
+
+function InventoryService.shieldDesign(player: Player, shieldId: string): string?
+	return getProfile(player).shieldDesigns[shieldId]
+end
+
+function InventoryService.setShieldDesign(player: Player, shieldId: string, option: string): (boolean, string)
+	local profile = getProfile(player)
+	if not profile.ownedShields[shieldId] then
+		return false, "Dieser Schild gehört dir nicht."
+	end
+	if not ForgeDefinitions.designOption(ForgeDefinitions.ShieldSlot, option) then
+		return false, "Diese Bemalung gibt es nicht."
+	end
+	profile.shieldDesigns[shieldId] = option
+	InventoryService.publish(player)
+	changed(player)
+	return true, "Schild bemalt."
+end
+
+-- Robux credits (bought, not yet used): "Skip" finishes a job, "Design" pays a design.
+function InventoryService.credits(player: Player, key: string): number
+	return getProfile(player).forgeCredits[key] or 0
+end
+
+function InventoryService.addCredit(player: Player, key: string, count: number?)
+	local profile = getProfile(player)
+	profile.forgeCredits[key] = (profile.forgeCredits[key] or 0) + (count or 1)
+	changed(player)
+end
+
+function InventoryService.useCredit(player: Player, key: string): boolean
+	local profile = getProfile(player)
+	if (profile.forgeCredits[key] or 0) < 1 then
+		return false
+	end
+	profile.forgeCredits[key] -= 1
+	changed(player)
+	return true
+end
+
+-- Processed Robux purchases: a receipt is granted at most once per profile.
+function InventoryService.hasReceipt(player: Player, purchaseId: string): boolean
+	return table.find(getProfile(player).receipts, purchaseId) ~= nil
+end
+
+function InventoryService.recordReceipt(player: Player, purchaseId: string)
+	local receipts = getProfile(player).receipts
+	table.insert(receipts, purchaseId)
+	while #receipts > ForgeDefinitions.MaxReceipts do
+		table.remove(receipts, 1)
+	end
+	changed(player)
+end
+
+-- Pays a fixed service price (e.g. the oracle) exactly once. Never makes the balance negative.
+function InventoryService.spendDenarii(player: Player, amount: number): boolean
+	if amount ~= amount or amount <= 0 or amount % 1 ~= 0 then
+		return false
+	end
+	local profile = getProfile(player)
+	if profile.denarii < amount then
+		return false
+	end
+	profile.denarii -= amount
+	InventoryService.publish(player)
+	changed(player)
+	return true
+end
+
 -- Plain table for the DataStore (only JSON-safe values).
 -- Day number in UTC; the daily allowance resets when it changes.
 local function currentDay(): number
@@ -762,6 +1190,22 @@ function InventoryService.serialize(player: Player): { [string]: any }
 		session = { aura = profile.session.aura, denarii = profile.session.denarii, startedAt = profile.session.startedAt, lastSeen = os.time() },
 		lastBattle = if profile.lastBattle then table.clone(profile.lastBattle) else nil,
 		activity = table.clone(profile.activity),
+		weaponCopies = (function()
+			local copy = {}
+			for id, list in profile.weaponCopies do
+				local out = {}
+				for _, c in list do
+					table.insert(out, { uid = c.uid, forge = c.forge, wear = c.wear, design = table.clone(c.design), job = if c.job then table.clone(c.job) else nil })
+				end
+				copy[id] = out
+			end
+			return copy
+		end)(),
+		activeCopy = table.clone(profile.activeCopy),
+		nextCopy = profile.nextCopy,
+		shieldDesigns = table.clone(profile.shieldDesigns),
+		forgeCredits = table.clone(profile.forgeCredits),
+		receipts = table.clone(profile.receipts),
 	}
 end
 

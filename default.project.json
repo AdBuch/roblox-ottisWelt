@@ -31,6 +31,12 @@
         },
         "MatchEvent": {
           "$className": "RemoteEvent"
+        },
+        "RomeRequest": {
+          "$className": "RemoteFunction"
+        },
+        "RomeEvent": {
+          "$className": "RemoteEvent"
         }
       }
     },
