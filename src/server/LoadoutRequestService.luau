@@ -35,6 +35,7 @@ local function loadout(player: Player): { [string]: string }
 		Weapon = InventoryService.getEquippedWeapon(player).Id,
 		Shield = tostring(player:GetAttribute(Config.EquippedShieldAttribute) or ""),
 		Armor = InventoryService.getEquippedArmor(player).Id,
+		Helmet = InventoryService.getEquippedHelmet(player).Id,
 	}
 end
 
@@ -71,7 +72,7 @@ function LoadoutRequestService.handle(player: Player, action: unknown, kind: unk
 	if not InventoryService.isItem(kind, id) then
 		return refuse("INVALID", "Unbekannter Gegenstand")
 	end
-	local itemKind: InventoryService.ItemKind = if kind == "Weapon" then "Weapon" elseif kind == "Shield" then "Shield" else "Armor"
+	local itemKind: InventoryService.ItemKind = if kind == "Weapon" then "Weapon" elseif kind == "Shield" then "Shield" elseif kind == "Helmet" then "Helmet" else "Armor"
 	local itemId = id :: string
 	local code, message = LoadoutRequestService.lockReason(player)
 	if code then

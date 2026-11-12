@@ -29,9 +29,11 @@ type Names = {
 	equippedWeapon: string,
 	equippedShield: string,
 	equippedArmor: string,
+	equippedHelmet: string,
 	ownedWeapons: string,
 	ownedShields: string,
 	ownedArmor: string,
+	ownedHelmets: string,
 	dataStatus: string,
 }
 
@@ -181,8 +183,8 @@ function ShopController.start(names: Names, group: GroupFn)
 	local function itemInfo(item: Instance): (string, string, boolean, boolean, number, number)
 		local kind = tostring(item:GetAttribute("ItemKind"))
 		local id = tostring(item:GetAttribute("ItemId"))
-		local ownedName = if kind == "Weapon" then names.ownedWeapons elseif kind == "Shield" then names.ownedShields else names.ownedArmor
-		local equippedName = if kind == "Weapon" then names.equippedWeapon elseif kind == "Shield" then names.equippedShield else names.equippedArmor
+		local ownedName = if kind == "Weapon" then names.ownedWeapons elseif kind == "Shield" then names.ownedShields elseif kind == "Helmet" then names.ownedHelmets else names.ownedArmor
+		local equippedName = if kind == "Weapon" then names.equippedWeapon elseif kind == "Shield" then names.equippedShield elseif kind == "Helmet" then names.equippedHelmet else names.equippedArmor
 		local owned = splitSet(player:GetAttribute(ownedName))[id] == true
 		local equipped = player:GetAttribute(equippedName) == id
 		return kind, id, owned, equipped, tonumber(item:GetAttribute("Price")) or 0, tonumber(item:GetAttribute("LevelRequired")) or 1
@@ -322,8 +324,8 @@ function ShopController.start(names: Names, group: GroupFn)
 		task.defer(refreshItem, item) -- wait for descendants to replicate
 	end)
 	for _, attribute in {
-		names.aura, names.denarii, names.equippedWeapon, names.equippedShield, names.equippedArmor,
-		names.ownedWeapons, names.ownedShields, names.ownedArmor, names.dataStatus,
+		names.aura, names.denarii, names.equippedWeapon, names.equippedShield, names.equippedArmor, names.equippedHelmet,
+		names.ownedWeapons, names.ownedShields, names.ownedArmor, names.ownedHelmets, names.dataStatus,
 	} do
 		player:GetAttributeChangedSignal(attribute):Connect(refreshAll)
 	end

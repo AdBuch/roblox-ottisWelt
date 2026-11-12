@@ -40,7 +40,6 @@ export type LobbyLayout = {
 	spawnCFrame: CFrame, -- safe return / respawn position
 	arrivalSpawn: SpawnLocation, -- first character on a direct Hub join
 	respawnSpawn: SpawnLocation, -- later characters and Arena returns
-	armory: ArmoryLayout,
 	pads: { PadLayout },
 	bossBoard: BasePart,
 	bossBoards: { BasePart },

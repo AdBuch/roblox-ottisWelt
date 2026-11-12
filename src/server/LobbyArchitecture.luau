@@ -28,11 +28,13 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
 local Layout = require(ReplicatedStorage.Shared.ColosseumLayout)
+-- The training yard lies on the Kolosseums-Vorplatz outside the west arch (RomeLayout.Forecourt:
+-- x -214..-160, z -45..45, on the upper terrace at y 1), between the Colosseum and the village.
+local FORECOURT = { x = -187, y = 1, width = 54, depth = 90 }
 local Config = require(ReplicatedStorage.Shared.Config)
 local PadDefinitions = require(ReplicatedStorage.Shared.LobbyPadDefinitions)
 local Statue = require(script.Parent.LobbyStatue)
 local Mosaics = require(script.Parent.LobbyMosaics)
-local Battles = require(script.Parent.ShopBattleMosaics)
 local Arena = require(script.Parent.Arena)
 
 local Architecture = {}
@@ -262,6 +264,17 @@ local function sandPad(buildPad: any, parent: Instance, def: any, deg: number, i
 	return buildPad(parent, def, center, size, board, if solo then -1 else 1)
 end
 
+-- A gathering point (mosaic + board) in a hall bay under the stands, at angle `deg`, `offset`
+-- outward from the podium: the same frame rules as sandPad, but on the hall floor where the shops were.
+local function bayPad(buildPad: any, parent: Instance, def: any, deg: number, offset: number, size: Vector2): any
+	local center = ring(deg, offset) * CFrame.Angles(0, math.pi, 0)
+	local board = center * CFrame.new(0, 7, -(size.Y / 2 + 2.3)) * CFrame.Angles(0, math.pi, 0)
+	for _, x in { -7.7, 7.7 } do
+		part(parent, "PadBoardPost", board * CFrame.new(x, -1.75, 0.45), Vector3.new(0.5, 10.5, 0.5), WOOD, true)
+	end
+	return buildPad(parent, def, center, size, board, 1)
+end
+
 -- Cages under the stands. A cage stands under tier 1, its back against the podium wall and its
 -- bars towards the hall; a stable (for the mounted praetorian) reaches on under tier 2, where
 -- there is room for horse and rider. Cages keep clear of the gate way and of the pier rays.
@@ -367,6 +380,8 @@ function Architecture.build(buildPad: any): any
 	local pads, menus, liveDoors, liveBoards, matchActions = {}, {}, {}, {}, {}
 	local bossHosts = {}
 	local soloPads: { [string]: any } = {}
+	local coopDefs: { [string]: any } = {}
+	local teamDefs: { [string]: any } = {}
 	local hallFrames: { [string]: CFrame } = {}
 	local shopFrames: { [string]: CFrame } = {}
 	local archives, plaques, archiveIds = {}, {}, {}
@@ -379,7 +394,7 @@ function Architecture.build(buildPad: any): any
 		local g = hero.angle
 		local gate = Layout.frame(math.rad(g), 0, FLOOR)
 		local approach = model(folder, hero.id .. "ArenaApproach")
-		sign(approach, "ArenaRampSign", gate * CFrame.new(0, 10.5, 8) * CFrame.Angles(0, math.pi, 0), "THE ARENA", "Training · solo start · groups gather on the sand", hero.color, Vector2.new(16, 3.5))
+		sign(approach, "ArenaRampSign", gate * CFrame.new(0, 10.5, 8) * CFrame.Angles(0, math.pi, 0), "THE ARENA", "Solo start on the sand · groups gather in the bays", hero.color, Vector2.new(16, 3.5))
 		local length = if hero.id == "Otti" then Architecture.Anchors.ArrivalOffset - 9 else 36
 		local guide = part(approach, "ArenaGuide", gate * CFrame.new(0, 0.03, length / 2), Vector3.new(1.2, 0.06, length + 18), GOLD, true)
 		guide.Material = Enum.Material.Neon
@@ -388,52 +403,24 @@ function Architecture.build(buildPad: any): any
 		soloPads[hero.id] = solo
 		table.insert(pads, solo)
 		local coopId = if hero.id == "Otti" then "ZombieCoop" else hero.id .. "ZombieCoop"
-		table.insert(pads, sandPad(buildPad, arena, coopDefinition(coopId, hero.emblem), along(g, -16, -24), 16, Vector2.new(22, 14), false))
+		coopDefs[hero.id] = coopDefinition(coopId, hero.emblem) -- gathering point: placed in the hall's bay below
 		if hero.id ~= "Otti" then
 			local def = table.clone(assert(PadDefinitions.get(if hero.id == "Schili" then "TeamSchili" else "TeamKrokero"), "team pad missing"))
 			def.Actions = { { Id = "ConfirmTeam", Label = "READY TEAM" }, { Id = "Ready", Label = "READY" }, { Id = "LeaveGroup", Label = "LEAVE" } }
-			table.insert(pads, sandPad(buildPad, arena, def, along(g, -16, 24), 16, Vector2.new(22, 14), false))
+			teamDefs[hero.id] = def -- team gathering point: placed in the hall's bay below
 		end
 	end
 	-- Training: six straw dummies in a ring around the middle, each looking outward
 	local training = {}
 	for k = 0, 5 do
-		table.insert(training, CFrame.new(0, FLOOR, 0) * CFrame.Angles(0, math.rad(30 + 60 * k), 0) * CFrame.new(0, 0, -16))
+		table.insert(training, CFrame.new(FORECOURT.x, FORECOURT.y, 0) * CFrame.Angles(0, math.rad(30 + 60 * k), 0) * CFrame.new(0, 0, -16))
 	end
-	part(arena, "TrainingRing", CFrame.new(0, FLOOR + 0.03, 0), Vector3.new(44, 0.06, 44), YARD, true).Material = Enum.Material.Sand
-	part(arena, "ComboTrainingBoard", sand(along(90, -5, 24), 5, 6), Vector3.new(12, 9, 0.5), WOOD, true)
-	sign(arena, "TrainingEntrance", sand(along(90, -5, 24), 5.4, 12.4), "TRAINING", "Straw dummies in the middle · practise attacks, blocks and specials · no rewards", nil, Vector2.new(14, 3))
-	local trainingCFrame = CFrame.new(0, FLOOR + 8, 0)
-	local trainingSize = Vector3.new(2 * Layout.SemiAxisX, 18, 2 * Layout.SemiAxisZ)
+	part(folder, "TrainingRing", CFrame.new(FORECOURT.x, FORECOURT.y + 0.03, 0), Vector3.new(44, 0.06, 44), YARD, true).Material = Enum.Material.Sand
+	part(folder, "ComboTrainingBoard", CFrame.new(FORECOURT.x, FORECOURT.y + 4.5, 36), Vector3.new(12, 9, 0.5), WOOD, true)
+	sign(folder, "TrainingEntrance", CFrame.new(FORECOURT.x, FORECOURT.y + 12, 36) * CFrame.Angles(0, math.pi, 0), "TRAINING", "Straw dummies on the Forecourt · practise attacks, blocks and specials · no rewards", nil, Vector2.new(14, 3))
+	local trainingCFrame = CFrame.new(FORECOURT.x, FORECOURT.y + 8, 0)
+	local trainingSize = Vector3.new(FORECOURT.width, 18, FORECOURT.depth)
 
-	-- One shop bay under the stands: an inner row (offset 26) and an outer row (offset 44) of
-	-- displays face each other across a rug. `faceUp`: the sign reads from increasing angles.
-	local INNER, OUTER = 26, 44
-	local function shopBay(hero: any, from: number, to: number, theme: string, second: string, title: string, goods: string, faceUp: boolean)
-		local frame = ring((from + to) / 2, 35)
-		shopFrames[hero.id] = frame
-		local arc = (ring(from, 35).Position - ring(to, 35).Position).Magnitude
-		local room = model(folder, hero.id .. "Shop")
-		part(room, "ShopRug", frame * CFrame.new(0, 0.04, 0), Vector3.new(arc, 0.08, 12), RUG, true).Material = Enum.Material.Fabric
-		sign(room, "ShopSign", frame * CFrame.new(0, 13, 0) * CFrame.Angles(0, if faceUp then math.pi / 2 else -math.pi / 2, 0), title, goods, hero.color, Vector2.new(14, 3.4))
-		Battles.build(room, frame, theme, hero.emblem, second, { floor = frame * CFrame.new(0, 0.11, 0) * CFrame.Angles(math.pi / 2, 0, 0) * CFrame.Angles(0, 0, math.pi), floorSize = Vector2.new(math.min(arc - 4, 24), 10), walls = false })
-		for _, at in { from + 1, to - 1 } do
-			brazier(room, ring(at, 35))
-		end
-		zone(frame * CFrame.new(0, 10, 0), Vector3.new(arc + 4, 26, OUTER - INNER + 8), true)
-	end
-	local armory = {
-		blades = chord(112, 121.5, INNER, 1),
-		ranged = chord(306, 312, OUTER, -1),
-		heavy = chord(224, 238, OUTER, -1),
-		shields = {
-			Light = chord(303, 315, INNER, 1),
-			Balanced = chord(123.5, 130.5, INNER, 1),
-			Heavy = chord(225, 237, INNER, 1),
-		},
-		armor = chord(112, 130, OUTER, -1),
-		floorY = FLOOR,
-	}
 
 	---------------------------------------------------------------- OTTI · the main lobby
 	local otti = HEROES[1]
@@ -458,7 +445,7 @@ function Architecture.build(buildPad: any): any
 	for _, x in { -26, 26 } do
 		banner(hall, ring(90, 52) * CFrame.new(x, 30, 0), otti.color)
 	end
-	sign(hall, "HallName", ring(90, 70, 20) * CFrame.Angles(0, math.pi, 0), "OTTI'S HALL", "The start · arena gate · blades, shields and armor · zombie cages", otti.color, Vector2.new(24, 4))
+	sign(hall, "HallName", ring(90, 70, 20) * CFrame.Angles(0, math.pi, 0), "OTTI'S HALL", "The start · arena gate · zombie cages · the shops are in Rome", otti.color, Vector2.new(24, 4))
 	sign(hall, "ArenaSign", ring(90, 30, 15) * CFrame.Angles(0, math.pi, 0), "THE ARENA", "Straight ahead · through the open gate", GOLD, Vector2.new(16, 3.6))
 	-- The notice walls near the gate face the arrival: teams (stage 3) to the west, all modes,
 	-- bosses and live battles (stage 4) to the east
@@ -483,15 +470,15 @@ function Architecture.build(buildPad: any): any
 	-- Directions on posts beside the way: west to Otti's shop, Kroko's hall and Rome, east to
 	-- Schili's hall; the training and the groups are on the sand
 	revealStage = 1
-	signpost(hall, (ring(90, 44) * CFrame.new(-27, 0, 0)).Position, axis(44), "OTTI'S SHOP", "Blades · balanced shields · armor · west", otti.color)
+	signpost(hall, (ring(90, 44) * CFrame.new(-27, 0, 0)).Position, axis(44), "ROMA · SHOPS", "Weapons, shields, armor and helmets · through the west arch", otti.color)
 	revealStage = 3
-	signpost(hall, (ring(90, 44) * CFrame.new(27, 0, 0)).Position, axis(44), "TRAINING & GROUPS", "On the sand · through the gate", otti.color)
+	signpost(hall, (ring(90, 44) * CFrame.new(27, 0, 0)).Position, axis(44), "GROUPS", "In the bays under the stands · the team gathers there", otti.color)
 	revealStage = 2
-	signpost(hall, (ring(90, 33) * CFrame.new(-27, 0, 0)).Position, axis(33), "KROKO HALL · ROMA", "Heavy weapons and shields · the west arch leads to Rome", otti.color)
-	signpost(hall, (ring(90, 33) * CFrame.new(27, 0, 0)).Position, axis(33), "SCHILI HALL", "Ranged weapons · light shields · east", otti.color)
+	signpost(hall, (ring(90, 33) * CFrame.new(-27, 0, 0)).Position, axis(33), "KROKO HALL · ROMA", "Legionaries · the west arch leads to Rome and the training yard", otti.color)
+	signpost(hall, (ring(90, 33) * CFrame.new(27, 0, 0)).Position, axis(33), "SCHILI HALL", "Ninjas · east", otti.color)
 	revealStage = nil
 	cages(hall, otti, archives, plaques, archiveIds)
-	shopBay(otti, 112, 131, "Weapons", "Krokero", "OTTI'S SHOP", "Blades · balanced shields · armor", false)
+	table.insert(pads, bayPad(buildPad, hall, coopDefs.Otti, 121.5, 35, Vector2.new(22, 14)))
 
 	---------------------------------------------------------------- SCHILI and KROKO
 	for index = 2, 3 do
@@ -507,9 +494,11 @@ function Architecture.build(buildPad: any): any
 		monument(small, facing(monumentPosition, ring(g, 40).Position), hero)
 		-- the hall's shop bay beyond the monument, then the boards on a notice wall facing the way
 		if kroko then
-			shopBay(hero, 224, 238, "Shields", "Otti", "KROKO'S SHOP", "Heavy weapons · heavy shields", false)
+			table.insert(pads, bayPad(buildPad, small, coopDefs[hero.id], 227, 35, Vector2.new(12, 12)))
+				table.insert(pads, bayPad(buildPad, small, teamDefs[hero.id], 235, 35, Vector2.new(12, 12)))
 		else
-			shopBay(hero, 302, 316, "Armor", "Otti", "SCHILI'S SHOP", "Ranged weapons · light shields", true)
+			table.insert(pads, bayPad(buildPad, small, coopDefs[hero.id], 305, 35, Vector2.new(12, 12)))
+				table.insert(pads, bayPad(buildPad, small, teamDefs[hero.id], 313, 35, Vector2.new(12, 12)))
 		end
 		local boardsAt = ring(g + s * 33, 38).Position
 		local wall = noticeWall(small, boardsAt, ring(g + s * 10, 34).Position, 16, 13)
@@ -518,7 +507,7 @@ function Architecture.build(buildPad: any): any
 		local liveHost, count = sign(small, "WatchLive", wall * CFrame.new(0, 12, 0), "LIVE BATTLES", "No live battles", hero.color, Vector2.new(14, 4))
 		table.insert(liveDoors, liveHost)
 		table.insert(liveBoards, count)
-		sign(small, "HallName", ring(g, 62, 18) * CFrame.Angles(0, math.pi, 0), hero.name .. " HALL", if kroko then "Legionaries · heavy weapons and shields" else "Ninjas · ranged weapons and light shields", hero.color, Vector2.new(24, 4))
+		sign(small, "HallName", ring(g, 62, 18) * CFrame.Angles(0, math.pi, 0), hero.name .. " HALL", if kroko then "Legionaries · the Kroko cages" else "Ninjas · the Schili cages", hero.color, Vector2.new(24, 4))
 		for _, deg in { g - 6, g + 6 } do
 			brazier(small, ring(deg, 50))
 			banner(small, ring(deg, 46, 26), hero.color)
@@ -530,7 +519,7 @@ function Architecture.build(buildPad: any): any
 	---------------------------------------------------------------- the way to Rome (west arch)
 	local roma = model(folder, "WayToRome")
 	local exitDeg = Architecture.Anchors.CityExitAngle
-	sign(roma, "RomaSign", ring(exitDeg, 80, 14), "ROMA · FORUM", "Out through the west arch · smithy · temple · harbour", GOLD, Vector2.new(18, 4))
+	sign(roma, "RomaSign", ring(exitDeg, 80, 14), "ROMA · FORUM", "Out through the west arch · training · smithy · shops · temple · harbour", GOLD, Vector2.new(18, 4))
 	signpost(roma, ring(196, 46).Position, ring(185, 46).Position, "ROMA →", "The west arch · the city", GOLD)
 	for deg = exitDeg - 4, exitDeg + 4, 8 do
 		brazier(roma, ring(deg, 82))
@@ -545,9 +534,9 @@ function Architecture.build(buildPad: any): any
 	-- shop, Schili's hall, the training ring on the sand and the boards near the gate
 	local introTargets = {
 		soloPads.Otti.cframe.Position,
-		ring(112, 35).Position,
+		Vector3.new(-272, -2, -20), -- the Handwerksgasse: the weapon shop beside the smithy in Rome
 		hallFrames.Schili.Position,
-		Vector3.new(0, FLOOR, 0),
+		Vector3.new(FORECOURT.x, FORECOURT.y, 0),
 		(ring(90, 24) * CFrame.new(19, 0, 0)).Position,
 	}
 	Lighting.Ambient = Color3.fromRGB(96, 88, 78)
@@ -563,8 +552,7 @@ function Architecture.build(buildPad: any): any
 		spawnCFrame = respawn.CFrame,
 		arrivalSpawn = arrival,
 		respawnSpawn = respawn,
-		armory = armory,
-		pads = pads,
+				pads = pads,
 		arenaGate = soloPads.Otti.ring,
 		arenaTriggers = {},
 		introTargets = introTargets,
@@ -595,6 +583,10 @@ function Architecture.isInside(p: Vector3): boolean
 		end
 	end
 	return Arena.isInside(p) or Arena.isOnGrounds(p)
+end
+-- Rome's shops (ArmoryShops) register their rooms here, so the displays accept purchases there.
+function Architecture.addArmoryVolume(cf: CFrame, size: Vector3)
+	table.insert(shops, { cf = cf, size = size })
 end
 function Architecture.isInArmory(p: Vector3): boolean
 	for _, v in shops do

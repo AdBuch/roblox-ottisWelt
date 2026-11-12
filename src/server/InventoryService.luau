@@ -23,6 +23,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ArmorDefinitions = require(ReplicatedStorage.Shared.ArmorDefinitions)
+local HelmetDefinitions = require(ReplicatedStorage.Shared.HelmetDefinitions)
 local Config = require(ReplicatedStorage.Shared.Config)
 local CurrencyConfig = require(ReplicatedStorage.Shared.CurrencyConfig)
 local ForgeDefinitions = require(ReplicatedStorage.Shared.ForgeDefinitions)
@@ -37,8 +38,9 @@ local SpecialPracticeDefinitions = require(ReplicatedStorage.Shared.SpecialPract
 type WeaponDefinition = WeaponDefinitions.WeaponDefinition
 type ShieldDefinition = ShieldDefinitions.ShieldDefinition
 type ArmorDefinition = ArmorDefinitions.ArmorDefinition
+type HelmetDefinition = HelmetDefinitions.HelmetDefinition
 
-export type ItemKind = "Weapon" | "Shield" | "Armor"
+export type ItemKind = "Weapon" | "Shield" | "Armor" | "Helmet"
 
 -- Persistent earnings counters (only ever increased by server rewards; spending never touches them).
 export type Earnings = {
@@ -65,9 +67,11 @@ export type Profile = {
 	ownedWeapons: { [string]: boolean },
 	ownedShields: { [string]: boolean },
 	ownedArmor: { [string]: boolean },
+	ownedHelmets: { [string]: boolean },
 	equippedWeapon: string,
 	equippedShield: string,
 	equippedArmor: string,
+	equippedHelmet: string,
 	preferences: { [string]: string },
 	stats: { [string]: number },
 	specialAttempts: { [string]: number }, -- practice steps per weapon:move (SpecialPracticeDefinitions)
@@ -118,9 +122,11 @@ local function newProfile(): Profile
 		ownedWeapons = { [WeaponDefinitions.Starter] = true },
 		ownedShields = { [ShieldDefinitions.Starter] = true },
 		ownedArmor = { [ArmorDefinitions.Starter] = true },
+		ownedHelmets = { [HelmetDefinitions.Starter] = true },
 		equippedWeapon = WeaponDefinitions.Starter,
 		equippedShield = ShieldDefinitions.Starter,
 		equippedArmor = ArmorDefinitions.Starter,
+		equippedHelmet = HelmetDefinitions.Starter,
 		preferences = {},
 		stats = {},
 		specialAttempts = {},
@@ -263,6 +269,8 @@ function InventoryService.migrateProfile(profile: Profile): Profile
 	profile.ownedWeapons = cleanSet(profile.ownedWeapons, WeaponDefinitions.ById)
 	profile.ownedShields = cleanSet(profile.ownedShields, ShieldDefinitions.ById)
 	profile.ownedArmor = cleanSet(profile.ownedArmor, ArmorDefinitions.ById)
+	profile.ownedHelmets = cleanSet(if typeof(profile.ownedHelmets) == "table" then profile.ownedHelmets else {}, HelmetDefinitions.ById)
+	profile.ownedHelmets[HelmetDefinitions.Starter] = true
 	profile.ownedWeapons[WeaponDefinitions.Starter] = true
 	profile.ownedShields[ShieldDefinitions.Starter] = true
 	profile.ownedArmor[ArmorDefinitions.Starter] = true
@@ -281,6 +289,9 @@ function InventoryService.migrateProfile(profile: Profile): Profile
 	end
 	if typeof(profile.equippedArmor) ~= "string" or not profile.ownedArmor[profile.equippedArmor] then
 		profile.equippedArmor = ArmorDefinitions.Starter
+	end
+	if typeof(profile.equippedHelmet) ~= "string" or not profile.ownedHelmets[profile.equippedHelmet] then
+		profile.equippedHelmet = HelmetDefinitions.Starter
 	end
 	local preferences: { [string]: string } = {}
 	if typeof(profile.preferences) == "table" then
@@ -498,6 +509,8 @@ function InventoryService.publish(player: Player)
 	player:SetAttribute(Config.OwnedWeaponsAttribute, joinOwned(profile.ownedWeapons))
 	player:SetAttribute(Config.OwnedShieldsAttribute, joinOwned(profile.ownedShields))
 	player:SetAttribute(Config.OwnedArmorAttribute, joinOwned(profile.ownedArmor))
+	player:SetAttribute(Config.EquippedHelmetAttribute, profile.equippedHelmet)
+	player:SetAttribute(Config.OwnedHelmetsAttribute, joinOwned(profile.ownedHelmets))
 	for key in practiceKeys do
 		player:SetAttribute(SpecialPracticeDefinitions.attribute(key), profile.specialAttempts[key] or 0)
 	end
@@ -567,6 +580,9 @@ function InventoryService.unlockAll(player: Player)
 	end
 	for id in ArmorDefinitions.ById do
 		profile.ownedArmor[id] = true
+	end
+	for id in HelmetDefinitions.ById do
+		profile.ownedHelmets[id] = true
 	end
 	local levels = GladiatorLevelDefinitions.Levels
 	profile.auraPoints = math.max(profile.auraPoints, levels[#levels].Aura)
@@ -666,7 +682,7 @@ function InventoryService.getEarnings(player: Player): Earnings
 end
 
 local function ownedSet(profile: Profile, kind: ItemKind): { [string]: boolean }
-	return if kind == "Weapon" then profile.ownedWeapons elseif kind == "Shield" then profile.ownedShields else profile.ownedArmor
+	return if kind == "Weapon" then profile.ownedWeapons elseif kind == "Shield" then profile.ownedShields elseif kind == "Helmet" then profile.ownedHelmets else profile.ownedArmor
 end
 
 -- (display name, price in Denarii, gladiator level required) of an item, or nil.
@@ -675,6 +691,7 @@ local function lookup(kind: ItemKind, id: string): (string?, number, number)
 		then WeaponDefinitions.ById[id] :: any
 		elseif kind == "Shield" then ShieldDefinitions.ById[id] :: any
 		elseif kind == "Armor" then ArmorDefinitions.ById[id] :: any
+		elseif kind == "Helmet" then HelmetDefinitions.ById[id] :: any
 		else nil
 	if def then
 		return def.DisplayName, def.Price, def.LevelRequired
@@ -683,7 +700,7 @@ local function lookup(kind: ItemKind, id: string): (string?, number, number)
 end
 
 function InventoryService.isItem(kind: unknown, id: unknown): boolean
-	if typeof(id) ~= "string" or (kind ~= "Weapon" and kind ~= "Shield" and kind ~= "Armor") then
+	if typeof(id) ~= "string" or (kind ~= "Weapon" and kind ~= "Shield" and kind ~= "Armor" and kind ~= "Helmet") then
 		return false
 	end
 	return (lookup(kind :: ItemKind, id)) ~= nil
@@ -717,7 +734,7 @@ end
 
 function InventoryService.isEquipped(player: Player, kind: ItemKind, id: string): boolean
 	local profile = getProfile(player)
-	local equipped = if kind == "Weapon" then profile.equippedWeapon elseif kind == "Shield" then profile.equippedShield else profile.equippedArmor
+	local equipped = if kind == "Weapon" then profile.equippedWeapon elseif kind == "Shield" then profile.equippedShield elseif kind == "Helmet" then profile.equippedHelmet else profile.equippedArmor
 	return equipped == id
 end
 
@@ -761,6 +778,12 @@ function InventoryService.equip(player: Player, kind: ItemKind, id: string): (bo
 		return false, name .. " is not owned yet"
 	end
 	local profile = getProfile(player)
+	if kind == "Helmet" then
+		profile.equippedHelmet = id
+		InventoryService.publish(player)
+		changed(player)
+		return true, name .. " equipped"
+	end
 	local message = name .. " equipped"
 	if kind == "Weapon" then
 		profile.equippedWeapon = id
@@ -804,6 +827,16 @@ function InventoryService.getActiveShield(player: Player): ShieldDefinition?
 		return def
 	end
 	return ShieldDefinitions.ById[ShieldDefinitions.Starter]
+end
+
+-- The helmet worn (always one: "NoHelmet" is free and can't be lost).
+function InventoryService.getEquippedHelmet(player: Player): HelmetDefinition
+	local profile = getProfile(player)
+	local def = HelmetDefinitions.ById[profile.equippedHelmet]
+	if def and profile.ownedHelmets[def.Id] then
+		return def
+	end
+	return HelmetDefinitions.ById[HelmetDefinitions.Starter]
 end
 
 -- The armor worn (always one: Recruit Leather is free and can't be lost).
@@ -1172,6 +1205,8 @@ function InventoryService.serialize(player: Player): { [string]: any }
 		ownedWeapons = joinOwned(profile.ownedWeapons),
 		ownedShields = joinOwned(profile.ownedShields),
 		ownedArmor = joinOwned(profile.ownedArmor),
+			ownedHelmets = joinOwned(profile.ownedHelmets),
+			equippedHelmet = profile.equippedHelmet,
 		equippedWeapon = profile.equippedWeapon,
 		equippedShield = profile.equippedShield,
 		equippedArmor = profile.equippedArmor,

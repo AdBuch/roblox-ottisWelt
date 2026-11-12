@@ -256,3 +256,21 @@ Später: Questfiguren/Anschlagtafel, Hausinnenräume, Trireme und Reisen, geheim
   0,25 unter Gehsteighöhe, die Begehungsplanke folgt; Randsteinrampen überlappen den Gehsteig 0,1.
 - Schmiede-Ausbau wie in Abschnitt 6.
 - `ContentId rbxassetid://203785492` im Log stammt nicht aus dem Projekt (weder Quellen noch Build).
+
+## 7. Läden in Rom und Trainingsplatz
+
+- **Läden (Rom, offene Innenräume, `src/hub/server/Rome/ArmoryShops.luau`):** Waffenladen neben der
+  Schmiede (BN1, Waffen), Helmhändler gegenüber (BS1, Helme), Rüstungsladen neben dem Helmhändler
+  (BS1, Rüstungen), Schildhaus (BS1, Schilde). Je ein Händler-NPC hinter dem Tresen. Die Taverne
+  bleibt, wo sie war. Die Gladiatorenwaffenkammer in der Arena ist leer.
+- **Helme (`src/shared/HelmetDefinitions.luau`):** eigener Ausrüstungs-Slot neben der Rüstung, Profil v11
+  (`ownedHelmets`, `equippedHelmet`). „Kein Helm“ ist kostenlos. Helme bringen etwas Schadensminderung
+  zusätzlich zur Rüstung (`PlayerCombatService.armorReduction`) und werden am Kopf angebracht
+  (`EquipmentModels.buildHelmet`).
+- **Training:** auf dem Kolosseums-Vorplatz vor dem Westbogen (`LobbyArchitecture` FORECOURT), nicht mehr
+  auf dem Sand. Die Kampfregel „nur Strohpuppen im Trainingsbereich“ gilt dort.
+- **Gathering-Punkte:** Co-op- und Team-Mosaike liegen jetzt in den Hallen-Buchten unter den Tribünen,
+  wo früher die Laden-Buchten waren. Der Solo-Start bleibt am Tor auf dem Sand.
+- **Noch nicht geprüft:** Ohne Roblox Studio und ohne Luau-Analyse sind nur die Rojo-Builds geprüft
+  (beide Places bauen). Platzierung von Ständern, Kollision und Sicht in den Läden müssen in Studio
+  angesehen werden.

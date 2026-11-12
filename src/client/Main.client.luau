@@ -479,9 +479,11 @@ ShopController.start({
 	equippedWeapon = Config.EquippedWeaponAttribute,
 	equippedShield = Config.EquippedShieldAttribute,
 	equippedArmor = Config.EquippedArmorAttribute,
+	equippedHelmet = Config.EquippedHelmetAttribute,
 	ownedWeapons = Config.OwnedWeaponsAttribute,
 	ownedShields = Config.OwnedShieldsAttribute,
 	ownedArmor = Config.OwnedArmorAttribute,
+	ownedHelmets = Config.OwnedHelmetsAttribute,
 	dataStatus = Config.DataStatusAttribute,
 }, hud.group)
 

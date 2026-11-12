@@ -26,9 +26,10 @@
 -- `activeCopy`, `nextCopy`, `shieldDesigns`, `forgeCredits` (Robux-bought Skip / Design) and
 -- `receipts` (processed Robux purchase ids). The v9 `forge` stage moves onto each owned weapon's
 -- first copy; every owned weapon gets one copy. Nothing is taken away.
+-- v11: helmets (`ownedHelmets`, `equippedHelmet`, HelmetDefinitions). Old profiles own only the bare head.
 
 local PlayerDataSchema = {
-	Version = 10,
+	Version = 11,
 
 	-- A new play session starts when the profile was not seen for this long (teleports take seconds)
 	SessionGapSeconds = 20 * 60,

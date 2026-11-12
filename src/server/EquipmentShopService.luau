@@ -16,6 +16,7 @@ local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ArmorDefinitions = require(ReplicatedStorage.Shared.ArmorDefinitions)
+local HelmetDefinitions = require(ReplicatedStorage.Shared.HelmetDefinitions)
 local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
 local Config = require(ReplicatedStorage.Shared.Config)
 local GameStates = require(ReplicatedStorage.Shared.GameStates)
@@ -285,6 +286,23 @@ local function buildMannequin(parent: Instance, base: CFrame): Model
 	return body
 end
 
+-- A helmet on a wooden mannequin head: the helmet is welded to the mannequin's Head part.
+local function buildHelmetDisplay(parent: Instance, slot: CFrame, helmet: HelmetDefinitions.HelmetDefinition)
+	local item = newItem("Helmet", helmet.Id, helmet.Price, helmet.LevelRequired)
+	local base = slot * CFrame.new(0, 0.85, 0)
+	local stand = makePart("Stand", Vector3.new(2.4, 0.3, 2.4), base * CFrame.new(0, 0.15, 0), DARK_WOOD, Enum.Material.Wood, item)
+	local body = buildMannequin(item, base * CFrame.new(0, 0.3, 0))
+	local helmetModel = EquipmentModels.buildHelmet(helmet.Id, body)
+	if helmetModel then
+		helmetModel.Name = "Display"
+		helmetModel.Parent = item
+		anchorAll(helmetModel)
+	end
+	namePlate(item, base * CFrame.new(0, 0.15, -1.25), helmet.DisplayName)
+	addPrompt(item, stand, "Helmet", helmet.Id, helmet.DisplayName)
+	item.Parent = parent
+end
+
 local function buildArmorDisplay(parent: Instance, slot: CFrame, armor: ArmorDefinitions.ArmorDefinition)
 	local item = newItem("Armor", armor.Id, armor.Price, armor.LevelRequired)
 	local base = slot * CFrame.new(0, 0.85, 0)
@@ -301,7 +319,17 @@ end
 
 ------------------------------------------------------------------------------------------
 
-function EquipmentShopService.build(parent: Instance, armory: LobbyService.ArmoryLayout)
+-- The display lines of ONE shop (a building in Rome, ArmoryShops): only the lines it has are filled.
+export type ShopLayout = {
+	blades: DisplayLine?,
+	heavy: DisplayLine?,
+	ranged: DisplayLine?,
+	shields: { [string]: DisplayLine }?,
+	armor: DisplayLine?,
+	helmets: DisplayLine?,
+}
+
+function EquipmentShopService.build(parent: Instance, armory: ShopLayout)
 	local shop = Instance.new("Folder")
 	shop.Name = "ArmoryDisplays"
 
@@ -309,7 +337,10 @@ function EquipmentShopService.build(parent: Instance, armory: LobbyService.Armor
 	for _, weapon in WeaponDefinitions.Ordered do
 		table.insert(rows[weapon.Row], weapon)
 	end
-	for row, line in { Blades = armory.blades, Heavy = armory.heavy, Ranged = armory.ranged } :: { [string]: DisplayLine } do
+	for row, line in { Blades = armory.blades, Heavy = armory.heavy, Ranged = armory.ranged } :: { [string]: DisplayLine? } do
+		if not line then
+			continue
+		end
 		local weapons = rows[row]
 		local spacing = if row == "Heavy" then 12 elseif row == "Ranged" then 11 else 10
 		for i, slot in slots(line, #weapons, spacing) do
@@ -321,17 +352,28 @@ function EquipmentShopService.build(parent: Instance, armory: LobbyService.Armor
 	for _, shield in ShieldDefinitions.Ordered do
 		table.insert(classes[ShieldDefinitions.classOf(shield)], shield)
 	end
-	for class, line in armory.shields :: { [string]: DisplayLine } do
+	for class, line in (armory.shields or {}) :: { [string]: DisplayLine } do
 		local shields = classes[class]
 		for i, slot in slots(line, #shields, 7.5) do
 			buildShieldDisplay(shop, slot, shields[i])
 		end
 	end
 
-	for i, slot in slots(armory.armor, #ArmorDefinitions.Ordered, 9) do
+	for i, slot in (if armory.armor then slots(armory.armor, #ArmorDefinitions.Ordered, 9) else {}) do
 		buildArmorDisplay(shop, slot, ArmorDefinitions.Ordered[i])
 	end
 
+	if armory.helmets then
+		local helmets = {}
+		for _, def in HelmetDefinitions.Ordered do
+			if def.Id ~= HelmetDefinitions.Starter then
+				table.insert(helmets, def)
+			end
+		end
+		for i, slot in slots(armory.helmets, #helmets, 9) do
+			buildHelmetDisplay(shop, slot, helmets[i])
+		end
+	end
 	shop.Parent = parent
 	print(PREFIX, ("Gladiator Armory: %d weapons, %d shields, %d armor sets on display"):format(#WeaponDefinitions.Ordered, #ShieldDefinitions.Ordered, #ArmorDefinitions.Ordered))
 end
