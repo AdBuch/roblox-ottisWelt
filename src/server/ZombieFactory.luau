@@ -214,7 +214,7 @@ function ZombieFactory.build(def: ZombieDefinition, appearanceSeed: number?): Zo
 	local lowerLegY = kneeY - lowerLegLen / 2
 
 	-- Core rig. The root is the zombie's solid body (sized to the torso); everything else is visual.
-	local rootSize = if mounted then Vector3.new(2.6, 2, 4.8)
+	local rootSize = if mounted then Vector3.new(3, 2, 6.4)
 		else Vector3.new(math.max(2, T.X * 0.8), 2, math.max(1.2, T.Z * 0.85))
 	local root = newPart("HumanoidRootPart", rootSize, CFrame.new(0, legLen + 1, 0), SKIN, smooth)
 	root.Transparency = 1
@@ -650,41 +650,104 @@ function ZombieFactory.build(def: ZombieDefinition, appearanceSeed: number?): Zo
 	end
 
 	if mounted then
-		local hide = Color3.fromRGB(70, 76, 69)
-		local mane = Color3.fromRGB(39, 39, 43)
-		local barrel = add(root, "HorseBarrel", Vector3.new(2.6, 2.7, 5.3), Vector3.new(0, 0.45, 0),
+		-- THE WAR HORSE of the praetorian: a full-size horse (withers about 6.5 studs before the
+		-- body scale), built around the saddle height so the rider sits ON it. Body: barrel with a
+		-- deep chest and round haunches, an arched neck, a long head with muzzle, cheek, blaze,
+		-- pointed ears and forelock, a mane along the crest, a dock with a long tail, and four legs
+		-- with forearm / gaskin, knee / hock, cannon, fetlock and hoof. Each leg hangs on one gait
+		-- motor (ZombieAnimator: HorseGait1..4). Tack: saddle with four horns, a purple cloth with
+		-- gold hem, breast and haunch straps with phalerae, bridle and reins.
+		local hide = Color3.fromRGB(72, 52, 40) -- dark bay, dull like everything undead here
+		local hideDark = Color3.fromRGB(46, 36, 32) -- legs and muzzle: black points
+		local mane = Color3.fromRGB(28, 26, 28)
+		local blaze = Color3.fromRGB(206, 198, 180)
+		local top = legLen - 0.25 -- the horse's back under the saddle
+		local function look(from: Vector3, to: Vector3): CFrame
+			return CFrame.lookAt(Vector3.zero, to - from)
+		end
+		local barrel = add(root, "HorseBarrel", Vector3.new(2.9, 3.0, 5.2), Vector3.new(0, top - 1.5, 0.3),
 			hide, smooth, nil, nil, "Sphere")
-		add(barrel, "HorseNeck", Vector3.new(1.25, 2.8, 1.65), Vector3.new(0, 1.75, -1.95),
-			hide, smooth, CFrame.Angles(math.rad(-24), 0, 0), nil, "Sphere")
-		add(barrel, "HorseHead", Vector3.new(1.15, 1.25, 2), Vector3.new(0, 2.75, -2.65),
-			hide, smooth, CFrame.Angles(math.rad(-14), 0, 0), nil, "Head")
-		add(barrel, "HorseMane", Vector3.new(0.5, 2.5, 0.55), Vector3.new(0, 2, -1.48),
-			mane, smooth, CFrame.Angles(math.rad(-24), 0, 0), nil, "Sphere")
-		add(barrel, "HorseTail", Vector3.new(0.48, 2.3, 0.5), Vector3.new(0, 0.18, 2.5),
-			mane, smooth, CFrame.Angles(math.rad(-28), 0, 0), nil, "Sphere")
-		add(barrel, "SaddleCloth", Vector3.new(2.75, 0.22, 2.4), Vector3.new(0, 1.63, 0.25), CLOTH, fabric)
+		add(barrel, "HorseChest", Vector3.new(2.8, 3.2, 2.8), Vector3.new(0, top - 1.5, -2.2), hide, smooth, nil, nil, "Sphere")
+		add(barrel, "HorseHaunch", Vector3.new(3.1, 3.2, 3.2), Vector3.new(0, top - 1.4, 2.7), hide, smooth, nil, nil, "Sphere")
+		add(barrel, "HorseWithers", Vector3.new(1.3, 1.2, 2.2), Vector3.new(0, top - 0.25, -1.9), hide, smooth, nil, nil, "Sphere")
+		-- the neck rises forward from the chest (38 deg off the vertical), the head hangs from its top
+		local neckTilt = CFrame.Angles(math.rad(-38), 0, 0)
+		local neckDir = Vector3.new(0, 0.788, -0.616)
+		local neckBack = Vector3.new(0, 0.616, 0.788) -- the crest side, where the mane grows
+		local neckBase = Vector3.new(0, top - 0.5, -3.1)
+		add(barrel, "HorseNeck", Vector3.new(1.5, 4.1, 2.2), neckBase + neckDir * 1.9, hide, smooth, neckTilt, nil, "Sphere")
+		add(barrel, "HorseThroat", Vector3.new(1.3, 2.2, 1.5), neckBase + neckDir * 3.1 - neckBack * 0.1, hide, smooth, neckTilt, nil, "Sphere")
+		for i = 0, 5 do
+			add(barrel, "HorseMane", Vector3.new(0.42, 1.0, 1.0), neckBase + neckDir * (0.7 + i * 0.62) + neckBack * 0.95,
+				mane, smooth, neckTilt, nil, "Sphere")
+		end
+		local headTilt = CFrame.Angles(math.rad(-50), 0, 0)
+		local headDir = Vector3.new(0, -0.766, -0.643) -- from the poll down to the nose
+		local headUp = Vector3.new(0, 0.643, -0.766) -- the front of the face
+		local poll = neckBase + neckDir * 3.9
+		local skull = poll + headDir * 0.75 + headUp * 0.1
+		add(barrel, "HorseHead", Vector3.new(1.3, 1.5, 2.1), skull, hide, smooth, headTilt, nil, "Sphere")
+		add(barrel, "HorseCheek", Vector3.new(1.4, 1.3, 1.2), skull - headUp * 0.4 - headDir * 0.2, hide, smooth, headTilt, nil, "Sphere")
+		add(barrel, "HorseMuzzle", Vector3.new(0.95, 1.05, 1.9), skull + headDir * 1.5, hide, smooth, headTilt, nil, "Sphere")
+		add(barrel, "HorseNose", Vector3.new(0.9, 0.9, 0.7), skull + headDir * 2.25, hideDark, smooth, headTilt, nil, "Sphere")
+		add(barrel, "HorseBlaze", Vector3.new(0.36, 0.1, 2.2), skull + headDir * 0.8 + headUp * 0.62, blaze, smooth, headTilt)
+		add(barrel, "HorseForelock", Vector3.new(0.5, 0.9, 0.5), poll + headUp * 0.55 + headDir * 0.2, mane, smooth, headTilt, nil, "Sphere")
+		-- bridle: brow band, nose band, cheek pieces
+		add(barrel, "BridleBrow", Vector3.new(1.36, 0.14, 0.2), skull - headDir * 0.45 + headUp * 0.55, LEATHER_DARK, leather, headTilt)
+		add(barrel, "BridleNose", Vector3.new(1.02, 0.16, 1.12), skull + headDir * 1.5, LEATHER_DARK, leather, headTilt * CFrame.Angles(math.rad(90), 0, 0))
+		add(barrel, "BridleBoss", Vector3.new(0.3, 0.3, 0.12), skull - headDir * 0.45 + headUp * 0.72, GOLD, metal, headTilt * CFrame.Angles(math.rad(90), 0, 0))
+		add(barrel, "HorseDock", Vector3.new(0.6, 1.2, 0.6), Vector3.new(0, top - 0.6, 4.2), mane, smooth, CFrame.Angles(math.rad(35), 0, 0), nil, "Sphere")
+		add(barrel, "HorseTail", Vector3.new(0.8, 3.6, 0.9), Vector3.new(0, top - 2.5, 4.75), mane, smooth, CFrame.Angles(math.rad(8), 0, 0), nil, "Sphere")
+		-- tack
+		add(barrel, "SaddleCloth", Vector3.new(3.0, 0.2, 3.0), Vector3.new(0, top + 0.02, 0.3), CLOTH, fabric)
+		add(barrel, "Saddle", Vector3.new(1.9, 0.4, 2.1), Vector3.new(0, top + 0.26, 0.3), LEATHER, leather)
+		add(barrel, "BreastStrap", Vector3.new(3.0, 0.32, 0.3), Vector3.new(0, top - 1.2, -3.45), LEATHER_DARK, leather)
+		add(barrel, "HaunchStrap", Vector3.new(3.2, 0.3, 0.3), Vector3.new(0, top - 1.1, 4.05), LEATHER_DARK, leather)
+		for _, x in { -0.9, 0, 0.9 } do
+			add(barrel, "Phalera", Vector3.new(0.12, 0.5, 0.5), Vector3.new(x, top - 1.2, -3.62), GOLD, metal,
+				CFrame.Angles(0, math.rad(90), 0), CYLINDER)
+		end
 		for _, side in { -1, 1 } do
-			add(barrel, "HorseEar", Vector3.new(0.3, 0.64, 0.33), Vector3.new(side * 0.34, 3.43, -2.04),
-				hide, smooth, nil, nil, "Head")
-			add(barrel, "HorseEye", Vector3.new(0.12, 0.16, 0.2), Vector3.new(side * 0.55, 2.87, -2.78),
-				Color3.fromRGB(225, 148, 62), Enum.Material.Neon, nil, BALL)
+			add(barrel, "HorseEar", Vector3.new(0.26, 0.8, 0.34), poll + headUp * 0.5 - headDir * 0.2 + Vector3.new(side * 0.4, 0, 0),
+				hide, smooth, headTilt * CFrame.Angles(math.rad(70), 0, side * math.rad(-14)), nil, "Head")
+			add(barrel, "HorseEye", Vector3.new(0.14, 0.24, 0.3), skull - headDir * 0.2 + headUp * 0.28 + Vector3.new(side * 0.6, 0, 0),
+				Color3.fromRGB(225, 148, 62), Enum.Material.Neon, headTilt, BALL)
+			add(barrel, "HorseNostril", Vector3.new(0.14, 0.2, 0.2), skull + headDir * 2.4 + headUp * 0.15 + Vector3.new(side * 0.3, 0, 0),
+				mane, smooth, nil, BALL)
+			add(barrel, "BridleCheek", Vector3.new(0.08, 0.14, 2.0), skull + headDir * 0.5 + Vector3.new(side * 0.68, 0, 0), LEATHER_DARK, leather, headTilt)
+			-- the cloth hangs down both flanks, with a gold hem; saddle horns front and back
+			add(barrel, "SaddleClothSide", Vector3.new(0.14, 1.7, 2.9), Vector3.new(side * 1.46, top - 0.85, 0.3), CLOTH, fabric)
+			add(barrel, "SaddleClothHem", Vector3.new(0.16, 0.2, 2.95), Vector3.new(side * 1.47, top - 1.72, 0.3), GOLD, metal)
+			add(barrel, "Girth", Vector3.new(0.12, 1.3, 0.4), Vector3.new(side * 1.42, top - 2.3, -0.3), LEATHER_DARK, leather)
+			for _, z in { -0.65, 1.25 } do
+				add(barrel, "SaddleHorn", Vector3.new(0.34, 0.6, 0.34), Vector3.new(side * 0.72, top + 0.62, z), LEATHER, leather, nil, nil, "Head")
+			end
+			-- reins from the bit to the rider's hands
+			local bit, hand = skull + headDir * 1.9 + Vector3.new(side * 0.5, 0, 0), Vector3.new(side * 0.6, top + 1.25, -1.1)
+			add(barrel, "Rein", Vector3.new(0.08, 0.08, (hand - bit).Magnitude), (bit + hand) / 2, LEATHER_DARK, leather, look(bit, hand))
 			for _, row in { -1, 1 } do
 				local index = (if row == -1 then 0 else 2) + (if side == -1 then 1 else 2)
-				local pivot = Vector3.new(side * 0.86, 0.1, row * 1.67)
-				local leg = newPart("HorseLeg" .. index, Vector3.new(0.52, 2.25, 0.6),
-					CFrame.new(pivot - Vector3.new(0, 1.07, 0)), hide, smooth, nil, "Head")
+				local hind = row == 1
+				local pivot = Vector3.new(side * 0.95, top - 2.3, if hind then 2.9 else -2.4)
+				-- upper leg (forearm / gaskin) on the gait motor; everything below is welded to it
+				local leg = newPart("HorseLeg" .. index, Vector3.new(if hind then 1.0 else 0.85, 2.3, if hind then 1.35 else 1.05),
+					CFrame.new(pivot - Vector3.new(0, 1.0, 0)), hide, smooth, nil, "Head")
 				motor("HorseGait" .. index, barrel, leg, pivot)
-				add(leg, "HorseHoof", Vector3.new(0.59, 0.36, 0.71), pivot - Vector3.new(0, 2.03, 0),
-					mane, smooth, nil, nil, "Head")
+				local back = if hind then 0.3 else 0 -- the hock sits behind the stifle
+				add(leg, "HorseKnee", Vector3.new(0.7, 0.7, 0.8), pivot + Vector3.new(0, -2.1, back), hideDark, smooth, nil, nil, "Sphere")
+				add(leg, "HorseCannon", Vector3.new(0.5, 1.8, 0.58), pivot + Vector3.new(0, -3.0, back + (if hind then 0.1 else 0)), hideDark, smooth, nil, nil, "Head")
+				add(leg, "HorseFetlock", Vector3.new(0.62, 0.5, 0.74), pivot + Vector3.new(0, -3.85, back + 0.08), mane, smooth, nil, nil, "Sphere")
+				add(leg, "HorseHoof", Vector3.new(0.78, 0.45, 0.95), pivot + Vector3.new(0, -4.27, back - 0.05),
+					Color3.fromRGB(34, 30, 28), smooth, nil, nil, "Head")
 			end
 		end
 		model:SetAttribute("Mounted", true)
 	end
-
 	-- Humanoid (R15 rules: HipHeight = ground to bottom of the root part)
 	local humanoid = Instance.new("Humanoid")
 	humanoid.RigType = Enum.HumanoidRigType.R15
-	humanoid.HipHeight = (legLen + (if mounted then 2.25 else 0)) * S
+	-- mounted: the hooves stand 6.8 studs below the rider's hips (see the war horse above)
+	humanoid.HipHeight = (if mounted then 6.8 else legLen) * S
 	humanoid.MaxHealth = def.Health
 	humanoid.Health = def.Health
 	humanoid.WalkSpeed = def.WalkSpeed

@@ -87,22 +87,59 @@ local layout=modules.LobbyService.build()
 local L=modules.ColosseumLayout
 local A=modules.Arena
 local FLOOR=L.FloorTop
-check(#layout.pads==8,"on the sand: a solo start and a co-op group at every gate, the two team mosaics")
+check(#layout.pads==6,"the solo start in Otti's gate, three co-op groups and the two team mosaics in the cellars")
 check(#layout.tribuneDoors==3,"three live entrances")
-check(#layout.trainingSlots==6,"six training dummies")
+check(#layout.portals==4 and #layout.introPaths==5,"two gates down, two gates back up, one arrow path per intro stage")
 check(#layout.modeBoards==4,"all modes in every hall and the team selector")
 check(#layout.archiveSlots==12 and #layout.archivePlaques==12 and #layout.archiveIds==12,"twelve cages: six zombies, two legionaries, four ninjas")
 check(#layout.arenaTriggers==0 and #layout.bossBoards==3,"open gates without walk-in triggers, boss entrance for every hall")
-local solos=0; for _,pad in layout.pads do if pad.def.Kind=="Solo" then solos+=1; check(pad.def.Mode=="SOLO_ZOMBIES" and pad.def.Enabled,"solo start mosaic starts a solo zombie run") end end; check(solos==3,"a solo start beyond every hero gate")
+local solos=0; for _,pad in layout.pads do if pad.def.Kind=="Solo" then solos+=1; check(pad.def.Mode=="SOLO_ZOMBIES" and pad.def.Enabled,"solo start mosaic starts a solo zombie run") end end; check(solos==1,"one solo start: Otti's gate")
 check(layout.arenaGate~=nil and #layout.introTargets==5,"solo start beyond Otti's gate and one target per intro stage")
 local function under(p,ancestorName)
     local a=p.Parent
     while a do if a.Name==ancestorName then return true end a=a.Parent end
     return false
 end
--- Otti's hall is the old lobby's start: groups gather in the yard and the two smaller halls
+-- The arena is closed: the solo start lies in Otti's gateway on the hall floor, the groups gather
+-- in the two cellars under the arena. Nothing lies on the sand.
+local CELLAR_FLOOR=-34
 for _,pad in layout.pads do
-    check(under(pad.ring,"ArenaGrounds") and A.isInside(pad.cframe.Position,-6),"group mosaics gather on the sand: "..pad.def.Id)
+    check(not A.isInside(pad.cframe.Position+vector(0,1,0)),"no mosaic on the closed sand: "..pad.def.Id)
+    check(modules.LobbyService.isInside(pad.cframe.Position+vector(0,3,0)),"mosaic inside the lobby: "..pad.def.Id)
+    if pad.def.Kind=="Solo" then
+        check(math.abs(pad.cframe.Position.Y-FLOOR)<0.01 and pad.cframe.Position.Z>0,"solo start on the hall floor at Otti's gate")
+    else
+        check(under(pad.ring,"Cellars") and math.abs(pad.cframe.Position.Y-CELLAR_FLOOR)<0.01,"group mosaic in a cellar: "..pad.def.Id)
+        check(under(pad.ring,if pad.def.Team then "TeamCellar" else "CoopCellar"),"team mosaics in the team cellar, co-op mosaics in the co-op cellar: "..pad.def.Id)
+    end
+end
+-- the gateways: Kroko's and Schili's gates lead down, each cellar's gate leads back to its hall
+local function portalAt(p)
+    for _,portal in layout.portals do
+        local o=portal.cframe:PointToObjectSpace(p)
+        if math.abs(o.X)<=portal.size.X/2 and math.abs(o.Y)<=portal.size.Y/2 and math.abs(o.Z)<=portal.size.Z/2 then return portal end
+    end
+    return nil
+end
+for _,portal in layout.portals do
+    local down=portal.name:find("Down")~=nil
+    local from,to=portal.cframe.Position,portal.target.Position
+    check(modules.LobbyService.isInside(to+vector(0,3,0)),"gateway target inside the lobby: "..portal.name)
+    check(portalAt(to+vector(0,3,0))==nil,"nobody arrives inside another gateway: "..portal.name)
+    check(not modules.LobbyService.isOnSand(to+vector(0,3,0)) and not modules.LobbyService.isOnSand(from),"gateways keep off the sand: "..portal.name)
+    if down then
+        check(from.Y>FLOOR and math.abs(to.Y-CELLAR_FLOOR)<0.01,"a hero gate leads down into a cellar: "..portal.name)
+    else
+        check(from.Y<CELLAR_FLOOR+10 and math.abs(to.Y-FLOOR)<0.01,"a cellar gate leads back up to the hall floor: "..portal.name)
+    end
+end
+check(portalAt(layout.arrivalSpawn.Position+vector(0,3,0))==nil and portalAt(layout.respawnSpawn.Position+vector(0,3,0))==nil,"the spawns are no gateway")
+check(portalAt(L.point(math.rad(90),6)+vector(0,FLOOR+3,0))==nil,"Otti's gate is no gateway: the solo mosaic lies there")
+check(portalAt(L.point(math.rad(210),6)+vector(0,FLOOR+3,0))~=nil and portalAt(L.point(math.rad(330),6)+vector(0,FLOOR+3,0))~=nil,"walking into Kroko's and Schili's gateways")
+check(modules.LobbyService.isOnSand(vector(0,FLOOR+3,0)) and not modules.LobbyService.isOnSand(layout.arrivalSpawn.Position+vector(0,3,0)),"the sand is known as closed ground")
+check(#modules.LobbyArchitecture.cellarCarves()==2,"two cellars to clear out of the terrain")
+for stage,path in layout.introPaths do
+    check(#path>=1 and path[#path]==layout.introTargets[stage],"arrow path "..stage.." ends at its target")
 end
 local stages={}
 for _,p in all do if not p.dead and p.attrs and p.attrs.IntroStage then stages[p.attrs.IntroStage]=(stages[p.attrs.IntroStage] or 0)+1; check(p.CanCollide==false,"only decoration is hidden by the intro") end end
@@ -111,11 +148,7 @@ local byName={}
 for _,p in all do byName[p.Name or ""]=true end
 for _,id in {"Otti","Schili","Kroko"} do check(byName[id.."Statue"],"statue "..id) end
 for _,name in {"TrainingZombie1","PrisonerCell","HypogeumMaze"} do check(not byName[name],"no "..name.." any more") end
-for _,cf in layout.trainingSlots do
-    check(modules.LobbyService.isInside(cf.Position+vector(0,3,0)) and A.isInside(cf.Position,-8),"training dummies stand on the open sand")
-    local o=layout.trainingCFrame:PointToObjectSpace(cf.Position+vector(0,3,0))
-    check(math.abs(o.X)<=layout.trainingSize.X/2 and math.abs(o.Y)<=layout.trainingSize.Y/2 and math.abs(o.Z)<=layout.trainingSize.Z/2,"dummy inside the training area")
-end
+check(layout.trainingSlots==nil,"no training in the Colosseum any more (the yards in Rome: RomeLayout.training)")
 check(not modules.LobbyService.isInArmory(layout.arrivalSpawn.Position+vector(0,3,0)),"no purchases outside shops")
 for name,cf in layout.shopFrames do check(modules.LobbyService.isInArmory(cf.Position+vector(0,3,0)),"shop region "..name) end
 -- The lobbies are built INTO the Colosseum: every lobby part stands on the hall floor inside the
@@ -163,6 +196,12 @@ for _,p in all do
         lobbyParts+=1
         local e=extent(p)
         local c=p.CFrame.Position
+        if under(p,"Cellars") then
+            -- the cellars lie under the arena: below the Colosseum's own structure, above the Hub's deep-fall line (-45)
+            check(c.Y+e.Y<=FLOOR-15 and c.Y-e.Y>-45,"cellar under the arena and above the deep-fall line: "..p.Name)
+            check(A.isInside(vector(c.X,FLOOR,c.Z),galleryEnd),"cellar inside the Colosseum's footprint: "..p.Name)
+            continue
+        end
         check(c.Y-e.Y>=FLOOR-2.05,"lobby at the arena's height: "..p.Name.." reaches down to "..(c.Y-e.Y))
         check(A.isInside(c,galleryEnd),"lobby inside the Colosseum's facade: "..p.Name)
         local approach=p.Parent and p.Parent.Name and p.Parent.Name:match("ArenaApproach$")
@@ -240,27 +279,7 @@ for _,flight in A.Layout.StairFlights do
         tested+=1
     end
 end
--- Shop displays (EquipmentShopService spreads them along each line, at most `max` apart): every
--- display, a rack 4 wide, 14 high and 3 deep standing behind its slot, fits between the piers
--- under the stands, and every slot lies in its shop's purchase zone.
-local armory=layout.armory
-for name,spec in {blades={armory.blades,3,10},heavy={armory.heavy,4,12},ranged={armory.ranged,1,11},light={armory.shields.Light,3,7.5},balanced={armory.shields.Balanced,2,7.5},heavyShields={armory.shields.Heavy,3,7.5},armor={armory.armor,4,9}} do
-    local line,count,max=spec[1],spec[2],spec[3]
-    local spacing=math.min(max,line.length/count)
-    check(spacing>=4.2,"shop line "..name.." leaves room for every display ("..spacing..")")
-    for i=1,count do
-        local slot=line.cframe*CFrame.new((i-(count+1)/2)*spacing,0,0)
-        check(modules.LobbyService.isInArmory(slot.Position+vector(0,3,0)),"display "..name.." "..i.." inside its shop")
-        local box={CFrame=slot*CFrame.new(0,7.05,1.5),Size=vector(4,14,3)}
-        local e=extent(box)
-        local c=box.CFrame.Position
-        cells(c,e,function(key)
-            for _,s in grid[key] or {} do
-                check(not penetrates(box,s,0.05),"display "..name.." "..i.." cuts into "..s.Name)
-            end
-        end)
-    end
-end
+-- (The shop displays moved to Rome: ArmoryShops, checked by the Rome geometry test.)
 -- Start pedestals stand beside the walk-on pad, never on the mosaic.
 for _,pad in layout.pads do
     for _,button in pad.buttons do
@@ -277,7 +296,7 @@ for _,entry in layout.matchActions do
 end
 for _,pad in layout.pads do
     for _,p in all do
-        if not p.dead and p.Name=="PadBoard" and p.Parent and p.Parent.Name=="Pad_"..pad.def.Id then check(facing(p,pad.cframe.Position),"pad board faces its pad "..pad.def.Id) end
+        if not p.dead and p.Name=="PadBoard" and p.Parent and p.Parent.Name=="Pad_"..pad.def.Id then check(facing(p,if pad.def.Kind=="Solo" then layout.arrivalSpawn.Position else pad.cframe.Position),"pad board faces its pad (the solo board: the arriving player) "..pad.def.Id) end
     end
 end
 check(#layout.liveBoards==3,"live count in every hall")
@@ -318,9 +337,14 @@ for _,v in vomitoria do
         check(blocked==nil,"vomitorium headroom at offset "..o.." blocked by "..tostring(blocked))
     end
 end
--- From every lobby straight to its gate: level paving and free headroom along the hero axis
+-- From every lobby straight to its gate: level paving and free headroom along the hero axis, up
+-- to the gateway (Otti: the solo mosaic and its pedestal, Kroko / Schili: the way down). The gate
+-- itself is CLOSED in the Hub: its grille blocks the way onto the sand.
 for _,angle in L.HeroAngles do
-    for o=-8,facade+8,2 do
+    local grille=L.point(math.rad(angle),1)
+    local _,closed=probe(grille.X,grille.Z,FLOOR)
+    check(closed=="GateCollision" or closed=="IronBar" or closed=="GateBand","the "..angle.." gate is closed (blocked by "..tostring(closed)..")")
+    for o=6,facade+8,2 do
         local p=L.point(math.rad(angle),o)
         local floor=probe(p.X,p.Z,FLOOR+0.01)
         check(floor>=FLOOR-0.06,"floor on the way to the "..angle.." gate at offset "..o.." is "..floor)
@@ -471,14 +495,14 @@ for _,spawn in {layout.arrivalSpawn,layout.respawnSpawn} do
     local floor,blocked=probe(spawn.Position.X,spawn.Position.Z,FLOOR+0.01)
     check(math.abs(floor-FLOOR)<0.1 and blocked==nil,"spawn on the floor with headroom: "..spawn.Name)
 end
-for _,pad in layout.pads do
+for _,pad in layout.pads do if pad.def.Kind~="Solo" then continue end -- the cellar mosaics lie under the arena
     for _,o in {vector(0,0,0),vector(9,0,5),vector(-9,0,-5),vector(9,0,-5),vector(-9,0,5)} do
         local p=pad.cframe*o
         local floor,blocked=probe(p.X,p.Z,FLOOR+0.5)
         check(math.abs(floor-FLOOR)<0.3 and blocked==nil,"pad "..pad.def.Id.." on the floor with headroom ("..tostring(blocked)..")")
     end
 end
-local targets={cityExit=layout.cityExit.Position+vector(0,FLOOR-layout.cityExit.Position.Y-0.05,0),grounds=vector(330,0.95,330),topGallery=L.point(math.rad(90),seatsEnd+7)+vector(0,A.Layout.GalleryTop,0),trainingYard=layout.trainingCFrame.Position-vector(0,8,0)}
+local targets={cityExit=layout.cityExit.Position+vector(0,FLOOR-layout.cityExit.Position.Y-0.05,0),grounds=vector(330,0.95,330),topGallery=L.point(math.rad(90),seatsEnd+7)+vector(0,A.Layout.GalleryTop,0)}
 for name,cf in layout.shopFrames do targets["shop "..name]=cf.Position end
 for id,cf in layout.hallFrames do targets["hall "..id]=cf.Position end
 for i,trigger in layout.arenaTriggers do targets["gate "..i]=trigger.Position-vector(0,4,0) end

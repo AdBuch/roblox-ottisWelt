@@ -185,21 +185,46 @@ RomeLayout.Squares = table.freeze({
 })
 RomeLayout.Plaza = table.freeze({ inner = 92, outer = 118 }) -- paved ring round the Colosseum (ring offsets)
 
--- Lower work yards (Werkhöfe) behind the shop fronts of the Handwerksgasse: private, walled, with
--- lean-to sheds along one side (`shed`: "N" | "S" | "E" | "W" edge of the yard).
-export type Yard = { id: string, block: string, x0: number, x1: number, z0: number, z1: number, level: number, shed: string }
+-- Lower work yards (Werkhöfe) behind the shop fronts of the Handwerksgasse: walled, with lean-to
+-- sheds along one side (`shed`: "N" | "S" | "E" | "W" edge of the yard). The two yards are the
+-- TRAINING YARDS: the smith's (behind the smithy) and the helm trader's (behind the helm shop).
+-- `training`: z of the row of straw dummies and the way they look (+1 south, -1 north), towards
+-- the yard's open gate on the Handwerksgasse.
+export type Yard = { id: string, block: string, x0: number, x1: number, z0: number, z1: number, level: number, shed: string, training: { z: number, face: number, name: string }? }
 RomeLayout.Yards = table.freeze({
-	{ id = "WerkhofNord", block = "BN1", x0 = -290, x1 = -238, z0 = -92, z1 = -38, level = L, shed = "N" },
-	{ id = "WerkhofSued", block = "BS1", x0 = -281, x1 = -238, z0 = 29, z1 = 75, level = L, shed = "S" },
+	{ id = "WerkhofNord", block = "BN1", x0 = -290, x1 = -238, z0 = -92, z1 = -38, level = L, shed = "N", training = { z = -56, face = 1, name = "ÜBUNGSHOF DES SCHMIEDS" } },
+	{ id = "WerkhofSued", block = "BS1", x0 = -281, x1 = -238, z0 = 29, z1 = 75, level = L, shed = "S", training = { z = 46, face = -1, name = "ÜBUNGSHOF DES HELMHÄNDLERS" } },
 } :: { Yard })
+RomeLayout.TrainingDummiesPerYard = 3
+-- The straw dummies (base frames on the yard's ground, -Z = the dummy's front) and the training
+-- areas (box centre + size) where hits on dummies count. Pure data for TrainingService.
+function RomeLayout.training(): ({ CFrame }, { { cframe: CFrame, size: Vector3 } })
+	local slots: { CFrame } = {}
+	local areas: { { cframe: CFrame, size: Vector3 } } = {}
+	for _, y in RomeLayout.Yards do
+		local t = y.training
+		if t then
+			local cx, cz = (y.x0 + y.x1) / 2, (y.z0 + y.z1) / 2
+			local n = RomeLayout.TrainingDummiesPerYard
+			for i = 1, n do
+				local at = Vector3.new(cx + (i - (n + 1) / 2) * 12, y.level, t.z)
+				table.insert(slots, CFrame.lookAt(at, at + Vector3.new(0, 0, t.face)))
+			end
+			-- the yard and the lane from its gate (the gate lies up to 28 studs outside the yard)
+			table.insert(areas, { cframe = CFrame.new(cx, y.level + 8, cz), size = Vector3.new(y.x1 - y.x0, 18, y.z1 - y.z0) })
+		end
+	end
+	return slots, areas
+end
 -- Low walls (2.4 studs, an invisible guard above) that close private yards and gardens toward the
--- public way; `gate` (0..1 along the wall) puts a closed arched gate (Torbogen) into it.
-export type YardWall = { id: string, a: Point, b: Point, level: number, gate: number? }
+-- public way; `gate` (0..1 along the wall) puts an arched gate (Torbogen) into it: closed, or
+-- `open` with a sign (`label`) for the two training yards beside the smithy and the helm shop.
+export type YardWall = { id: string, a: Point, b: Point, level: number, gate: number?, open: boolean?, label: string? }
 RomeLayout.YardWalls = table.freeze({
 	{ id = "BN1-Ost", a = { x = -235.6, z = -11.6 }, b = { x = -235.6, z = -94 }, level = L },
-	{ id = "BN1-Sued", a = { x = -259.4, z = -11.6 }, b = { x = -235.6, z = -11.6 }, level = L, gate = 0.5 },
+	{ id = "BN1-Sued", a = { x = -259.4, z = -11.6 }, b = { x = -235.6, z = -11.6 }, level = L, gate = 0.5, open = true, label = "TRAINING · HOF DES SCHMIEDS" },
 	{ id = "BS1-Ost", a = { x = -235.6, z = 11.6 }, b = { x = -235.6, z = 92.6 }, level = L },
-	{ id = "BS1-Nord", a = { x = -261.4, z = 11.6 }, b = { x = -235.6, z = 11.6 }, level = L, gate = 0.5 },
+	{ id = "BS1-Nord", a = { x = -261.4, z = 11.6 }, b = { x = -235.6, z = 11.6 }, level = L, gate = 0.5, open = true, label = "TRAINING · HOF DES HELMHÄNDLERS" },
 	{ id = "BS1-Sued", a = { x = -265.4, z = 92.6 }, b = { x = -235.6, z = 92.6 }, level = L, gate = 0.55 },
 	{ id = "BS1-Luecke", a = { x = -282.6, z = 92.6 }, b = { x = -279.4, z = 92.6 }, level = L },
 	{ id = "BS6-Garten", a = { x = -358, z = 162.6 }, b = { x = -270, z = 162.6 }, level = L, gate = 0.5 },

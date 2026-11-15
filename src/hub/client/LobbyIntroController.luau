@@ -2,8 +2,10 @@
 -- The Hub intro on the client (LobbyIntroService decides the stage):
 --   * signs of the start hall marked with an IntroStage attribute stay hidden (locally: board,
 --     text and F prompt) until the player's IntroStage attribute reaches that stage
---   * MatchEvent "IntroHint": a banner with the stage's hint and a gold floor arrow from the
---     player towards the place it is about; the arrow goes once it is reached or after a while
+--   * MatchEvent "IntroHint": a banner with the stage's hint and gold TUTORIAL ARROWS on the
+--     floor. They start at the player's feet and follow the stage's waypoints (round the hall,
+--     through the west arch, down the street ...), are redrawn as the player walks, and go once
+--     the place is reached, a fight starts, or after a few minutes. A beacon marks the place.
 -- Display only: hidden prompts still work on the server, which checks everything itself.
 
 local Players = game:GetService("Players")
@@ -11,9 +13,17 @@ local Workspace = game:GetService("Workspace")
 
 local LobbyIntroController = {}
 
-local ARROW_LENGTH = 40 -- studs of chevrons on the player's floor; the beacon marks the target
-local ARROW_SECONDS = 25
+local ARROW_LENGTH = 44 -- studs of chevrons ahead of the player; the beacon marks the target
+local ARROW_STEP = 4
+local ARROW_SECONDS = 240
+local ARROW_REFRESH = 0.3
+local REACHED = 8 -- studs (flat) to the last waypoint
+local PASSED = 9 -- a waypoint this close counts as passed
 local GOLD = Color3.fromRGB(240, 196, 80)
+
+local function flat(a: Vector3, b: Vector3): number
+	return (Vector3.new(a.X, 0, a.Z) - Vector3.new(b.X, 0, b.Z)).Magnitude
+end
 
 local function decor(name: string, size: Vector3, cframe: CFrame, parent: Instance, transparency: number): Part
 	local part = Instance.new("Part")
@@ -87,40 +97,95 @@ function LobbyIntroController.start(lobbyFolder: Instance?, events: RemoteEvent?
 		end
 	end
 
-	local function showArrow(target: Vector3)
+	-- `path`: waypoints on the floor; the last one is the place the hint is about.
+	local function showArrow(path: { Vector3 })
 		clearArrow()
-		local character = player.Character
-		local root = character and character:FindFirstChild("HumanoidRootPart")
-		if not root or not root:IsA("BasePart") then
+		if #path == 0 then
 			return
 		end
+		local target = path[#path]
 		local model = Instance.new("Model")
 		model.Name = "IntroArrow"
-		local floorY = root.Position.Y - 3
-		local flat = Vector3.new(target.X - root.Position.X, 0, target.Z - root.Position.Z)
-		local distance = math.min(flat.Magnitude - 4, ARROW_LENGTH)
-		if flat.Magnitude > 1 then
-			local direction = flat.Unit
-			for d = 4, distance, 4 do
-				local at = Vector3.new(root.Position.X, floorY + 0.08, root.Position.Z) + direction * d
-				local frame = CFrame.lookAt(at, at + direction)
-				for _, side in { -1, 1 } do
-					decor("Chevron", Vector3.new(0.35, 0.06, 1.8), frame * CFrame.new(side * 0.55, 0, 0.3) * CFrame.Angles(0, side * math.rad(-35), 0), model, 0.15)
-				end
-			end
-		end
 		decor("Beacon", Vector3.new(14, 2.4, 2.4), CFrame.new(target + Vector3.new(0, 7, 0)) * CFrame.Angles(0, 0, math.rad(90)), model, 0.6).Shape = Enum.PartType.Cylinder
+		-- a fixed set of chevrons, moved every refresh (two bars each)
+		local chevrons: { { Part } } = {}
+		for _ = 1, ARROW_LENGTH // ARROW_STEP do
+			table.insert(chevrons, {
+				decor("Chevron", Vector3.new(0.4, 0.06, 2), CFrame.identity, model, 1),
+				decor("Chevron", Vector3.new(0.4, 0.06, 2), CFrame.identity, model, 1),
+			})
+		end
 		model.Parent = Workspace
 		arrow = model
+		-- start with the waypoint that lies ahead: the nearest one, or the one after it when the
+		-- player is already closer to the following waypoint than that one is
+		local function firstAhead(position: Vector3): number
+			local best, bestDistance = 1, math.huge
+			for i, point in path do
+				local distance = flat(position, point)
+				if distance < bestDistance then
+					best, bestDistance = i, distance
+				end
+			end
+			if best < #path and (bestDistance < PASSED or flat(position, path[best + 1]) < flat(path[best], path[best + 1])) then
+				best += 1
+			end
+			return best
+		end
+		local nextIndex: number? = nil
 		local deadline = os.clock() + ARROW_SECONDS
+		local pulse = 0
 		task.spawn(function()
 			while arrow == model and os.clock() < deadline do
-				local current = player.Character
-				local position = current and current:FindFirstChild("HumanoidRootPart")
-				if position and position:IsA("BasePart") and (Vector3.new(position.Position.X, 0, position.Position.Z) - Vector3.new(target.X, 0, target.Z)).Magnitude < 7 then
-					break
+				local character = player.Character
+				local root = character and character:FindFirstChild("HumanoidRootPart")
+				if root and root:IsA("BasePart") then
+					local position = root.Position
+					if flat(position, target) < REACHED and math.abs(position.Y - target.Y) < 12 then
+						break
+					end
+					local index = nextIndex or firstAhead(position)
+					while index < #path and flat(position, path[index]) < PASSED do
+						index += 1
+					end
+					nextIndex = index
+					-- lay the chevrons along the way: from the feet to the next waypoint, then on
+					local from = Vector3.new(position.X, position.Y - 3, position.Z)
+					local used, travelled, skip = 0, 0, ARROW_STEP
+					pulse = (pulse + 1) % 4
+					for i = index, #path do
+						local to = path[i]
+						local leg = Vector3.new(to.X - from.X, 0, to.Z - from.Z)
+						local length = leg.Magnitude
+						if length > 0.5 then
+							local direction = leg.Unit
+							local d = skip
+							while d <= length - 1 and used < #chevrons and travelled + d <= ARROW_LENGTH do
+								used += 1
+								local height = from.Y + (to.Y - from.Y) * (d / length) + 0.1
+								local at = Vector3.new(from.X, height, from.Z) + direction * d
+								local frame = CFrame.lookAt(at, at + direction)
+								local glow = if (used + pulse) % 4 == 0 then 0 else 0.25
+								for n, side in { -1, 1 } do
+									local bar = chevrons[used][n]
+									bar.CFrame = frame * CFrame.new(side * 0.62, 0, 0.3) * CFrame.Angles(0, side * math.rad(-35), 0)
+									bar.Transparency = glow
+								end
+								d += ARROW_STEP
+							end
+							skip = math.max(ARROW_STEP - (length - (d - ARROW_STEP)), 1)
+							travelled += length
+						end
+						from = to
+						if used >= #chevrons or travelled >= ARROW_LENGTH then
+							break
+						end
+					end
+					for i = used + 1, #chevrons do
+						chevrons[i][1].Transparency, chevrons[i][2].Transparency = 1, 1
+					end
 				end
-				task.wait(0.25)
+				task.wait(ARROW_REFRESH)
 			end
 			if arrow == model then
 				clearArrow()
@@ -132,9 +197,18 @@ function LobbyIntroController.start(lobbyFolder: Instance?, events: RemoteEvent?
 		events.OnClientEvent:Connect(function(kind: string, data: any)
 			if kind == "IntroHint" and type(data) == "table" then
 				banner(tostring(data.title or ""), tostring(data.text or ""))
-				if typeof(data.target) == "Vector3" then
-					showArrow(data.target)
+				local path: { Vector3 } = {}
+				if type(data.path) == "table" then
+					for _, point in data.path do
+						if typeof(point) == "Vector3" then
+							table.insert(path, point)
+						end
+					end
 				end
+				if #path == 0 and typeof(data.target) == "Vector3" then
+					path = { data.target }
+				end
+				showArrow(path)
 			elseif kind == "Teleport" then
 				clearArrow()
 			end

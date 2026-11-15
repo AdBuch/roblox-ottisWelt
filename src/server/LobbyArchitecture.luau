@@ -14,23 +14,29 @@
 --     gate; Otti's monument and mosaic beside the way; the team, mode, boss and live boards on
 --     two notice walls near the gate.
 --   Every hall: the cages of its chapter's fighters stand under the lowest tier, their backs
---     against the podium wall (zombies with Otti, legionaries with Kroko, ninjas with Schili),
---     and one shop bay: blades, balanced shields and armor with Otti (112..131), heavy weapons
---     and heavy shields with Kroko (224..238), ranged weapons and light shields with Schili
---     (302..316).
---   KROKO (gate 210) bay 190..250 and SCHILI (gate 330) bay 290..350: monument, shop bay, boards.
---   THE ARENA: the hero gates stand open in the Hub. On the sand: six straw dummies in a ring,
---     and in front of every gate the solo start mosaic, the hall's co-op group and (Kroko,
---     Schili) the team's gathering mosaic. The way to Rome leaves through the west arch (180).
+--     against the podium wall (zombies with Otti, legionaries with Kroko, ninjas with Schili).
+--   KROKO (gate 210) bay 190..250 and SCHILI (gate 330) bay 290..350: monument, boards.
+--   THE ARENA IS CLOSED in the Hub: the three hero gates keep their grilles, nobody walks on the
+--     sand. Each gate is a way into a fight instead:
+--       Otti's gate (the first one, straight ahead of the arrival): the SOLO mosaic lies in the
+--         gateway; standing on it starts the solo fight in the Arena place.
+--       Kroko's gate leads down to the TEAM CELLAR, Schili's gate to the CO-OP CELLAR: walking
+--         into the gateway places the player in the cellar (Architecture portals, CellarService).
+--   THE CELLARS (hypogeum): two vaulted halls under the arena, built like the first lobby
+--     (stone, piers, braziers, banners, mosaics) but without any shop. The co-op cellar holds the
+--     three group mosaics for the zombie arena, the team cellar the two opposing team mosaics.
+--     Each has a gate back to the Colosseum (to the hall in front of the gate it was entered by).
+--   Training is in Rome (the yards behind the smithy and the helm shop, RomeLayout.training), the
+--     shops too. The way to Rome leaves through the west arch (180).
 --
 -- In the ring frames local +X points towards DEcreasing angle, local +Z outward, -Z into the arena.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
 local Layout = require(ReplicatedStorage.Shared.ColosseumLayout)
--- The training yard lies on the Kolosseums-Vorplatz outside the west arch (RomeLayout.Forecourt:
--- x -214..-160, z -45..45, on the upper terrace at y 1), between the Colosseum and the village.
-local FORECOURT = { x = -187, y = 1, width = 54, depth = 90 }
+-- The gathering cellars under the arena: floor 35 studs below the sand (above the Hub's deep-fall
+-- line at -45), each 72 x 48 and 16 high. RomeWorld carves them out of the island's terrain.
+local CELLAR = { y = -34, width = 72, depth = 48, height = 16, wall = 2 }
 local Config = require(ReplicatedStorage.Shared.Config)
 local PadDefinitions = require(ReplicatedStorage.Shared.LobbyPadDefinitions)
 local Statue = require(script.Parent.LobbyStatue)
@@ -46,7 +52,6 @@ local GOLD = Color3.fromRGB(224, 176, 70)
 local IRON = Color3.fromRGB(62, 64, 61)
 local WOOD = Color3.fromRGB(100, 65, 38)
 local WHITE = Color3.fromRGB(245, 231, 202)
-local YARD = Color3.fromRGB(196, 170, 120)
 local RUG = Color3.fromRGB(150, 54, 40)
 -- The hero monuments: twice the size the heroes fight at (a rig is built at fight size)
 local STATUE_SCALE = 2
@@ -59,6 +64,9 @@ Architecture.Anchors = table.freeze({
 })
 
 type Volume = { cf: CFrame, size: Vector3, kinds: { [string]: boolean }? }
+-- A walk-in doorway: a player inside the box is placed at `target` (CellarService).
+export type Portal = { name: string, cframe: CFrame, size: Vector3, target: CFrame, text: string }
+local carves: { Volume } = {}
 local volumes: { Volume } = {}
 local shops: { Volume } = {}
 local function inside(v: Volume, p: Vector3): boolean
@@ -222,11 +230,6 @@ local function along(deg: number, offset: number, studs: number): number
 	end
 	return math.deg(theta)
 end
--- A frame on the sand: `inset` studs inside the podium wall, -Z towards the arena's middle.
-local function sand(deg: number, inset: number, y: number?): CFrame
-	return Layout.frame(math.rad(deg), -inset, FLOOR + (y or 0))
-end
-
 -- `foes`: the fighters of the hero's campaign chapter, shown in the cages of the hero's hall.
 local HEROES = {
 	{ id = "Otti", name = "OTTI", angle = 90, color = Color3.fromRGB(140, 38, 37), motto = "COURAGE · FRIENDSHIP · UNITY", emblem = "Otti", foes = { "LegionRemnant", "RottenVelite", "ArenaBrute", "NetFighter", "ArenaChampion", "UndeadSagittarius" } },
@@ -252,27 +255,100 @@ local function soloDefinition(hero: any): any
 	}
 end
 
--- A walk-on mosaic on the sand. Group mosaics lie along the podium wall, their board in front of
--- the wall and the start pedestals towards the arena's middle; the solo mosaic lies on the gate
--- axis, its board beyond it, facing the gate.
-local function sandPad(buildPad: any, parent: Instance, def: any, deg: number, inset: number, size: Vector2, solo: boolean): any
-	local center = sand(deg, inset) * (if solo then CFrame.identity else CFrame.Angles(0, math.pi, 0))
-	local board = center * CFrame.new(0, 7, -(size.Y / 2 + (if solo then 4.5 else 2.3))) * CFrame.Angles(0, math.pi, 0)
-	for _, x in { -7.7, 7.7 } do
-		part(parent, "PadBoardPost", board * CFrame.new(x, -1.75, 0.45), Vector3.new(0.5, 10.5, 0.5), WOOD, true)
-	end
-	return buildPad(parent, def, center, size, board, if solo then -1 else 1)
+-- The solo start in Otti's gateway: the mosaic lies on the hall floor right in front of the closed
+-- gate (offsets 6..14, the start pedestal between it and the grille), its board hangs above the
+-- way under the second tier (7.5 studs of headroom below it), facing the arrival.
+local function gatewayPad(buildPad: any, parent: Instance, def: any, deg: number): any
+	local size = Vector2.new(12, 8)
+	local center = ring(deg, 10)
+	local board = ring(deg, 14.4, 10) * CFrame.Angles(0, math.pi, 0)
+	return buildPad(parent, def, center, size, board, -1)
 end
 
--- A gathering point (mosaic + board) in a hall bay under the stands, at angle `deg`, `offset`
--- outward from the podium: the same frame rules as sandPad, but on the hall floor where the shops were.
-local function bayPad(buildPad: any, parent: Instance, def: any, deg: number, offset: number, size: Vector2): any
-	local center = ring(deg, offset) * CFrame.Angles(0, math.pi, 0)
-	local board = center * CFrame.new(0, 7, -(size.Y / 2 + 2.3)) * CFrame.Angles(0, math.pi, 0)
-	for _, x in { -7.7, 7.7 } do
-		part(parent, "PadBoardPost", board * CFrame.new(x, -1.75, 0.45), Vector3.new(0.5, 10.5, 0.5), WOOD, true)
+-- The doorway to a cellar in a hero gate: a glowing step in front of the grille and a sign above
+-- the way. Returns the portal (the gateway's box and where it leads).
+local function gatePortal(parent: Instance, hero: any, title: string, subtitle: string, target: CFrame, text: string): Portal
+	local g = hero.angle
+	sign(parent, "CellarSign", ring(g, 14, 11.2) * CFrame.Angles(0, math.pi, 0), title, subtitle, hero.color, Vector2.new(16, 3.5))
+	local glow = part(parent, "CellarDoorGlow", ring(g, 1.9, 5), Vector3.new(15, 10, 0.3), GOLD, true)
+	glow.Material, glow.Transparency = Enum.Material.Neon, 0.8
+	local step = part(parent, "CellarDoorStep", ring(g, 6, 0.05), Vector3.new(14, 0.1, 8), hero.color, true)
+	step.Material, step.Transparency = Enum.Material.Neon, 0.35
+	for _, x in { -8, 8 } do
+		lamp(parent, ring(g, 5, 7) * CFrame.new(x, 0, 0))
 	end
-	return buildPad(parent, def, center, size, board, 1)
+	return { name = hero.id .. "GateDown", cframe = ring(g, 6, 5), size = Vector3.new(14, 10, 8), target = target, text = text }
+end
+
+-- A gathering cellar: one vaulted hall like the first lobby (stone walls, piers, ceiling beams,
+-- braziers, banners, a carpet), no shop. `room`: the middle of its floor, -Z towards the back wall
+-- with the boards, +Z towards the gate back to the Colosseum. Returns the model, where players
+-- arrive (looking at the mosaics) and the box of the gate back.
+local function cellar(parent: Instance, name: string, room: CFrame, color: Color3, title: string, subtitle: string): (Model, CFrame, CFrame, Vector3)
+	local m = model(parent, name)
+	local w, d, h, t = CELLAR.width, CELLAR.depth, CELLAR.height, CELLAR.wall
+	local function box(partName: string, x: number, y: number, z: number, size: Vector3, colour: Color3, decor: boolean?): Part
+		return part(m, partName, room * CFrame.new(x, y, z), size, colour, decor)
+	end
+	box("CellarFloor", 0, -0.5, 0, Vector3.new(w + 2 * t, 1, d + 2 * t), SANDSTONE).Material = Enum.Material.Pavement
+	box("CellarCeiling", 0, h + 1, 0, Vector3.new(w + 2 * t, 2, d + 2 * t), DARK)
+	for _, s in { -1, 1 } do
+		box("CellarWall", s * (w / 2 + t / 2), h / 2, 0, Vector3.new(t, h, d + 2 * t), STONE)
+		box("CellarWall", 0, h / 2, s * (d / 2 + t / 2), Vector3.new(w, h, t), STONE)
+		box("WallBase", s * (w / 2 - 0.3), 1, 0, Vector3.new(0.6, 2, d), DARK, true)
+		box("WallBand", s * (w / 2 - 0.15), h - 3, 0, Vector3.new(0.3, 0.5, d), GOLD, true).Material = Enum.Material.Metal
+	end
+	-- the vault: pilasters along the side walls carry beams across the hall; four free piers
+	-- stand in the arrival half (the mosaics lie in the back half)
+	for z = -d / 2 + 6, d / 2 - 5, 12 do
+		for _, s in { -1, 1 } do
+			box("Pilaster", s * (w / 2 - 1), h / 2, z, Vector3.new(2, h, 2.4), SANDSTONE)
+			lamp(m, room * CFrame.new(s * (w / 2 - 2.6), 8, z))
+		end
+		box("VaultBeam", 0, h - 0.6, z, Vector3.new(w, 1.2, 1.6), SANDSTONE, true)
+	end
+	for _, z in { 4, 16 } do
+		for _, s in { -1, 1 } do
+			box("Pier", s * 13, h / 2, z, Vector3.new(2.6, h, 2.6), SANDSTONE)
+			box("PierBase", s * 13, 0.5, z, Vector3.new(3.6, 1, 3.6), STONE, true)
+			box("PierCapital", s * 13, h - 1.6, z, Vector3.new(3.6, 0.8, 3.6), GOLD, true).Material = Enum.Material.Metal
+		end
+	end
+	for _, s in { -1, 1 } do
+		brazier(m, room * CFrame.new(s * 8, 0, 20))
+		brazier(m, room * CFrame.new(s * 30, 0, 2))
+		part(m, "Bench", room * CFrame.new(s * 26, 1.1, 14), Vector3.new(3, 2.2, 9), WOOD)
+		banner(m, room * CFrame.new(s * 34.6, 9.5, 14) * CFrame.Angles(0, math.pi / 2, 0), color)
+		banner(m, room * CFrame.new(s * 34.6, 9.5, -8) * CFrame.Angles(0, math.pi / 2, 0), color)
+	end
+	local carpet = box("CellarCarpet", 0, 0.04, 9, Vector3.new(8, 0.08, 26), RUG, true)
+	carpet.Material = Enum.Material.Fabric
+	box("CarpetHem", 0, 0.05, 9, Vector3.new(8.6, 0.06, 26.6), GOLD, true).Material = Enum.Material.Metal
+	sign(m, "CellarName", room * CFrame.new(0, 13.4, -d / 2 + 0.4) * CFrame.Angles(0, math.pi, 0), title, subtitle, color, Vector2.new(30, 3.6))
+	-- the gate back to the Colosseum in the wall behind the arrival
+	local gateAt = room * CFrame.new(0, 0, d / 2)
+	for _, x in { -7.2, 7.2 } do
+		part(m, "GatePillar", gateAt * CFrame.new(x, 5.5, -0.9), Vector3.new(2, 11, 1.8), SANDSTONE)
+	end
+	part(m, "GateLintel", gateAt * CFrame.new(0, 10.6, -0.9), Vector3.new(16.4, 1.6, 1.8), SANDSTONE)
+	part(m, "GateDark", gateAt * CFrame.new(0, 4.9, -0.1), Vector3.new(12.4, 9.8, 0.2), Color3.fromRGB(24, 20, 18), true)
+	local glow = part(m, "GateGlow", gateAt * CFrame.new(0, 4.9, -0.4), Vector3.new(12.4, 9.8, 0.2), GOLD, true)
+	glow.Material, glow.Transparency = Enum.Material.Neon, 0.8
+	for x = -5.4, 5.41, 1.8 do
+		part(m, "IronBar", gateAt * CFrame.new(x, 4.9, -0.7), Vector3.new(0.28, 9.8, 0.3), IRON, true).Material = Enum.Material.Metal
+	end
+	local step = part(m, "GateStep", gateAt * CFrame.new(0, 0.05, -3), Vector3.new(12, 0.1, 5), color, true)
+	step.Material, step.Transparency = Enum.Material.Neon, 0.35
+	sign(m, "GateBackSign", gateAt * CFrame.new(0, 13.2, -0.5), "BACK TO THE COLOSSEUM", "Walk into the gate · up to the hall", GOLD, Vector2.new(20, 3.2))
+	zone(room * CFrame.new(0, h / 2, 0), Vector3.new(w, h + 4, d))
+	table.insert(carves, { cf = room * CFrame.new(0, h / 2 + 0.25, 0), size = Vector3.new(w + 2 * t - 1, h + 2.5, d + 2 * t - 1) })
+	return m, room * CFrame.new(0, 0, 9), gateAt * CFrame.new(0, 4.5, -3), Vector3.new(12, 9, 5)
+end
+
+-- A group mosaic in a cellar: at (x, z) of the room, its board on the back wall.
+local function cellarPad(buildPad: any, parent: Instance, def: any, room: CFrame, x: number, z: number, size: Vector2): any
+	local board = room * CFrame.new(x, 6.4, -CELLAR.depth / 2 + 0.5) * CFrame.Angles(0, math.pi, 0)
+	return buildPad(parent, def, room * CFrame.new(x, 0, z), size, board, 1)
 end
 
 -- Cages under the stands. A cage stands under tier 1, its back against the podium wall and its
@@ -281,7 +357,7 @@ end
 local PIER_RAYS = { 10, 30, 70, 110, 150, 170, 190, 250, 270, 290, 350 }
 local CAGE_BACK = Layout.PodiumThickness + 0.5
 local CAGE_FRONT, CAGE_HEIGHT = 12.6, 7.6 -- under tier 1: 8 studs of headroom
-local STABLE_FRONT, STABLE_HEIGHT = 21.6, 11 -- under tier 2: 14 studs of headroom
+local STABLE_FRONT, STABLE_HEIGHT = 24, 12.4 -- under tier 2: 14 studs of headroom; room for the war horse (12 long, 10.5 high with its rider)
 local function cage(parent: Instance, deg: number, width: number, stable: boolean): (CFrame, CFrame)
 	local m = model(parent, "ArchiveCage")
 	local half = width / 2
@@ -309,7 +385,7 @@ local function cage(parent: Instance, deg: number, width: number, stable: boolea
 		box("PrisonBars", bx, 0, height, front - 0.15, front + 0.15, 0.3)
 	end
 	-- the fighter looks out at the hall; its plaque hangs on the terrace's front above the bars
-	local slot = ring(deg, if stable then 16.6 else (CAGE_BACK + CAGE_FRONT) / 2) * CFrame.Angles(0, math.pi, 0)
+	local slot = ring(deg, if stable then 15.2 else (CAGE_BACK + CAGE_FRONT) / 2) * CFrame.Angles(0, math.pi, 0)
 	local plaque = ring(deg, front + (if stable then 0.65 else 0.75), if stable then 14 else 11) * CFrame.Angles(0, math.pi, 0)
 	return slot, plaque
 end
@@ -347,26 +423,10 @@ local function cages(parent: Instance, hero: any, slots: { CFrame }, plaques: { 
 	end
 end
 
--- In the Hub the hero gates stand open: the grilles and their collision go, the stone frame stays.
-local function openHeroGates(arena: Instance)
-	local gates = arena:FindFirstChild("Gates")
-	if not gates then
-		return
-	end
-	for _, entrance in gates:GetChildren() do
-		if entrance.Name:match("^ArenaEntrance") then
-			for _, item in entrance:GetChildren() do
-				if item.Name == "GateCollision" or item.Name == "IronBar" or item.Name == "GateBand" or item.Name == "TimberLeaves" then
-					item:Destroy()
-				end
-			end
-		end
-	end
-end
-
 function Architecture.build(buildPad: any): any
 	table.clear(volumes)
 	table.clear(shops)
+	table.clear(carves)
 	local existing = Workspace:FindFirstChild(Config.LobbyFolderName)
 	if existing then
 		existing:Destroy()
@@ -374,7 +434,7 @@ function Architecture.build(buildPad: any): any
 	-- Exactly the same builder, gates, sand, stands and galleries as the fight place.
 	local arenaFolder = Arena.build()
 	Arena.setGroundExits(true) -- in the Hub the ground floor, galleries and stands are part of the lobby
-	openHeroGates(arenaFolder)
+	local _ = arenaFolder -- the hero gates stay closed: the arena is no part of the lobby
 	local folder = Instance.new("Folder")
 	folder.Name = Config.LobbyFolderName
 	local pads, menus, liveDoors, liveBoards, matchActions = {}, {}, {}, {}, {}
@@ -382,45 +442,56 @@ function Architecture.build(buildPad: any): any
 	local soloPads: { [string]: any } = {}
 	local coopDefs: { [string]: any } = {}
 	local teamDefs: { [string]: any } = {}
+	local portals: { Portal } = {}
 	local hallFrames: { [string]: CFrame } = {}
 	local shopFrames: { [string]: CFrame } = {}
 	local archives, plaques, archiveIds = {}, {}, {}
 
-	---------------------------------------------------------------- the arena (open in the Hub)
-	-- Through every hero gate onto the sand: the solo start on the gate axis, the hall's co-op
-	-- group beside it and, with Kroko and Schili, the team's gathering mosaic on the other side.
-	local arena = model(folder, "ArenaGrounds")
+	---------------------------------------------------------------- the gates and the cellars
+	-- Otti's gate: the solo start in the gateway. Kroko's gate: down to the team cellar. Schili's
+	-- gate: down to the co-op cellar. The definitions of the group mosaics are made per hero.
 	for _, hero in HEROES do
 		local g = hero.angle
 		local gate = Layout.frame(math.rad(g), 0, FLOOR)
 		local approach = model(folder, hero.id .. "ArenaApproach")
-		sign(approach, "ArenaRampSign", gate * CFrame.new(0, 10.5, 8) * CFrame.Angles(0, math.pi, 0), "THE ARENA", "Solo start on the sand · groups gather in the bays", hero.color, Vector2.new(16, 3.5))
 		local length = if hero.id == "Otti" then Architecture.Anchors.ArrivalOffset - 9 else 36
-		local guide = part(approach, "ArenaGuide", gate * CFrame.new(0, 0.03, length / 2), Vector3.new(1.2, 0.06, length + 18), GOLD, true)
+		local guide = part(approach, "ArenaGuide", gate * CFrame.new(0, 0.03, length / 2 + 7), Vector3.new(1.2, 0.06, length - 14), GOLD, true)
 		guide.Material = Enum.Material.Neon
 		hallFrames[hero.id] = ring(g, 40)
-		local solo = sandPad(buildPad, arena, soloDefinition(hero), g, 14, Vector2.new(10, 10), true)
-		soloPads[hero.id] = solo
-		table.insert(pads, solo)
 		local coopId = if hero.id == "Otti" then "ZombieCoop" else hero.id .. "ZombieCoop"
-		coopDefs[hero.id] = coopDefinition(coopId, hero.emblem) -- gathering point: placed in the hall's bay below
+		coopDefs[hero.id] = coopDefinition(coopId, hero.emblem)
 		if hero.id ~= "Otti" then
 			local def = table.clone(assert(PadDefinitions.get(if hero.id == "Schili" then "TeamSchili" else "TeamKrokero"), "team pad missing"))
 			def.Actions = { { Id = "ConfirmTeam", Label = "READY TEAM" }, { Id = "Ready", Label = "READY" }, { Id = "LeaveGroup", Label = "LEAVE" } }
-			teamDefs[hero.id] = def -- team gathering point: placed in the hall's bay below
+			teamDefs[hero.id] = def
 		end
 	end
-	-- Training: six straw dummies in a ring around the middle, each looking outward
-	local training = {}
-	for k = 0, 5 do
-		table.insert(training, CFrame.new(FORECOURT.x, FORECOURT.y, 0) * CFrame.Angles(0, math.rad(30 + 60 * k), 0) * CFrame.new(0, 0, -16))
-	end
-	part(folder, "TrainingRing", CFrame.new(FORECOURT.x, FORECOURT.y + 0.03, 0), Vector3.new(44, 0.06, 44), YARD, true).Material = Enum.Material.Sand
-	part(folder, "ComboTrainingBoard", CFrame.new(FORECOURT.x, FORECOURT.y + 4.5, 36), Vector3.new(12, 9, 0.5), WOOD, true)
-	sign(folder, "TrainingEntrance", CFrame.new(FORECOURT.x, FORECOURT.y + 12, 36) * CFrame.Angles(0, math.pi, 0), "TRAINING", "Straw dummies on the Forecourt · practise attacks, blocks and specials · no rewards", nil, Vector2.new(14, 3))
-	local trainingCFrame = CFrame.new(FORECOURT.x, FORECOURT.y + 8, 0)
-	local trainingSize = Vector3.new(FORECOURT.width, 18, FORECOURT.depth)
+	local ottiHero, schiliHero, krokoHero = HEROES[1], HEROES[2], HEROES[3]
+	local solo = gatewayPad(buildPad, model(folder, "OttiSoloStart"), soloDefinition(ottiHero), ottiHero.angle)
+	soloPads.Otti = solo
+	table.insert(pads, solo)
 
+	local cellars = model(folder, "Cellars")
+	-- back up from a cellar: into the hall in front of the gate, looking away from it
+	local function hallArrival(hero: any): CFrame
+		return ring(hero.angle, 24) * CFrame.Angles(0, math.pi, 0)
+	end
+	-- THE TEAM CELLAR (Kroko's gate): the two teams face each other across the aisle
+	local teamRoom = CFrame.new(-40, CELLAR.y, 0)
+	local teamCellar, teamArrival, teamGate, teamGateSize = cellar(cellars, "TeamCellar", teamRoom, krokoHero.color, "TEAM CELLAR", "Team Schili against Team Krokero · every captain presses READY TEAM")
+	table.insert(pads, cellarPad(buildPad, teamCellar, teamDefs.Schili, teamRoom, -19, -8, Vector2.new(14, 14)))
+	table.insert(pads, cellarPad(buildPad, teamCellar, teamDefs.Kroko, teamRoom, 19, -8, Vector2.new(14, 14)))
+	banner(teamCellar, teamRoom * CFrame.new(0, 6.6, -CELLAR.depth / 2 + 0.3), GOLD)
+	table.insert(portals, gatePortal(model(folder, "KrokoGateDown"), krokoHero, "TEAM BATTLES", "Through this gate · down to the team cellar", teamArrival, "Team cellar · step on a team mosaic"))
+	table.insert(portals, { name = "TeamCellarUp", cframe = teamGate, size = teamGateSize, target = hallArrival(krokoHero), text = "Back in Kroko's hall" })
+	-- THE CO-OP CELLAR (Schili's gate): three group mosaics for the zombie arena
+	local coopRoom = CFrame.new(40, CELLAR.y, 0)
+	local coopCellar, coopArrival, coopGate, coopGateSize = cellar(cellars, "CoopCellar", coopRoom, ottiHero.color, "CO-OP CELLAR", "Zombie arena together · 1-4 players gather on a mosaic")
+	for i, id in { "Kroko", "Otti", "Schili" } do
+		table.insert(pads, cellarPad(buildPad, coopCellar, coopDefs[id], coopRoom, (i - 2) * 23, -9, Vector2.new(18, 12)))
+	end
+	table.insert(portals, gatePortal(model(folder, "SchiliGateDown"), schiliHero, "CO-OP ZOMBIES", "Through this gate · down to the co-op cellar", coopArrival, "Co-op cellar · gather on a mosaic"))
+	table.insert(portals, { name = "CoopCellarUp", cframe = coopGate, size = coopGateSize, target = hallArrival(schiliHero), text = "Back in Schili's hall" })
 
 	---------------------------------------------------------------- OTTI · the main lobby
 	local otti = HEROES[1]
@@ -445,8 +516,8 @@ function Architecture.build(buildPad: any): any
 	for _, x in { -26, 26 } do
 		banner(hall, ring(90, 52) * CFrame.new(x, 30, 0), otti.color)
 	end
-	sign(hall, "HallName", ring(90, 70, 20) * CFrame.Angles(0, math.pi, 0), "OTTI'S HALL", "The start · arena gate · zombie cages · the shops are in Rome", otti.color, Vector2.new(24, 4))
-	sign(hall, "ArenaSign", ring(90, 30, 15) * CFrame.Angles(0, math.pi, 0), "THE ARENA", "Straight ahead · through the open gate", GOLD, Vector2.new(16, 3.6))
+	sign(hall, "HallName", ring(90, 70, 20) * CFrame.Angles(0, math.pi, 0), "OTTI'S HALL", "The start · the gate to your solo fight · zombie cages · the shops are in Rome", otti.color, Vector2.new(24, 4))
+	sign(hall, "ArenaSign", ring(90, 30, 15) * CFrame.Angles(0, math.pi, 0), "YOUR FIGHT", "Straight ahead · step into the gate", GOLD, Vector2.new(16, 3.6))
 	-- The notice walls near the gate face the arrival: teams (stage 3) to the west, all modes,
 	-- bosses and live battles (stage 4) to the east
 	local west = noticeWall(hall, (ring(90, 24) * CFrame.new(-19, 0, 0)).Position, axis(A.ArrivalOffset), 18, 13)
@@ -468,17 +539,16 @@ function Architecture.build(buildPad: any): any
 	table.insert(liveBoards, liveCount)
 	revealStage = nil
 	-- Directions on posts beside the way: west to Otti's shop, Kroko's hall and Rome, east to
-	-- Schili's hall; the training and the groups are on the sand
+	-- Schili's hall; the groups gather in the cellars, the training is in Rome
 	revealStage = 1
 	signpost(hall, (ring(90, 44) * CFrame.new(-27, 0, 0)).Position, axis(44), "ROMA · SHOPS", "Weapons, shields, armor and helmets · through the west arch", otti.color)
 	revealStage = 3
-	signpost(hall, (ring(90, 44) * CFrame.new(27, 0, 0)).Position, axis(44), "GROUPS", "In the bays under the stands · the team gathers there", otti.color)
+	signpost(hall, (ring(90, 44) * CFrame.new(27, 0, 0)).Position, axis(44), "GROUPS", "In the cellars · through the gates of Kroko and Schili", otti.color)
 	revealStage = 2
-	signpost(hall, (ring(90, 33) * CFrame.new(-27, 0, 0)).Position, axis(33), "KROKO HALL · ROMA", "Legionaries · the west arch leads to Rome and the training yard", otti.color)
-	signpost(hall, (ring(90, 33) * CFrame.new(27, 0, 0)).Position, axis(33), "SCHILI HALL", "Ninjas · east", otti.color)
+	signpost(hall, (ring(90, 33) * CFrame.new(-27, 0, 0)).Position, axis(33), "KROKO HALL · TEAMS", "West · his gate leads down to the team cellar · further on: Rome", otti.color)
+	signpost(hall, (ring(90, 33) * CFrame.new(27, 0, 0)).Position, axis(33), "SCHILI HALL · CO-OP", "East · his gate leads down to the co-op cellar", otti.color)
 	revealStage = nil
 	cages(hall, otti, archives, plaques, archiveIds)
-	table.insert(pads, bayPad(buildPad, hall, coopDefs.Otti, 121.5, 35, Vector2.new(22, 14)))
 
 	---------------------------------------------------------------- SCHILI and KROKO
 	for index = 2, 3 do
@@ -492,14 +562,7 @@ function Architecture.build(buildPad: any): any
 		-- the monument beside the way, towards the stair tower; it looks at the gate axis
 		local monumentPosition = ring(g + s * 8, 46).Position
 		monument(small, facing(monumentPosition, ring(g, 40).Position), hero)
-		-- the hall's shop bay beyond the monument, then the boards on a notice wall facing the way
-		if kroko then
-			table.insert(pads, bayPad(buildPad, small, coopDefs[hero.id], 227, 35, Vector2.new(12, 12)))
-				table.insert(pads, bayPad(buildPad, small, teamDefs[hero.id], 235, 35, Vector2.new(12, 12)))
-		else
-			table.insert(pads, bayPad(buildPad, small, coopDefs[hero.id], 305, 35, Vector2.new(12, 12)))
-				table.insert(pads, bayPad(buildPad, small, teamDefs[hero.id], 313, 35, Vector2.new(12, 12)))
-		end
+		-- the boards on a notice wall facing the way
 		local boardsAt = ring(g + s * 33, 38).Position
 		local wall = noticeWall(small, boardsAt, ring(g + s * 10, 34).Position, 16, 13)
 		table.insert(menus, (sign(small, "AllModes", wall * CFrame.new(0, 7.4, 0), "PLAY · ALL MODES", "Solo · Co-op · Teams · Boss · Watch", hero.color, Vector2.new(14, 4))))
@@ -507,7 +570,7 @@ function Architecture.build(buildPad: any): any
 		local liveHost, count = sign(small, "WatchLive", wall * CFrame.new(0, 12, 0), "LIVE BATTLES", "No live battles", hero.color, Vector2.new(14, 4))
 		table.insert(liveDoors, liveHost)
 		table.insert(liveBoards, count)
-		sign(small, "HallName", ring(g, 62, 18) * CFrame.Angles(0, math.pi, 0), hero.name .. " HALL", if kroko then "Legionaries · the Kroko cages" else "Ninjas · the Schili cages", hero.color, Vector2.new(24, 4))
+		sign(small, "HallName", ring(g, 62, 18) * CFrame.Angles(0, math.pi, 0), hero.name .. " HALL", if kroko then "Legionaries · the gate leads down to the team cellar" else "Ninjas · the gate leads down to the co-op cellar", hero.color, Vector2.new(24, 4))
 		for _, deg in { g - 6, g + 6 } do
 			brazier(small, ring(deg, 50))
 			banner(small, ring(deg, 46, 26), hero.color)
@@ -530,15 +593,36 @@ function Architecture.build(buildPad: any): any
 	-- Spawns: direct joins in Otti's lobby facing the gate; later respawns and fighter returns close by
 	local arrival = spawn(folder, "LobbyArrivalSpawn", arrivalCF)
 	local respawn = spawn(folder, "LobbyRespawn", ring(A.RespawnAngle, A.RespawnOffset))
-	-- Where each intro stage points (LobbyIntroService): the solo start beyond Otti's gate, Otti's
-	-- shop, Schili's hall, the training ring on the sand and the boards near the gate
-	local introTargets = {
-		soloPads.Otti.cframe.Position,
-		Vector3.new(-272, -2, -20), -- the Handwerksgasse: the weapon shop beside the smithy in Rome
-		hallFrames.Schili.Position,
-		Vector3.new(FORECOURT.x, FORECOURT.y, 0),
-		(ring(90, 24) * CFrame.new(19, 0, 0)).Position,
+	-- Where each intro stage leads (LobbyIntroService): a list of waypoints on the floor, the last
+	-- one is the place itself. 0 the solo start in Otti's gate · 1 the shops in Rome (round the
+	-- hall to the west arch, across the Forecourt, down the Handwerksgasse) · 2 Schili's gate ·
+	-- 3 the training yard beside the smithy · 4 the boards near Otti's gate
+	local function floorPoint(deg: number, offset: number): Vector3
+		return ring(deg, offset).Position
+	end
+	local toRome = {
+		floorPoint(112, 54), floorPoint(134, 50), floorPoint(156, 54), floorPoint(176, 60),
+		floorPoint(exitDeg, Layout.facadeEnd() + 6),
+		Vector3.new(-200, 1, 0), Vector3.new(-236, -2, 0),
 	}
+	local function withRome(last: { Vector3 }): { Vector3 }
+		local path = table.clone(toRome)
+		for _, point in last do
+			table.insert(path, point)
+		end
+		return path
+	end
+	local introPaths: { { Vector3 } } = {
+		{ soloPads.Otti.cframe.Position },
+		withRome({ Vector3.new(-272, -2, 0) }), -- the Handwerksgasse between the smithy / weapon shop and the helm shop
+		{ floorPoint(68, 54), floorPoint(46, 50), floorPoint(24, 54), floorPoint(2, 54), floorPoint(340, 50), floorPoint(330, 14) },
+		withRome({ Vector3.new(-247.5, -2, -6), Vector3.new(-247.5, -2, -30), Vector3.new(-264, -2, -46) }),
+		{ (ring(90, 28) * CFrame.new(19, 0, 0)).Position },
+	}
+	local introTargets: { Vector3 } = {}
+	for _, path in introPaths do
+		table.insert(introTargets, path[#path])
+	end
 	Lighting.Ambient = Color3.fromRGB(96, 88, 78)
 	Lighting.OutdoorAmbient = Color3.fromRGB(128, 120, 106)
 	Lighting.Brightness = 2
@@ -556,6 +640,8 @@ function Architecture.build(buildPad: any): any
 		arenaGate = soloPads.Otti.ring,
 		arenaTriggers = {},
 		introTargets = introTargets,
+		introPaths = introPaths,
+		portals = portals,
 		bossBoard = bossHosts[1],
 		bossBoards = bossHosts,
 		modeBoards = menus,
@@ -566,16 +652,14 @@ function Architecture.build(buildPad: any): any
 		archiveSlots = archives,
 		archivePlaques = plaques,
 		archiveIds = archiveIds,
-		trainingSlots = training,
-		trainingCFrame = trainingCFrame,
-		trainingSize = trainingSize,
 		floorY = FLOOR,
 		hallFrames = hallFrames,
 		shopFrames = shopFrames,
 		cityExit = ring(exitDeg, Layout.facadeEnd() + 2),
 	}
 end
--- Inside a lobby room, on the open arena's sand or anywhere on the Colosseum's floors.
+-- Inside a lobby room or a cellar, or anywhere on the Colosseum's floors (the sand is closed, but
+-- a player who got onto it is still in the lobby: CellarService puts them back into the hall).
 function Architecture.isInside(p: Vector3): boolean
 	for _, v in volumes do
 		if inside(v, p) then
@@ -583,6 +667,18 @@ function Architecture.isInside(p: Vector3): boolean
 		end
 	end
 	return Arena.isInside(p) or Arena.isOnGrounds(p)
+end
+-- On the closed arena's sand (below the podium's top).
+function Architecture.isOnSand(p: Vector3): boolean
+	return Arena.isInside(p) and p.Y < FLOOR + Layout.PodiumHeight
+end
+-- The cellars' boxes (centre, size): RomeWorld clears the island's terrain there.
+function Architecture.cellarCarves(): { { cf: CFrame, size: Vector3 } }
+	local list = {}
+	for _, v in carves do
+		table.insert(list, { cf = v.cf, size = v.size })
+	end
+	return list
 end
 -- Rome's shops (ArmoryShops) register their rooms here, so the displays accept purchases there.
 -- `kinds` (Weapon / Shield / Armor / Helmet): what this room sells; nil sells everything.

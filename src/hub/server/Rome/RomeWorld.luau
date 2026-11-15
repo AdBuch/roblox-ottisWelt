@@ -83,6 +83,11 @@ function RomeWorld.build(openForge: (player: Player) -> (), openOracle: (player:
 	folder.Parent = Workspace
 	IslandBuilder.setupAtmosphere()
 	IslandBuilder.buildTerrain()
+	-- the gathering cellars under the arena (LobbyArchitecture) lie inside the island: clear the
+	-- terrain out of their rooms
+	for _, room in LobbyArchitecture.cellarCarves() do
+		Workspace.Terrain:FillBlock(room.cf, room.size, Enum.Material.Air)
+	end
 	IslandBuilder.buildRim(folder)
 	CityShell.build(folder)
 	local crossings = StreetBuilder.build(folder)

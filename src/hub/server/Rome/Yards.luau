@@ -1,5 +1,8 @@
 --!strict
--- Private ground behind the public way (RomeLayout.Yards / YardWalls):
+-- The ground behind the public way (RomeLayout.Yards / YardWalls):
+--   * the two TRAINING YARDS behind the smithy and the helm shop (the work yards of the
+--     Handwerksgasse): an open arched gate beside each shop leads in from the street; the straw
+--     dummies (TrainingService) stand on a strip of sand in the yard's free half
 --   * the lower work yards behind the shop fronts of the Handwerksgasse: beaten earth, a row of
 --     lean-to sheds one storey high (lower than the houses round them), a cart, firewood, a
 --     sawhorse, a grindstone and amphorae
@@ -32,6 +35,25 @@ local function wallPiece(parent: Instance, a: Vector3, b: Vector3, level: number
 	guard.CanQuery = false
 end
 
+-- An OPEN arched gate 6 wide and 8 high (the way into a training yard): two piers, an arch, a
+-- sign on both sides and two torches. Nothing blocks the opening.
+local function openGate(parent: Instance, center: Vector3, along: Vector3, level: number, label: string?)
+	local frame = CFrame.lookAt(Vector3.new(center.X, level, center.Z), Vector3.new(center.X, level, center.Z) + along)
+	local width, height = 6, 8
+	for _, s in { -1, 1 } do
+		Parts.part(parent, "GatePier", frame * CFrame.new(0, height / 2, s * (width / 2 + 0.6)), v(1.4, height + 0.6, 1.2), C.Limestone, { material = Enum.Material.Limestone })
+		Parts.flame(parent, frame * CFrame.new(0, height - 1.5, s * (width / 2 + 0.6)) * CFrame.new(1.1, 0, 0), 14, 0.5)
+		Parts.flame(parent, frame * CFrame.new(0, height - 1.5, s * (width / 2 + 0.6)) * CFrame.new(-1.1, 0, 0), 14, 0.5)
+	end
+	Parts.part(parent, "GateArch", frame * CFrame.new(0, height + 0.6, 0), v(1.4, 1.2, width + 2.4), C.Limestone, { material = Enum.Material.Limestone })
+	if label then
+		for _, side in { -1, 1 } do
+			-- the sign's text looks along its -Z: once towards the street, once into the lane
+			Parts.sign(parent, "TrainingSign", frame * CFrame.new(side * 0.85, height + 2.2, 0) * CFrame.Angles(0, side * math.pi / 2, 0), Vector2.new(width + 3, 2), "TRAINING", label, C.TimberDark)
+		end
+	end
+end
+
 -- A closed arched gate 4 wide: two piers, an arch, timber leaves (all solid).
 local function gate(parent: Instance, center: Vector3, along: Vector3, level: number)
 	local frame = CFrame.lookAt(Vector3.new(center.X, level, center.Z), Vector3.new(center.X, level, center.Z) + along)
@@ -48,7 +70,18 @@ end
 
 local function yard(parent: Instance, y: RomeLayout.Yard)
 	local model = Parts.model(parent, "Werkhof_" .. y.id)
-	model:SetAttribute("Private", true)
+	model:SetAttribute("Private", y.training == nil) -- the training yards are open to everybody
+	local training = y.training
+	if training then
+		-- the dummies stand on a strip of sand; a board on the shed side names the yard
+		local n = RomeLayout.TrainingDummiesPerYard
+		local cx = (y.x0 + y.x1) / 2
+		Parts.decor(model, "TrainingSand", CFrame.new(cx, y.level + 0.06, training.z), v(n * 12 + 8, 0.06, 16), Color3.fromRGB(196, 170, 120), Enum.Material.Sand)
+		local board = CFrame.lookAt(v(cx, y.level + 7, training.z - training.face * 12), v(cx, y.level + 7, training.z + training.face * 40))
+		Parts.part(model, "TrainingBoardPost", board * CFrame.new(-7, -3.5, 0.4), v(0.5, 7, 0.5), C.Timber, { collide = false, material = Enum.Material.Wood })
+		Parts.part(model, "TrainingBoardPost", board * CFrame.new(7, -3.5, 0.4), v(0.5, 7, 0.5), C.Timber, { collide = false, material = Enum.Material.Wood })
+		Parts.sign(model, "TrainingBoard", board, Vector2.new(16, 3.4), training.name, "Strohpuppen · Angriffe, Block und Spezialangriffe üben · keine Belohnung", C.TimberDark)
+	end
 	local cx, cz = (y.x0 + y.x1) / 2, (y.z0 + y.z1) / 2
 	local w, d = y.x1 - y.x0, y.z1 - y.z0
 	Parts.decor(model, "YardGround", CFrame.new(cx, y.level + 0.03, cz), v(w, 0.06, d), Color3.fromRGB(150, 122, 92), Enum.Material.Ground)
@@ -94,9 +127,16 @@ function Yards.build(parent: Instance)
 		if w.gate then
 			local g = a + (b - a) * w.gate
 			local half = 2 + 1 -- gate opening plus its piers
+			if w.open then
+				half = 3 + 1.3
+			end
 			wallPiece(model, a, g - along * half, w.level)
 			wallPiece(model, g + along * half, b, w.level)
-			gate(model, g, along, w.level) -- the gate frame looks along the wall (Z: along, X: through)
+			if w.open then
+				openGate(model, g, along, w.level, w.label)
+			else
+				gate(model, g, along, w.level) -- the gate frame looks along the wall (Z: along, X: through)
+			end
 		else
 			wallPiece(model, a, b, w.level)
 		end

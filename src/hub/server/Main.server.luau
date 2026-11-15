@@ -1,7 +1,8 @@
 --!strict
 -- OTTI HUB (start place) server entry. Builds the three hero lobbies INTO the Colosseum's ground
--- hall (Otti's lobby with the zombie archive, the shop street, the training yard, Schili's and
--- Krokero's lobbies with their groups) and Rome around it (Rome/RomeWorld). Starts the Hub
+-- hall (Otti's lobby with the zombie archive and the solo start in his gate, Schili's and
+-- Krokero's lobbies whose gates lead down to the co-op and team cellars) and Rome around it
+-- (Rome/RomeWorld: shops, smithy, the two training yards). Starts the Hub
 -- services: persistent data, equipment, training combat, parties, matchmaking, live battles and
 -- the teleports to reserved Arena servers. No arena match ever runs in the Hub.
 
@@ -34,6 +35,9 @@ local TeleportUtil = require(Server.TeleportUtil)
 local TrainingService = require(Server.TrainingService)
 local ZombieDisplayService = require(Server.ZombieDisplayService)
 local HubMatchService = require(script.Parent.HubMatchService)
+local HubTeleportService = require(script.Parent.HubTeleportService)
+local CellarService = require(script.Parent.CellarService)
+local RomeLayout = require(script.Parent.Rome.RomeLayout)
 local LobbyIntroService = require(script.Parent.LobbyIntroService)
 
 if EnvironmentConfig.role() ~= "Hub" then
@@ -54,7 +58,7 @@ end
 
 -- World: the three hero lobbies, plus the shared playable Colosseum architecture.
 local lobby = LobbyService.build()
-print(PREFIX, ("Lobby ready: %d pads, three hero halls, shop street, training yard, tribunes"):format(#lobby.pads))
+print(PREFIX, ("Lobby ready: %d pads, three hero halls, two cellars, %d gateways, tribunes"):format(#lobby.pads, #lobby.portals))
 local _ = Remotes
 
 -- Lobby combat rules: only the training dummies can be hit, nobody can be hurt
@@ -88,7 +92,13 @@ PlayerDataService.init(function(player: Player) -- same schema and store as the 
 end)
 PlayerCombatService.init()
 LoadoutRequestService.init() -- equip OWNED gear from the lobby menu (server-validated)
-TrainingService.build(lobby.folder, lobby.trainingSlots, lobby.trainingCFrame, lobby.trainingSize)
+-- Training: the straw dummies stand in the two yards behind the smithy and the helm shop in Rome
+local trainingSlots, trainingAreas = RomeLayout.training()
+TrainingService.build(lobby.folder, trainingSlots, trainingAreas)
+-- The gates down to the cellars and back; nobody stays on the closed arena's sand
+CellarService.start(lobby.portals, LobbyService.isOnSand, lobby.spawnCFrame, function(player: Player, text: string)
+	HubTeleportService.message(player, text, true)
+end)
 ZombieDisplayService.build(lobby.folder, lobby.archiveSlots, lobby.archivePlaques, lobby.archiveIds)
 HubMatchService.init(lobby)
 
@@ -112,7 +122,7 @@ end
 local romeRequest = remote("RomeRequest", "RemoteFunction") :: RemoteFunction
 local romeEvent = remote("RomeEvent", "RemoteEvent") :: RemoteEvent
 local forumRespawn: CFrame? = nil
--- Safety: a fall over the world's rim -> once to the forum fountain (the arena sand is open; the training yard lies on the Forecourt)
+-- Safety: a fall over the world's rim -> once to the forum fountain (the cellars lie above the deep-fall line)
 WorldEdgeService.start(function()
 	return forumRespawn
 end, lobby.spawnCFrame, function(player: Player, kind: string)

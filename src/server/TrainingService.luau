@@ -1,5 +1,6 @@
 --!strict
--- Safe training area in the lobby: straw dummies that take hits from basic attacks, specials and
+-- Safe training areas (the Hub: the two yards behind the smithy and the helm shop in Rome,
+-- RomeLayout.training): straw dummies that take hits from basic attacks, specials and
 -- combos. They show damage numbers (via the normal Hit feedback), never die permanently, never
 -- give Aura, statistics or eliminations. They refill after a short pause. The last dummy is a
 -- SPARRING dummy that swings (Mid / High / Low, telegraphed) for Block / Perfect Block practice.
@@ -22,8 +23,8 @@ export type Dummy = {
 local TrainingService = {}
 
 local dummies: { [Model]: Dummy } = {}
-local zoneCFrame = CFrame.identity
-local zoneSize = Vector3.zero
+export type Area = { cframe: CFrame, size: Vector3 }
+local zones: { Area } = {}
 local startSparring: (dummy: Dummy) -> ()
 
 -- The client shows a contextual health bar from these attributes (ContextHealthController).
@@ -67,9 +68,9 @@ local function buildDummy(parent: Instance, base: CFrame, index: number): Dummy
 	return dummy
 end
 
-function TrainingService.build(parent: Instance, slots: { CFrame }, areaCFrame: CFrame, areaSize: Vector3)
-	zoneCFrame = areaCFrame
-	zoneSize = areaSize
+-- `areas`: the training yards (boxes). Hits on dummies only count for players standing in one.
+function TrainingService.build(parent: Instance, slots: { CFrame }, areas: { Area })
+	zones = areas
 	for index, slot in slots do
 		local dummy = buildDummy(parent, slot, index)
 		if index == #slots then
@@ -94,10 +95,15 @@ function TrainingService.build(parent: Instance, slots: { CFrame }, areaCFrame: 
 end
 
 function TrainingService.isInTrainingArea(position: Vector3): boolean
-	local localPosition = zoneCFrame:PointToObjectSpace(position)
-	return math.abs(localPosition.X) <= zoneSize.X / 2
-		and math.abs(localPosition.Y) <= zoneSize.Y / 2
-		and math.abs(localPosition.Z) <= zoneSize.Z / 2
+	for _, zone in zones do
+		local localPosition = zone.cframe:PointToObjectSpace(position)
+		if math.abs(localPosition.X) <= zone.size.X / 2
+			and math.abs(localPosition.Y) <= zone.size.Y / 2
+			and math.abs(localPosition.Z) <= zone.size.Z / 2 then
+			return true
+		end
+	end
+	return false
 end
 
 function TrainingService.getDummies(): { Dummy }

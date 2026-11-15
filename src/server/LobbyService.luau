@@ -43,20 +43,19 @@ export type LobbyLayout = {
 	pads: { PadLayout },
 	bossBoard: BasePart,
 	bossBoards: { BasePart },
-	arenaTriggers: { BasePart }, -- none any more: the gates stand open, the solo start is a mosaic on the sand
+	arenaTriggers: { BasePart }, -- none: the solo start is the mosaic in Otti's gateway
 	introTargets: { Vector3 }, -- where each Hub intro stage points (index = stage + 1)
+	introPaths: { { Vector3 } }, -- the waypoints the intro arrows follow to that place
+	portals: { { name: string, cframe: CFrame, size: Vector3, target: CFrame, text: string } }, -- gateways to and from the cellars (CellarService)
 	matchActions: { { part: BasePart, mode: string } },
 	modeBoards: { BasePart },
-	arenaGate: BasePart, -- the solo start mosaic beyond Otti's gate
+	arenaGate: BasePart, -- the solo start mosaic in Otti's gateway
 	tribuneDoors: { BasePart }, -- WATCH LIVE entrances at the top of the side stairs
 	liveBoards: { TextLabel }, -- live battle count on every hall's LIVE BATTLES sign
 	liveCFrame: CFrame, -- where returning spectators arrive
 	archiveSlots: { CFrame },
 	archivePlaques: { CFrame },
 	archiveIds: { string }, -- the fighter shown in each cage (ZombieDefinitions id)
-	trainingSlots: { CFrame },
-	trainingCFrame: CFrame,
-	trainingSize: Vector3,
 	floorY: number,
 }
 
@@ -182,5 +181,8 @@ function LobbyService.isInside(position: Vector3): boolean
 end
 function LobbyService.isInArmory(position: Vector3): boolean
     return Architecture.isInArmory(position)
+end
+function LobbyService.isOnSand(position: Vector3): boolean
+    return Architecture.isOnSand(position)
 end
 return LobbyService
