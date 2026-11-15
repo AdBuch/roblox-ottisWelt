@@ -280,6 +280,33 @@ local f = newPlayer(9)
 Inv.load(f, savedB, 0, 0, nil)
 check(f.attrs.EarnedDenarii == b.attrs.EarnedDenarii and f.attrs.LastBattleMode == "Solo" and f.attrs.SessionAura == b.attrs.SessionAura, "earnings, session and last battle survive the teleport")
 
+-- A reconnect may coexist with its old Player instance until the old release finishes.
+local reconnect = newPlayer(e.UserId)
+Inv.load(reconnect, Inv.serialize(e), 0, 0, nil)
+Inv.addDenarii(e, 10)
+check(Inv.getDenarii(reconnect) == 87, "simultaneous Player instances do not share an in-memory profile")
+Inv.forget(e)
+check(Inv.getAura(reconnect) == 50000, "forgetting a departing Player preserves the reconnect")
+
+local revisions = 0
+Inv.onChanged(function(player)
+	if player == reconnect then revisions += 1 end
+end)
+local frozen = false
+Inv.setMutationGuard(function(player) return player ~= reconnect or not frozen end)
+local snapshot = Inv.serialize(reconnect)
+Inv.addActiveSeconds(reconnect, 5)
+check(revisions == 1 and Inv.serialize(reconnect).activity.seconds == snapshot.activity.seconds + 5, "activity advances the revision synchronously")
+local copy = Inv.copyInUse(reconnect, "RustyGladius")
+copy.wear = -999
+check(Inv.copyInUse(reconnect, "RustyGladius").wear ~= -999, "mutable copy data does not escape through read access")
+frozen = true
+Inv.addReward(reconnect, 50, 50)
+Inv.addActiveSeconds(reconnect, 5)
+Inv.recordReceipt(reconnect, "TRANSFER-RECEIPT")
+check(not Inv.spendDenarii(reconnect, 1) and revisions == 1 and Inv.getDenarii(reconnect) == 87
+	and not Inv.hasReceipt(reconnect, "TRANSFER-RECEIPT"), "the transfer guard freezes balances, activity and receipts")
+
 print("PASS: " .. checks .. " checks against the actual Luau sources (mock Roblox services).")
 '@
 $target = Join-Path ([System.IO.Path]::GetTempPath()) ("OttiProgression-" + [guid]::NewGuid().ToString() + ".luau")

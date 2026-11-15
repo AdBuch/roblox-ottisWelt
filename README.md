@@ -629,19 +629,12 @@ mock data unless `StudioMockData = false`. Loaded data always goes through
 `InventoryService.migrateProfile` (legacy `coins`, missing armor, unknown ids are dropped, starter items guaranteed).
 - **Load** on join with 3 retries. While loading (`DataStatus = Loading`) the armory refuses purchases.
 - **Load failed / no API access:** a fresh profile marked `Unsaved` — it is never written, so saved progress can't be wiped.
-- **Save:** 8 s after a change (purchase, equip, Aura reward, preference), every 120 s if dirty, on leave and on
-  shutdown (`BindToClose`) via `UpdateAsync`.
-- **Confirmed saves only:** a save counts when `UpdateAsync` returned this very record (its `saveId`). A failed or
-  refused write is reported as not saved (`flush` / `beginTransfer` answer `false`) and the profile stays dirty: every
-  change raises a counter, and only a confirmed save that covered it clears it.
-- **One write at a time per profile:** a save that starts while another runs waits for it, then writes what is still
-  unsaved. Nothing is dropped.
-- **One server per profile (`lock` in the record):** the load claims the lock. A profile held by another server is not
-  read; the load waits up to 20 s for the release (the last save of a session and the flush before a teleport release
-  it) and then takes it over (at once when the lock is older than 30 minutes). A server that lost the lock writes
-  nothing more and sends the player out, so it can't overwrite the newer server's data.
-- **Shutdown:** `BindToClose` starts the last save of every profile and waits until every running write (its own, the
-  leave saves, autosaves) has answered, at most 25 s.
+- **Save:** 8 s after a gameplay change, every 120 s to renew the lease, and on leave or shutdown.
+- **Confirmation:** `flush` requires a confirmed revision. A timeout leaves any in-flight write tracked.
+- **Ownership:** each acquisition uses a unique lease token and an increasing epoch. A competing load can
+  acquire an expired or released lease. A release and a new acquisition are serialized by `UpdateAsync`.
+- **Release:** teleports require a confirmed release. Shutdown waits up to 25 s for pending profiles and logs
+  any unconfirmed releases. See the [player data API and rollout requirements](docs/PLAYER_DATA_API.md).
 - **Robux receipts** are granted only on a profile that can be saved, and confirmed to Roblox only after a confirmed
   save; the saved receipt id prevents a second grant.
 - **Test:** `scripts/test-player-data.ps1 -LuauPath <luau.exe>` (mock DataStore, several servers).
