@@ -6,7 +6,11 @@
 --   * Hub place only (the Arena never changes gear), saved data loaded and not mid-teleport
 --   * lobby state + lobby location, no match being prepared (MatchTransition) -> no changes during a
 --     fight or the transition into one
---   * the player OWNS the item (buying stays in the Gladiator Armory; equipping never costs Denarii)
+--   * "Equip": the player OWNS the item (equipping never costs Denarii)
+--   * "Buy" (shop menu): the player stands in the Rome shop that sells this kind. Denarii items
+--     are bought through InventoryService.purchase; a Robux helmet (HelmetDefinitions.Robux) goes
+--     to the Robux buyer (TownServices.buyHelmet): the answer carries the product id the client
+--     prompts, and the receipt handler grants and equips the helmet
 -- Then InventoryService.equip (two-handed rule: a shield choice is kept but unused while a
 -- two-handed weapon is equipped) and PlayerCombatService.refreshEquipment rebuilds weapon, shield
 -- and armor models (attack chain, walk speed and animations follow the new weapon). The profile is
@@ -18,17 +22,25 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
 local EnvironmentConfig = require(ReplicatedStorage.Shared.EnvironmentConfig)
 local GameStates = require(ReplicatedStorage.Shared.GameStates)
+local HelmetDefinitions = require(ReplicatedStorage.Shared.HelmetDefinitions)
+local CombatUtil = require(script.Parent.CombatUtil)
 local InventoryService = require(script.Parent.InventoryService)
 local PlayerCombatService = require(script.Parent.PlayerCombatService)
 local PlayerDataService = require(script.Parent.PlayerDataService)
 local RateLimiter = require(script.Parent.RateLimiter)
 local Remotes = require(script.Parent.Remotes)
 
-export type Response = { ok: boolean, message: string, code: string, data: { [string]: string }? }
+export type Response = { ok: boolean, message: string, code: string, data: { [string]: string }?, productId: number? }
 
 local LoadoutRequestService = {}
 
 local limiter = RateLimiter.new({ Equip = 0.35 }, 0.35)
+local robuxBuyer: ((player: Player, id: string) -> { [string]: any })? = nil
+
+-- The Hub's Robux counter (TownServices.buyHelmet). Without it Robux helmets can't be bought.
+function LoadoutRequestService.setRobuxBuyer(buyer: (player: Player, id: string) -> { [string]: any })
+	robuxBuyer = buyer
+end
 
 local function loadout(player: Player): { [string]: string }
 	return {
@@ -66,7 +78,7 @@ function LoadoutRequestService.handle(player: Player, action: unknown, kind: unk
 	if typeof(action) ~= "string" or not limiter.allow(player, action) then
 		return refuse("RATE", "Einen Moment …")
 	end
-	if action ~= "Equip" then
+	if action ~= "Equip" and action ~= "Buy" then
 		return refuse("INVALID", "Unbekannte Anfrage")
 	end
 	if not InventoryService.isItem(kind, id) then
@@ -78,8 +90,34 @@ function LoadoutRequestService.handle(player: Player, action: unknown, kind: unk
 	if code then
 		return refuse(code, message :: string)
 	end
+	if action == "Buy" then
+		-- buying only inside a shop room that sells this kind (Rome's shops, the shop menu)
+		local _, _, root = CombatUtil.getLivingCharacter(player)
+		local LobbyArchitecture = require(script.Parent.LobbyArchitecture) :: any -- Hub only (lockReason above refuses the Arena)
+		if not root or not LobbyArchitecture.armorySells(root.Position, itemKind) then
+			return refuse("NOT_IN_SHOP", "Kaufen kannst du nur im passenden Laden in Rom")
+		end
+		if InventoryService.owns(player, itemKind, itemId) then
+			return refuse("OWNED", "Bereits in deinem Besitz")
+		end
+		if itemKind == "Helmet" and HelmetDefinitions.ById[itemId].Robux > 0 then
+			if not robuxBuyer then
+				return refuse("REFUSED", "Robux-Käufe sind hier nicht möglich")
+			end
+			local answer = robuxBuyer(player, itemId)
+			return { ok = answer.ok == true, code = tostring(answer.code), message = tostring(answer.message), productId = answer.productId, data = loadout(player) }
+		end
+		local bought, message = InventoryService.purchase(player, itemKind, itemId)
+		if not bought then
+			return refuse("REFUSED", message)
+		end
+		print("[OttiArena][Shop]", player.Name, message)
+		InventoryService.equip(player, itemKind, itemId)
+		PlayerCombatService.refreshEquipment(player)
+		return { ok = true, code = "BOUGHT", message = message, data = loadout(player) }
+	end
 	if not InventoryService.owns(player, itemKind, itemId) then
-		return refuse("NOT_OWNED", "Nicht in deinem Besitz · erhältlich in der Gladiatorenwaffenkammer")
+		return refuse("NOT_OWNED", "Nicht in deinem Besitz · erhältlich in den Läden in Rom")
 	end
 	if InventoryService.isEquipped(player, itemKind, itemId) then
 		return { ok = true, code = "ALREADY", message = "Bereits ausgerüstet", data = loadout(player) }

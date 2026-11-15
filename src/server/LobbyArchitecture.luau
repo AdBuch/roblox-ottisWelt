@@ -58,7 +58,7 @@ Architecture.Anchors = table.freeze({
 	CityExitAngle = 180, -- the facade's west arch: the way to Rome
 })
 
-type Volume = { cf: CFrame, size: Vector3 }
+type Volume = { cf: CFrame, size: Vector3, kinds: { [string]: boolean }? }
 local volumes: { Volume } = {}
 local shops: { Volume } = {}
 local function inside(v: Volume, p: Vector3): boolean
@@ -585,8 +585,26 @@ function Architecture.isInside(p: Vector3): boolean
 	return Arena.isInside(p) or Arena.isOnGrounds(p)
 end
 -- Rome's shops (ArmoryShops) register their rooms here, so the displays accept purchases there.
-function Architecture.addArmoryVolume(cf: CFrame, size: Vector3)
-	table.insert(shops, { cf = cf, size = size })
+-- `kinds` (Weapon / Shield / Armor / Helmet): what this room sells; nil sells everything.
+function Architecture.addArmoryVolume(cf: CFrame, size: Vector3, kinds: { string }?)
+	local set: { [string]: boolean }? = nil
+	if kinds then
+		local s: { [string]: boolean } = {}
+		for _, kind in kinds do
+			s[kind] = true
+		end
+		set = s
+	end
+	table.insert(shops, { cf = cf, size = size, kinds = set })
+end
+-- Inside a shop room that sells `kind`.
+function Architecture.armorySells(p: Vector3, kind: string): boolean
+	for _, v in shops do
+		if inside(v, p) and (v.kinds == nil or (v.kinds :: { [string]: boolean })[kind] == true) then
+			return true
+		end
+	end
+	return false
 end
 function Architecture.isInArmory(p: Vector3): boolean
 	for _, v in shops do

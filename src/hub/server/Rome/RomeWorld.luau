@@ -4,6 +4,7 @@
 -- interior), the countryside, and the three townspeople with their counters. The Colosseum and
 -- the lobbies inside it come from LobbyService; only the Arena builder's endless granite plate is
 -- removed here (the island replaces it). Nothing of this runs in the Arena place.
+local CollectionService = game:GetService("CollectionService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -28,6 +29,14 @@ local LobbyArchitecture = require(Server.LobbyArchitecture)
 
 local PREFIX = "[OttiArena][Rome]"
 local RomeWorld = {}
+
+-- what each shop room sells (item kinds of InventoryService)
+local SHOP_SELLS: { [string]: { string } } = {
+	WeaponShop = { "Weapon" },
+	HelmShop = { "Helmet" },
+	ArmorShop = { "Armor" },
+	ShieldShop = { "Shield" },
+}
 
 export type World = {
 	folder: Folder,
@@ -59,6 +68,12 @@ function RomeWorld.build(openForge: (player: Player) -> (), openOracle: (player:
 	if plate then
 		plate:Destroy() -- the island replaces the endless granite plate
 	end
+	-- the grey Baseplate of Studio's place template would show through the town's ground
+	for _, child in Workspace:GetChildren() do
+		if child:IsA("BasePart") and child.Name == "Baseplate" then
+			child:Destroy()
+		end
+	end
 	local old = Workspace:FindFirstChild("Rome")
 	if old then
 		old:Destroy()
@@ -80,7 +95,11 @@ function RomeWorld.build(openForge: (player: Player) -> (), openOracle: (player:
 		if h.special == "Smithy" then
 			Smithy.build(model, frame, h)
 		else
-			ArmoryShops.build(model, frame, h)
+			-- a shop must never stop the town: on an error the house stays an empty shell
+			local ok, err = pcall(ArmoryShops.build, model, frame, h)
+			if not ok then
+				warn(PREFIX, "shop room failed", h.id, err)
+			end
 		end
 	end
 	local houses: { [string]: Model } = {}
@@ -95,15 +114,35 @@ function RomeWorld.build(openForge: (player: Player) -> (), openOracle: (player:
 	-- the townspeople
 	local people = Parts.folder(folder, "Townspeople")
 	-- the shops: display racks (EquipmentShopService), the purchase volume and a shopkeeper at the counter
-local shopFolder = Parts.folder(folder, "Shops")
-for _, shop in ArmoryShops.shops() do
-	EquipmentShopService.build(shopFolder, shop.layout)
-	LobbyArchitecture.addArmoryVolume(shop.volume.cf, shop.volume.size)
-	local keeper = RomeNpc.spawn(people, "Haendler", shop.keeper, shop.look)
-	keeper.model:SetAttribute("Role", "Shopkeeper")
-	keeper.model:SetAttribute("ShopKind", shop.kind)
-end
-local smithy = assert(Smithy.result(), "smithy not built")
+	local shopFolder = Parts.folder(folder, "Shops")
+	for _, shop in ArmoryShops.shops() do
+		local ok, err = pcall(function()
+			local kinds = SHOP_SELLS[shop.kind] or { "Weapon" }
+			EquipmentShopService.build(shopFolder, shop.layout, true) -- displays only, the menu sells
+			LobbyArchitecture.addArmoryVolume(shop.volume.cf, shop.volume.size, kinds)
+			-- the room as an invisible zone: walking in opens the shop menu (LobbyMenuController)
+			local zone = Instance.new("Part")
+			zone.Name = "ShopZone_" .. shop.kind
+			zone.Anchored = true
+			zone.CanCollide = false
+			zone.CanQuery = false
+			zone.CanTouch = false
+			zone.Transparency = 1
+			zone.CFrame = shop.volume.cf
+			zone.Size = shop.volume.size
+			zone:SetAttribute("ShopKinds", table.concat(kinds, ","))
+			zone:SetAttribute("ShopName", shop.name)
+			CollectionService:AddTag(zone, Config.ShopZoneTag)
+			zone.Parent = shopFolder
+			local keeper = RomeNpc.spawn(people, "Haendler", shop.keeper, shop.look)
+			keeper.model:SetAttribute("Role", "Shopkeeper")
+			keeper.model:SetAttribute("ShopKind", shop.kind)
+		end)
+		if not ok then
+			warn(PREFIX, "shop failed", shop.kind, err)
+		end
+	end
+	local smithy = assert(Smithy.result(), "smithy not built")
 	local smith = RomeNpc.spawn(people, "Faber", smithy.smithSpot, { skin = Color3.fromRGB(196, 150, 112), cloth = Color3.fromRGB(120, 92, 70), accent = Color3.fromRGB(88, 60, 40), apron = true })
 	smith.model:SetAttribute("Role", "Smith")
 	prompt(smith.root, "Waffe verbessern", "Faber · Schmied", function(player)

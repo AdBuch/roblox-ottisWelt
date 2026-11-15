@@ -9,6 +9,7 @@ local Config = {
 	ZombiesFolderName = "Zombies",
 	ProjectilesFolderName = "Projectiles",
 	ShopItemTag = "OttiShopItem",
+	ShopZoneTag = "OttiShopZone", -- Rome's shop rooms: walking in opens the shop menu (attribute ShopKinds)
 	ZombieDisplayTag = "ZombieDisplay", -- archive cage zombies: never combat targets
 	TrainingDummyTag = "TrainingDummy",
 

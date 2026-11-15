@@ -648,19 +648,294 @@ function EquipmentModels.buildArmor(id: string, body: Model): Model
 end
 
 ------------------------------------------------------------------------------------------
--- Helmets (HelmetDefinitions): a shell over the head plus the piece of each helmet, welded to the
--- body's "Head" part (R15, R6 and the mannequins). "NoHelmet" builds nothing. Visual only; the
--- protection is in the damage numbers (PlayerCombatService.armorReduction).
+-- Helmets (HelmetDefinitions): welded to the body's "Head" part (R15, R6 and the mannequins).
+-- "NoHelmet" builds nothing. Visual only; the protection is in the damage numbers
+-- (PlayerCombatService.armorReduction). Every helmet is drawn in HEAD UNITS (1 = the head's
+-- height), the face looks along -Z:
+--   Denarii  SpartaHelm, MurmilloHelm (gladiator), ChampionCrest (Roman general)
+--   Robux    the three friends (OttiHead, SchiliHead, KrokoHead), animals (DragonHead, RhinoHead,
+--            ToroHead, MonkeyHead) and foreign fighters (SamuraiHelm, SoldierHelm, IncaHelm).
+--            The animal heads are whole masks over the head.
 ------------------------------------------------------------------------------------------
 
 local HELM_BRONZE = Color3.fromRGB(176, 125, 60)
 local HELM_STEEL = Color3.fromRGB(170, 172, 180)
 local HELM_CREST = Color3.fromRGB(150, 32, 36)
 local HELM_GOLD = Color3.fromRGB(214, 176, 80)
+local HELM_DARK = Color3.fromRGB(30, 28, 30)
+local HELM_CREAM = Color3.fromRGB(232, 214, 178)
+
+type HelmPiece = (name: string, size: Vector3, offset: CFrame, color: Color3, material: Enum.Material?, shape: Enum.PartType?) -> Part
+type HelmBuilder = (piece: HelmPiece) -> ()
+
+local METAL = Enum.Material.Metal
+local SMOOTH = Enum.Material.SmoothPlastic
+local FABRIC = Enum.Material.Fabric
+local FLAT = CFrame.Angles(0, 0, math.rad(90)) -- cylinder axis X -> Y (a lying disc)
+local FRONT = CFrame.Angles(0, math.rad(90), 0) -- cylinder axis X -> Z (a disc facing the front)
+
+local function v(x: number, y: number, z: number): Vector3
+	return Vector3.new(x, y, z)
+end
+local function at(x: number, y: number, z: number): CFrame
+	return CFrame.new(x, y, z)
+end
+local function deg(x: number, y: number, z: number): CFrame
+	return CFrame.Angles(math.rad(x), math.rad(y), math.rad(z))
+end
+
+-- two eyes on the front of a mask
+local function eyes(piece: HelmPiece, x: number, y: number, z: number, size: number, color: Color3, material: Enum.Material?)
+	for _, side in { -1, 1 } do
+		piece("Eye", v(size, size, size * 0.6), at(side * x, y, z), color, material or SMOOTH, BALL)
+	end
+end
+
+local HELMETS: { [string]: HelmBuilder } = {}
+
+-- DENARII ---------------------------------------------------------------------------------
+
+HELMETS.SpartaHelm = function(piece)
+	-- Corinthian bronze helm: deep bowl, long cheek plates, nose guard, horsehair crest front to back
+	piece("Shell", v(1.22, 0.7, 1.22), at(0, 0.3, 0), HELM_BRONZE, METAL, BALL)
+	piece("Bowl", v(1.2, 0.5, 1.2), at(0, 0.12, 0.02), HELM_BRONZE, METAL)
+	piece("NeckGuard", v(1.16, 0.5, 0.14), at(0, -0.3, 0.56), HELM_BRONZE, METAL)
+	for _, side in { -1, 1 } do
+		piece("CheekGuard", v(0.12, 0.75, 0.9), at(side * 0.58, -0.3, 0.1), HELM_BRONZE, METAL)
+		piece("CheekFront", v(0.34, 0.7, 0.1), at(side * 0.42, -0.3, -0.6), HELM_BRONZE, METAL)
+	end
+	piece("NoseGuard", v(0.12, 0.5, 0.1), at(0, -0.12, -0.63), HELM_BRONZE, METAL)
+	piece("BrowBand", v(1.24, 0.08, 0.1), at(0, 0.14, -0.62), HELM_GOLD, METAL)
+	piece("CrestHolder", v(0.12, 0.14, 1.0), at(0, 0.68, 0.05), HELM_BRONZE, METAL)
+	piece("Crest", v(0.16, 0.42, 1.25), at(0, 0.94, 0.12), HELM_CREST, FABRIC)
+	piece("CrestTail", v(0.14, 0.5, 0.16), at(0, 0.55, 0.78) * deg(-25, 0, 0), HELM_CREST, FABRIC)
+end
+
+HELMETS.MurmilloHelm = function(piece)
+	-- Gladiator (murmillo): steel dome, wide brim, grille visor, tall fish crest
+	piece("Shell", v(1.2, 0.72, 1.2), at(0, 0.32, 0), HELM_STEEL, METAL, BALL)
+	piece("Brim", v(0.08, 1.7, 1.7), at(0, 0.16, 0) * FLAT, HELM_BRONZE, METAL, CYLINDER)
+	piece("Visor", v(1.0, 0.62, 0.12), at(0, -0.18, -0.6), HELM_STEEL, METAL)
+	for _, x in { -0.3, -0.1, 0.1, 0.3 } do
+		piece("Grille", v(0.06, 0.4, 0.13), at(x, -0.12, -0.61), HELM_DARK, METAL)
+	end
+	for _, side in { -1, 1 } do
+		piece("CheekGuard", v(0.12, 0.62, 0.8), at(side * 0.58, -0.18, -0.1), HELM_STEEL, METAL)
+	end
+	piece("NeckGuard", v(1.1, 0.4, 0.12), at(0, -0.1, 0.6), HELM_STEEL, METAL)
+	piece("FishCrest", v(0.14, 0.5, 1.0), at(0, 0.86, 0.05), HELM_BRONZE, METAL)
+	piece("FishFin", v(0.12, 0.3, 0.34), at(0, 0.98, 0.56) * deg(-30, 0, 0), HELM_BRONZE, METAL)
+end
+
+HELMETS.ChampionCrest = function(piece)
+	-- Roman general (legate): gilded dome, cheek guards, neck guard, tall red crest across the head
+	piece("Shell", v(1.2, 0.7, 1.2), at(0, 0.32, 0), HELM_GOLD, METAL, BALL)
+	piece("BrowBand", v(1.26, 0.14, 1.26), at(0, 0.1, 0), HELM_BRONZE, METAL)
+	piece("Peak", v(1.0, 0.08, 0.3), at(0, 0.18, -0.7), HELM_GOLD, METAL)
+	for _, side in { -1, 1 } do
+		piece("CheekGuard", v(0.1, 0.62, 0.5), at(side * 0.6, -0.25, -0.22), HELM_GOLD, METAL)
+		piece("EarStud", v(0.12, 0.2, 0.2), at(side * 0.64, 0.02, 0.1), HELM_BRONZE, METAL, CYLINDER)
+	end
+	piece("NeckGuard", v(1.3, 0.08, 0.5), at(0, -0.22, 0.72) * deg(-20, 0, 0), HELM_GOLD, METAL)
+	piece("CrestHolder", v(1.0, 0.14, 0.14), at(0, 0.68, 0), HELM_BRONZE, METAL)
+	piece("Crest", v(1.5, 0.6, 0.2), at(0, 1.0, 0), HELM_CREST, FABRIC)
+	piece("Laurel", v(1.28, 0.06, 1.28), at(0, 0.24, 0), Color3.fromRGB(240, 206, 110), METAL)
+end
+
+-- ROBUX: the three friends ----------------------------------------------------------------
+
+HELMETS.OttiHead = function(piece)
+	local fur, dark = Color3.fromRGB(92, 58, 38), Color3.fromRGB(66, 40, 26)
+	piece("Mask", v(1.45, 1.4, 1.45), at(0, 0.08, 0), fur, SMOOTH, BALL)
+	piece("Muzzle", v(0.8, 0.6, 0.55), at(0, -0.14, -0.62), HELM_CREAM, SMOOTH, BALL)
+	piece("Chin", v(0.9, 0.5, 0.5), at(0, -0.38, -0.42), HELM_CREAM, SMOOTH, BALL)
+	piece("Nose", v(0.26, 0.2, 0.2), at(0, 0.02, -0.9), Color3.fromRGB(40, 28, 24), SMOOTH, BALL)
+	eyes(piece, 0.34, 0.26, -0.62, 0.2, Color3.fromRGB(26, 18, 14))
+	for _, side in { -1, 1 } do
+		piece("Ear", v(0.34, 0.34, 0.2), at(side * 0.58, 0.68, 0.05), dark, SMOOTH, BALL)
+		for i = -1, 1 do
+			piece("Whisker", v(0.5, 0.03, 0.03), at(side * 0.55, -0.16 + i * 0.07, -0.74) * deg(0, side * 20, side * i * 12), Color3.fromRGB(240, 232, 214), SMOOTH)
+		end
+	end
+end
+
+HELMETS.SchiliHead = function(piece)
+	local skin, ridge = Color3.fromRGB(126, 140, 90), Color3.fromRGB(92, 104, 64)
+	piece("Mask", v(1.4, 1.35, 1.5), at(0, 0.06, -0.02), skin, SMOOTH, BALL)
+	piece("Beak", v(0.7, 0.42, 0.5), at(0, -0.2, -0.68), Color3.fromRGB(222, 214, 174), SMOOTH, BALL)
+	piece("Brow", v(1.0, 0.16, 0.3), at(0, 0.42, -0.56), ridge, SMOOTH, BALL)
+	eyes(piece, 0.4, 0.2, -0.62, 0.22, Color3.fromRGB(64, 41, 25))
+	for _, side in { -1, 1 } do
+		piece("Nostril", v(0.06, 0.06, 0.06), at(side * 0.1, -0.06, -0.92), HELM_DARK, SMOOTH, BALL)
+	end
+	-- a piece of the shell at the nape
+	piece("Shell", v(1.5, 1.1, 0.7), at(0, 0.05, 0.6), Color3.fromRGB(112, 76, 43), Enum.Material.Wood, BALL)
+	for i, x in { -0.4, 0, 0.4 } do
+		piece("ShellPlate", v(0.36, 0.4, 0.12), at(x, 0.1, 0.94), if i % 2 == 0 then Color3.fromRGB(184, 131, 63) else Color3.fromRGB(136, 147, 74), Enum.Material.Wood)
+	end
+end
+
+HELMETS.KrokoHead = function(piece)
+	local skin, belly, ridge = Color3.fromRGB(64, 120, 58), Color3.fromRGB(178, 186, 88), Color3.fromRGB(38, 78, 40)
+	piece("Mask", v(1.4, 1.3, 1.45), at(0, 0.05, 0), skin, SMOOTH, BALL)
+	piece("Snout", v(0.8, 0.3, 1.1), at(0, -0.02, -1.0), skin, SMOOTH)
+	piece("SnoutTip", v(0.86, 0.36, 0.4), at(0, 0, -1.5), skin, SMOOTH, BALL)
+	piece("Jaw", v(0.72, 0.2, 1.0), at(0, -0.32, -0.95) * deg(8, 0, 0), belly, SMOOTH)
+	for _, side in { -1, 1 } do
+		piece("EyeBump", v(0.36, 0.36, 0.4), at(side * 0.36, 0.55, -0.4), skin, SMOOTH, BALL)
+		piece("Eye", v(0.2, 0.22, 0.12), at(side * 0.38, 0.58, -0.58), Color3.fromRGB(255, 176, 40), Enum.Material.Neon, BALL)
+		piece("Nostril", v(0.1, 0.1, 0.1), at(side * 0.2, 0.18, -1.56), ridge, SMOOTH, BALL)
+		for i = 0, 3 do
+			piece("Tooth", v(0.08, 0.14, 0.08), at(side * 0.36, -0.2, -0.62 - i * 0.26), HELM_CREAM, SMOOTH)
+		end
+	end
+	for i = 0, 3 do
+		piece("Scute", v(0.16, 0.18, 0.22), at(0, 0.68 - i * 0.06, 0.05 + i * 0.26) * deg(-20, 0, 0), ridge, SMOOTH)
+	end
+end
+
+-- ROBUX: animals --------------------------------------------------------------------------
+
+HELMETS.DragonHead = function(piece)
+	local red, dark, horn = Color3.fromRGB(170, 34, 30), Color3.fromRGB(96, 18, 22), Color3.fromRGB(236, 224, 196)
+	piece("Mask", v(1.42, 1.34, 1.46), at(0, 0.06, 0), red, SMOOTH, BALL)
+	piece("Snout", v(0.74, 0.44, 0.9), at(0, -0.08, -0.9), red, SMOOTH)
+	piece("SnoutTip", v(0.8, 0.5, 0.4), at(0, -0.06, -1.32), red, SMOOTH, BALL)
+	piece("Jaw", v(0.66, 0.16, 0.8), at(0, -0.4, -0.85) * deg(10, 0, 0), dark, SMOOTH)
+	piece("Brow", v(1.1, 0.2, 0.3), at(0, 0.44, -0.56) * deg(15, 0, 0), dark, SMOOTH)
+	eyes(piece, 0.36, 0.28, -0.66, 0.2, Color3.fromRGB(255, 150, 30), Enum.Material.Neon)
+	for _, side in { -1, 1 } do
+		piece("Horn", v(0.2, 0.9, 0.2), at(side * 0.42, 0.95, 0.4) * deg(-40, 0, -side * 12), horn, SMOOTH)
+		piece("HornTip", v(0.12, 0.5, 0.12), at(side * 0.5, 1.4, 0.92) * deg(-60, 0, -side * 12), horn, SMOOTH)
+		piece("Nostril", v(0.12, 0.1, 0.12), at(side * 0.2, 0.2, -1.36), Color3.fromRGB(255, 120, 40), Enum.Material.Neon, BALL)
+		piece("Frill", v(0.06, 0.6, 0.5), at(side * 0.74, 0.0, 0.3) * deg(0, side * 25, 0), dark, SMOOTH)
+		for i = 0, 2 do
+			piece("Fang", v(0.08, 0.2, 0.08), at(side * 0.32, -0.28, -0.7 - i * 0.26), horn, SMOOTH)
+		end
+	end
+	for i = 0, 4 do
+		piece("Spine", v(0.1, 0.32 - i * 0.03, 0.2), at(0, 0.78 - i * 0.1, -0.2 + i * 0.26) * deg(-25, 0, 0), dark, SMOOTH)
+	end
+end
+
+HELMETS.RhinoHead = function(piece)
+	local grey, dark, horn = Color3.fromRGB(128, 130, 134), Color3.fromRGB(92, 94, 98), Color3.fromRGB(226, 216, 196)
+	piece("Mask", v(1.45, 1.36, 1.46), at(0, 0.05, 0), grey, Enum.Material.Slate, BALL)
+	piece("Snout", v(0.86, 0.6, 1.0), at(0, -0.16, -0.9), grey, Enum.Material.Slate)
+	piece("SnoutTip", v(0.9, 0.62, 0.44), at(0, -0.18, -1.38), dark, Enum.Material.Slate, BALL)
+	piece("HornBase", v(0.34, 0.4, 0.34), at(0, 0.24, -1.26), horn, SMOOTH, BALL)
+	piece("Horn", v(0.24, 0.7, 0.24), at(0, 0.6, -1.32) * deg(12, 0, 0), horn, SMOOTH)
+	piece("HornTip", v(0.14, 0.36, 0.14), at(0, 1.02, -1.26) * deg(-8, 0, 0), horn, SMOOTH)
+	piece("SmallHorn", v(0.2, 0.36, 0.2), at(0, 0.36, -0.8) * deg(6, 0, 0), horn, SMOOTH)
+	eyes(piece, 0.5, 0.16, -0.56, 0.16, HELM_DARK)
+	for _, side in { -1, 1 } do
+		piece("Ear", v(0.24, 0.44, 0.16), at(side * 0.5, 0.82, 0.2) * deg(0, 0, -side * 20), grey, Enum.Material.Slate, BALL)
+		piece("Fold", v(0.08, 0.5, 0.7), at(side * 0.7, -0.2, 0.1), dark, Enum.Material.Slate)
+	end
+end
+
+HELMETS.ToroHead = function(piece)
+	local black, muzzle, horn = Color3.fromRGB(34, 30, 30), Color3.fromRGB(120, 86, 76), Color3.fromRGB(236, 226, 200)
+	piece("Mask", v(1.45, 1.36, 1.46), at(0, 0.05, 0), black, SMOOTH, BALL)
+	piece("Snout", v(0.8, 0.56, 0.7), at(0, -0.22, -0.8), black, SMOOTH)
+	piece("Muzzle", v(0.86, 0.5, 0.36), at(0, -0.26, -1.14), muzzle, SMOOTH, BALL)
+	piece("NoseRing", v(0.06, 0.36, 0.36), at(0, -0.5, -1.22) * FRONT, HELM_GOLD, METAL, CYLINDER)
+	piece("Forelock", v(0.5, 0.26, 0.3), at(0, 0.62, -0.5), Color3.fromRGB(60, 46, 40), SMOOTH, BALL)
+	eyes(piece, 0.42, 0.2, -0.62, 0.18, Color3.fromRGB(190, 40, 30), Enum.Material.Neon)
+	for _, side in { -1, 1 } do
+		piece("Nostril", v(0.12, 0.1, 0.08), at(side * 0.18, -0.2, -1.3), HELM_DARK, SMOOTH, BALL)
+		piece("Ear", v(0.44, 0.2, 0.14), at(side * 0.84, 0.3, 0.1) * deg(0, 0, side * 15), black, SMOOTH, BALL)
+		-- the horns: out to the side, then swept up and forward
+		piece("HornBase", v(0.6, 0.24, 0.24), at(side * 0.84, 0.62, -0.05) * deg(0, 0, side * 18), horn, SMOOTH, CYLINDER)
+		piece("Horn", v(0.2, 0.6, 0.2), at(side * 1.16, 1.0, -0.12) * deg(-15, 0, -side * 14), horn, SMOOTH)
+		piece("HornTip", v(0.12, 0.36, 0.12), at(side * 1.2, 1.42, -0.24) * deg(-25, 0, side * 6), Color3.fromRGB(70, 56, 46), SMOOTH)
+	end
+end
+
+HELMETS.MonkeyHead = function(piece)
+	local fur, face = Color3.fromRGB(104, 68, 42), Color3.fromRGB(226, 190, 150)
+	piece("Mask", v(1.44, 1.38, 1.44), at(0, 0.06, 0), fur, SMOOTH, BALL)
+	piece("Face", v(0.96, 0.7, 0.4), at(0, 0.2, -0.56), face, SMOOTH, BALL)
+	piece("Muzzle", v(0.84, 0.6, 0.6), at(0, -0.24, -0.58), face, SMOOTH, BALL)
+	piece("Nose", v(0.2, 0.12, 0.12), at(0, -0.1, -0.9), Color3.fromRGB(70, 46, 34), SMOOTH, BALL)
+	piece("Mouth", v(0.5, 0.04, 0.06), at(0, -0.34, -0.86), Color3.fromRGB(70, 46, 34), SMOOTH)
+	piece("Tuft", v(0.3, 0.3, 0.3), at(0, 0.78, -0.1), fur, SMOOTH, BALL)
+	eyes(piece, 0.24, 0.26, -0.74, 0.16, HELM_DARK)
+	for _, side in { -1, 1 } do
+		piece("Ear", v(0.16, 0.56, 0.56), at(side * 0.78, 0.12, 0), fur, SMOOTH, BALL)
+		piece("EarInner", v(0.1, 0.36, 0.36), at(side * 0.84, 0.12, -0.04), face, SMOOTH, BALL)
+	end
+end
+
+-- ROBUX: foreign fighters -----------------------------------------------------------------
+
+HELMETS.SamuraiHelm = function(piece)
+	-- Kabuto: lacquered bowl, peak, layered neck guard, golden crescent
+	local lacquer, cord = Color3.fromRGB(28, 26, 30), Color3.fromRGB(170, 30, 34)
+	piece("Shell", v(1.22, 0.72, 1.22), at(0, 0.34, 0), lacquer, SMOOTH, BALL)
+	piece("Rim", v(0.1, 1.34, 1.34), at(0, 0.2, 0) * FLAT, HELM_GOLD, METAL, CYLINDER)
+	piece("Peak", v(0.9, 0.06, 0.4), at(0, 0.16, -0.76) * deg(12, 0, 0), lacquer, SMOOTH)
+	for i = 0, 2 do
+		local w = 1.36 + i * 0.22
+		piece("NeckPlate", v(w, 0.2, 0.1), at(0, 0.04 - i * 0.2, 0.66 + i * 0.1) * deg(-18, 0, 0), lacquer, SMOOTH)
+		piece("NeckCord", v(w, 0.04, 0.11), at(0, -0.05 - i * 0.2, 0.69 + i * 0.1) * deg(-18, 0, 0), cord, FABRIC)
+		for _, side in { -1, 1 } do
+			piece("SidePlate", v(0.1, 0.2, 0.9 + i * 0.1), at(side * (0.66 + i * 0.11), 0.04 - i * 0.2, 0.2), lacquer, SMOOTH)
+		end
+	end
+	piece("CrestDisc", v(0.06, 0.3, 0.3), at(0, 0.5, -0.64) * FRONT, HELM_GOLD, METAL, CYLINDER)
+	for _, side in { -1, 1 } do
+		piece("Crescent", v(0.14, 0.8, 0.05), at(side * 0.3, 0.9, -0.62) * deg(0, 0, -side * 32), HELM_GOLD, METAL)
+		piece("CrescentTip", v(0.1, 0.4, 0.05), at(side * 0.62, 1.34, -0.62) * deg(0, 0, -side * 12), HELM_GOLD, METAL)
+		piece("Wing", v(0.06, 0.4, 0.3), at(side * 0.72, 0.36, -0.5) * deg(0, side * 30, 0), lacquer, SMOOTH)
+	end
+	piece("TopKnob", v(0.16, 0.12, 0.16), at(0, 0.74, 0), HELM_GOLD, METAL)
+end
+
+HELMETS.SoldierHelm = function(piece)
+	-- Steel helmet of a WW2 soldier: olive pot with a rim, net and chin strap (no insignia)
+	local olive, net, strap = Color3.fromRGB(86, 96, 62), Color3.fromRGB(58, 66, 44), Color3.fromRGB(104, 78, 50)
+	piece("Shell", v(1.34, 0.86, 1.4), at(0, 0.36, 0), olive, METAL, BALL)
+	piece("Rim", v(0.08, 1.46, 1.46), at(0, 0.16, 0) * FLAT, olive, METAL, CYLINDER)
+	piece("Peak", v(1.0, 0.07, 0.3), at(0, 0.14, -0.72) * deg(10, 0, 0), olive, METAL)
+	for i = -2, 2 do
+		piece("Net", v(1.3, 0.56, 0.03), at(0, 0.44, i * 0.26), net, FABRIC)
+		piece("Net", v(0.03, 0.56, 1.34), at(i * 0.25, 0.44, 0), net, FABRIC)
+	end
+	piece("Band", v(1.36, 0.08, 1.42), at(0, 0.3, 0), net, FABRIC)
+	for _, side in { -1, 1 } do
+		piece("Strap", v(0.05, 0.7, 0.1), at(side * 0.62, -0.2, -0.1), strap, Enum.Material.Leather)
+	end
+	piece("ChinStrap", v(1.24, 0.08, 0.1), at(0, -0.56, -0.1), strap, Enum.Material.Leather)
+end
+
+HELMETS.IncaHelm = function(piece)
+	-- Inca headdress: golden band, sun disc with rays, a fan of feathers, ear discs
+	local feathers = { Color3.fromRGB(200, 40, 40), Color3.fromRGB(240, 190, 40), Color3.fromRGB(30, 150, 110), Color3.fromRGB(40, 90, 200) }
+	piece("Cap", v(1.2, 0.5, 1.2), at(0, 0.36, 0), Color3.fromRGB(150, 40, 40), FABRIC, BALL)
+	piece("Band", v(1.26, 0.3, 1.26), at(0, 0.22, 0), HELM_GOLD, METAL)
+	piece("BandStripe", v(1.28, 0.08, 1.28), at(0, 0.22, 0), Color3.fromRGB(30, 150, 110), SMOOTH)
+	piece("Sun", v(0.08, 0.56, 0.56), at(0, 0.56, -0.66) * FRONT, HELM_GOLD, METAL, CYLINDER)
+	piece("SunFace", v(0.1, 0.3, 0.3), at(0, 0.56, -0.68) * FRONT, Color3.fromRGB(240, 206, 110), METAL, CYLINDER)
+	for i = 0, 7 do
+		local angle = i / 8 * 360
+		piece("Ray", v(0.08, 0.2, 0.05), at(0, 0.56, -0.67) * deg(0, 0, angle) * at(0, 0.38, 0), HELM_GOLD, METAL)
+	end
+	for i = -3, 3 do
+		local color = feathers[(i + 3) % #feathers + 1]
+		piece("Feather", v(0.2, 0.9 - math.abs(i) * 0.08, 0.05), at(0, 0.5, 0.1) * deg(0, 0, -i * 16) * at(0, 0.7, 0), color, FABRIC)
+		piece("FeatherTip", v(0.14, 0.2, 0.06), at(0, 0.5, 0.1) * deg(0, 0, -i * 16) * at(0, 1.2 - math.abs(i) * 0.08, 0), HELM_CREAM, FABRIC)
+	end
+	for _, side in { -1, 1 } do
+		piece("EarDisc", v(0.08, 0.4, 0.4), at(side * 0.66, -0.1, 0), HELM_GOLD, METAL, CYLINDER)
+		piece("Tassel", v(0.1, 0.5, 0.1), at(side * 0.62, -0.5, 0.1), Color3.fromRGB(200, 40, 40), FABRIC)
+	end
+end
 
 function EquipmentModels.buildHelmet(id: string, body: Model): Model?
-	if id == "NoHelmet" then
-		return nil
+	local builder = HELMETS[id]
+	if not builder then
+		return nil -- "NoHelmet" (and anything unknown): bare head
 	end
 	local head = body:FindFirstChild("Head")
 	if not head or not head:IsA("BasePart") then
@@ -669,14 +944,18 @@ function EquipmentModels.buildHelmet(id: string, body: Model): Model?
 	local model = Instance.new("Model")
 	model.Name = "Helmet_" .. id
 	model:SetAttribute("HelmetId", id)
-	local s = head.Size
-	local function piece(name: string, size: Vector3, offset: CFrame, color: Color3, material: Enum.Material)
+	-- head units: R15 heads are about as wide as tall; the mesh of an R6 head (2 x 1 x 1) is too
+	local u = head.Size.Y
+	local function piece(name: string, size: Vector3, offset: CFrame, color: Color3, material: Enum.Material?, shape: Enum.PartType?): Part
 		local p = Instance.new("Part")
 		p.Name = name
-		p.Size = size
-		p.CFrame = head.CFrame * offset
+		if shape then
+			p.Shape = shape
+		end
+		p.Size = size * u
+		p.CFrame = head.CFrame * (offset.Rotation + offset.Position * u)
 		p.Color = color
-		p.Material = material
+		p.Material = material or METAL
 		p.TopSurface, p.BottomSurface = Enum.SurfaceType.Smooth, Enum.SurfaceType.Smooth
 		p.CanCollide, p.CanQuery, p.CanTouch, p.Massless = false, false, false, true
 		p.CastShadow = false
@@ -684,20 +963,9 @@ function EquipmentModels.buildHelmet(id: string, body: Model): Model?
 		local weld = Instance.new("WeldConstraint")
 		weld.Part0, weld.Part1 = head, p
 		weld.Parent = p
+		return p
 	end
-	-- the shell over the skull (bronze for the legionary's galea, steel for the others)
-	piece("Shell", Vector3.new(s.X * 1.18, s.Y * 0.6, s.Z * 1.18), CFrame.new(0, s.Y * 0.32, 0), if id == "Galea" then HELM_BRONZE else HELM_STEEL, Enum.Material.Metal)
-	if id == "Galea" then
-		for _, side in { -1, 1 } do
-			piece("CheekGuard", Vector3.new(s.X * 0.14, s.Y * 0.7, s.Z * 0.85), CFrame.new(side * s.X * 0.6, -s.Y * 0.15, 0), HELM_BRONZE, Enum.Material.Metal)
-		end
-	elseif id == "MurmilloHelm" then
-		piece("Visor", Vector3.new(s.X * 0.95, s.Y * 0.55, s.Z * 0.14), CFrame.new(0, -s.Y * 0.02, -s.Z * 0.6), HELM_STEEL, Enum.Material.Metal)
-		piece("FishCrest", Vector3.new(s.X * 0.16, s.Y * 0.45, s.Z * 0.9), CFrame.new(0, s.Y * 0.9, 0), HELM_BRONZE, Enum.Material.Metal)
-	elseif id == "ChampionCrest" then
-		piece("GildedRim", Vector3.new(s.X * 1.24, s.Y * 0.12, s.Z * 1.24), CFrame.new(0, s.Y * 0.05, 0), HELM_GOLD, Enum.Material.Metal)
-		piece("Crest", Vector3.new(s.X * 0.22, s.Y * 1.4, s.Z * 0.75), CFrame.new(0, s.Y * 1.0, 0), HELM_CREST, Enum.Material.Fabric)
-	end
+	builder(piece)
 	return model
 end
 

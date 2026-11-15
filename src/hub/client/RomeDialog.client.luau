@@ -206,6 +206,8 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local forgeToken: string? = nil
 local forgeOpen = false
 local renderForge: (state: any) -> () = function() end
+local lastForgeState: any = nil
+local designOpen: string? = nil -- the copy (uid) or shield ("shield:Id") whose design choices are unfolded
 
 -- Sends one smith request; renders the answer; follows a Robux or Denarii hint.
 local function forgeCall(action: string, data: { [string]: any })
@@ -261,13 +263,48 @@ renderForge = function(state: any)
 		return
 	end
 	clear()
+	lastForgeState = state
 	title.Text = "SCHMIEDE · FABER"
-	subtitle.Text = ("Härten +%d %% gegen Zombies und Bosse · Schleifen und Reparieren gegen Verschleiss · Designs und Vorspulen mit Robux. Ein Exemplar beim Schmied kannst du nicht benutzen."):format(math.floor(state.bonus * 100 + 0.5))
+	subtitle.Text = ("Härten +%d %% gegen Zombies und Bosse · Schleifen und Reparieren gegen Verschleiss · Designs (Farben, Gold, Silber) und Vorspulen mit Robux. Ein Exemplar beim Schmied kannst du nicht benutzen."):format(math.floor(state.bonus * 100 + 0.5))
 	status.Text = ("Guthaben: %d Denarii · Gutschriften: %d× Vorspulen, %d× Design"):format(state.denarii, state.credits.Skip, state.credits.Design)
 	local order = 0
 	local function nextOrder(): number
 		order += 1
 		return order
+	end
+	-- The design choices of one copy / shield: unfolded by its DESIGN button, one row of options
+	-- per part (each costs one Design credit, bought with Robux).
+	local function designToggle(bar: Frame, key: string)
+		local b = button(bar, if designOpen == key then "DESIGN ▴" else "DESIGN ▾ · ROBUX", Color3.fromRGB(70, 58, 40), UDim.new(0, 0))
+		b.TextSize = 13
+		table.insert(actionButtons, b)
+		b.Activated:Connect(function()
+			if pending then
+				return
+			end
+			designOpen = if designOpen == key then nil else key
+			renderForge(lastForgeState)
+			status.Text = ("Guthaben: %d Denarii · Gutschriften: %d× Vorspulen, %d× Design"):format(state.denarii, state.credits.Skip, state.credits.Design)
+		end)
+	end
+	local function designRows(box: Frame, slots: { any }, current: { [string]: string }, choose: (slotId: string, optionId: string) -> ())
+		for i, slot in slots do
+			line(box, 10 + i * 2, slot.label .. ":", 13, THEME.Gold, THEME.LabelFont)
+			local options = actionBar(box)
+			options.LayoutOrder = 11 + i * 2
+			for _, option in slot.options :: { any } do
+				local has = current[slot.id] == option.id
+				local d = button(options, if has then "✓ " .. option.label else option.label, if has then THEME.Locked else Color3.fromRGB(70, 58, 40), UDim.new(0, 0))
+				d.TextSize = 12
+				d.TextWrapped = true
+				if not has then
+					table.insert(actionButtons, d)
+					d.Activated:Connect(function()
+						choose(slot.id, option.id)
+					end)
+				end
+			end
+		end
 	end
 	local note = card(nextOrder())
 	line(note, 1, state.note, 12, THEME.TextMuted)
@@ -315,18 +352,12 @@ renderForge = function(state: any)
 						forgeCall("SetActive", { weaponId = weapon.weaponId, uid = c.uid })
 					end)
 				end
-				-- designs: one button per option, grouped by slot (paid with Robux)
-				for _, slot in state.slots :: { any } do
-					for _, option in slot.options :: { any } do
-						if c.design[slot.id] ~= option.id then
-							local d = button(bar, option.label, Color3.fromRGB(70, 58, 40), UDim.new(0, 0))
-							d.TextSize = 13
-							table.insert(actionButtons, d)
-							d.Activated:Connect(function()
-								forgeCall("ForgeJob", { weaponId = weapon.weaponId, uid = c.uid, kind = "Design", slot = slot.id, option = option.id })
-							end)
-						end
-					end
+				-- designs (blade, grip, fittings): unfolded on demand, paid with Robux
+				designToggle(bar, c.uid)
+				if designOpen == c.uid then
+					designRows(box, state.slots, c.design, function(slotId, optionId)
+						forgeCall("ForgeJob", { weaponId = weapon.weaponId, uid = c.uid, kind = "Design", slot = slotId, option = optionId })
+					end)
 				end
 			end
 		end
@@ -343,24 +374,55 @@ renderForge = function(state: any)
 	end
 	for _, shield in state.shields :: { any } do
 		local box = card(nextOrder())
-		line(box, 1, ("%s · Bemalung: %s"):format(shield.name, shield.paintText), 15, THEME.Text, THEME.LabelFont)
+		line(box, 1, ("%s · Schild"):format(shield.name), 15, THEME.Text, THEME.LabelFont)
+		line(box, 2, ("Design: %s"):format(shield.designText), 13, THEME.TextMuted)
 		local bar = actionBar(box)
-		for _, option in state.paints :: { any } do
-			if shield.paint ~= option.id then
-				local b = button(bar, option.label, Color3.fromRGB(70, 58, 40), UDim.new(0, 0))
-				b.TextSize = 13
+		local key = "shield:" .. shield.shieldId
+		designToggle(bar, key)
+		if designOpen == key then
+			-- bemalen, vergolden, versilbern: Fläche, Rand, Buckel und Verzierung einzeln
+			designRows(box, state.shieldSlots, shield.design, function(slotId, optionId)
+				forgeCall("Paint", { shieldId = shield.shieldId, slot = slotId, option = optionId })
+			end)
+		end
+	end
+	-- Robux: speed-ups and designs in advance (credits), then Denarii
+	local function shelf(heading: string, wanted: (p: any) -> boolean)
+		local box = card(nextOrder())
+		line(box, 1, heading, 15, THEME.Gold, THEME.LabelFont)
+		local products = actionBar(box)
+		local grid = products:FindFirstChildOfClass("UIGridLayout")
+		if grid then
+			grid.CellSize = UDim2.fromOffset(282, THEME.TouchTarget)
+		end
+		for _, p in state.products :: { any } do
+			if wanted(p) then
+				local b = button(products, if p.ready then ("%s · R$%d"):format(p.label, p.robux) else (p.label .. " · bald"), if p.ready then THEME.Primary else THEME.Locked, UDim.new(0, 0))
+				b.TextSize = 12
+				b.TextWrapped = true
 				table.insert(actionButtons, b)
 				b.Activated:Connect(function()
-					forgeCall("Paint", { shieldId = shield.shieldId, option = option.id })
+					if p.ready then
+						forgeCall("Buy", { key = p.key })
+					end
 				end)
 			end
 		end
 	end
+	shelf(("Vorspulen kaufen · du hast %d×"):format(state.credits.Skip), function(p)
+		return p.credits ~= nil and p.credits.Skip ~= nil and p.denarii == nil and p.credits.Design == nil
+	end)
+	shelf(("Designs kaufen · du hast %d×"):format(state.credits.Design), function(p)
+		return p.credits ~= nil and p.credits.Design ~= nil and p.denarii == nil and p.credits.Skip == nil
+	end)
+	shelf("Pakete", function(p)
+		return p.denarii ~= nil and p.credits ~= nil
+	end)
 	local packs = card(nextOrder())
 	line(packs, 1, "Denarii kaufen", 15, THEME.Gold, THEME.LabelFont)
 	local bar = actionBar(packs)
 	for _, p in state.products :: { any } do
-		if p.denarii then
+		if p.denarii and not p.credits then
 			local b = button(bar, if p.ready then ("%s · R$%d"):format(p.label, p.robux) else (p.label .. " · bald"), if p.ready then THEME.Primary else THEME.Locked, UDim.new(0, 0))
 			b.TextSize = 13
 			table.insert(actionButtons, b)

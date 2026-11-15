@@ -29,6 +29,7 @@ export type Record = {
 		shields: { [string]: DisplayLine }?,
 		armor: DisplayLine?,
 		helmets: DisplayLine?,
+		helmetLines: { DisplayLine }?,
 	},
 	volume: { cf: CFrame, size: Vector3 },
 	keeper: CFrame,
@@ -97,7 +98,7 @@ function ArmoryShops.build(model: Model, frame: CFrame, h: House)
 	-- flat roof (collision) and the sign over the opening
 	Parts.part(model, "Ceiling", at(0, top + 0.5, 0), Vector3.new(w + 0.8, 1, d + 0.8), Color3.fromRGB(92, 72, 52), { material = Enum.Material.WoodPlanks })
 	Parts.decor(model, "Beam", at(0, top - 0.4, 0), Vector3.new(w - 2 * WALL, 0.8, 0.8), C.TimberDark, Enum.Material.Wood)
-	Parts.sign(model, "ShopSign", at(0, SOCKET + OPENING_HEIGHT + 1.9, -d / 2 - 0.35), Vector2.new(11, 2.2), h.name or "LADEN", ({ WeaponShop = "Waffen · Schwerter, Speere, Bögen", HelmShop = "Helme · Galeae und Visiere", ArmorShop = "Rüstungen · Lorica und Ringpanzer", ShieldShop = "Schilde · Scutum und Parma" })[kind], C.TimberDark)
+	Parts.sign(model, "ShopSign", at(0, SOCKET + OPENING_HEIGHT + 1.9, -d / 2 - 0.35), Vector2.new(11, 2.2), h.name or "LADEN", ({ WeaponShop = "Waffen · Schwerter, Speere, Bögen", HelmShop = "Helme · Tierköpfe und Krieger aus aller Welt", ArmorShop = "Rüstungen · Lorica und Ringpanzer", ShieldShop = "Schilde · Scutum und Parma" })[kind], C.TimberDark)
 	Parts.flame(model, at(0, top - 1.6, 0), 16, 0.6)
 
 	-- the counter across the room, its front 5 studs from the street; the shopkeeper behind it
@@ -124,7 +125,9 @@ function ArmoryShops.build(model: Model, frame: CFrame, h: House)
 		layout.layout.heavy = sideLine(frame, rightX, sideFrom, sideTo, -1)
 		layout.layout.ranged = backLine(frame, backZ, backFrom, backTo)
 	elseif kind == "HelmShop" then
+		-- 13 helmets: both side walls and the back wall
 		layout.layout.helmets = sideLine(frame, leftX, sideFrom, sideTo, 1)
+		layout.layout.helmetLines = { backLine(frame, backZ, backFrom, backTo), sideLine(frame, rightX, sideFrom, sideTo, -1) }
 	elseif kind == "ArmorShop" then
 		layout.layout.armor = sideLine(frame, leftX, sideFrom, sideTo, 1)
 	elseif kind == "ShieldShop" then
