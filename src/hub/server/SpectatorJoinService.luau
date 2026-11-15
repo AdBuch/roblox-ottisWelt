@@ -15,6 +15,7 @@ local Server = script.Parent.Parent
 local AdmissionTicketService = require(Server.AdmissionTicketService)
 local MatchRegistryService = require(Server.MatchRegistryService)
 local SpectatorSlotService = require(Server.SpectatorSlotService)
+local TeleportUtil = require(Server.TeleportUtil)
 local HubTeleportService = require(script.Parent.HubTeleportService)
 local LiveBattlesService = require(script.Parent.LiveBattlesService)
 local MatchmakingService = require(script.Parent.MatchmakingService)
@@ -25,6 +26,9 @@ local SpectatorJoinService = {}
 local busy: { [Player]: boolean } = {}
 
 local function watchRecord(player: Player, record: MatchTypes.RegistryRecord): (boolean, string)
+	if HubTeleportService.isRevoking(player, record.matchId) then
+		return false, "Please wait for the previous travel to finish."
+	end
 	local result = SpectatorSlotService.reserve(record.matchId, player.UserId)
 	if result == "FULL" then
 		return false, MatchTypes.Messages.FULL
@@ -38,7 +42,7 @@ local function watchRecord(player: Player, record: MatchTypes.RegistryRecord): (
 		return false, MatchTypes.Messages.UNREACHABLE
 	end
 	local mock = LiveBattlesService.isMock(record.matchId) or not EnvironmentConfig.canTeleport()
-	HubTeleportService.send({ player }, {
+	local accepted = HubTeleportService.send({ player }, {
 		matchId = record.matchId,
 		role = "SPECTATOR",
 		mode = record.mode,
@@ -47,12 +51,15 @@ local function watchRecord(player: Player, record: MatchTypes.RegistryRecord): (
 			SpectatorSlotService.release(record.matchId, failedPlayer.UserId)
 		end,
 	})
-	return true, if mock then "STUDIO MOCK: spectator slot reserved and released" else "Travelling to the Colosseum…"
+	if mock then
+		return true, "STUDIO MOCK: spectator slot reserved and released"
+	end
+	return #accepted > 0, if #accepted > 0 then "Preparing the trip to the Colosseum…" else MatchTypes.Messages.TELEPORT_FAILED
 end
 
 -- matchId = a public id from the list, or "RANDOM".
 function SpectatorJoinService.watch(player: Player, matchId: unknown): (boolean, string)
-	if busy[player] then
+	if busy[player] or TeleportUtil.isPending(player) then
 		return false, "Please wait…"
 	end
 	if not GameStates.isInLobby(player:GetAttribute(GameStates.StateAttribute)) then

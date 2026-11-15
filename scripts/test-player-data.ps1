@@ -6,6 +6,7 @@ param([string]$LuauPath = 'luau')
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $source = Get-Content -LiteralPath (Join-Path $repo 'src/server/PlayerDataService.luau') -Raw
+$teleportSource = Get-Content -LiteralPath (Join-Path $repo 'src/server/TeleportUtil.luau') -Raw
 $arenaSource = Get-Content -LiteralPath (Join-Path $repo 'src/arena/server/ArenaReturnService.luau') -Raw
 
 $harness = @'
@@ -134,7 +135,7 @@ local function newServer(name, mockData)
 	local mocks = {
 		["Shared/Config"] = { DataStatusAttribute = "DataStatus", IntroSeenAttribute = "IntroSeen" },
 		["Shared/EnvironmentConfig"] = { get = function() return { DataStoreName = "Store" } end, useMockData = function() return mockData == true end, describe = function() return "test" end, name = function() return "DEV" end },
-		["Shared/ExperienceConfig"] = { Studio = { UnlockAllGear = false }, Teleport = { TransitionHoldSeconds = 30 } },
+		["Shared/ExperienceConfig"] = { Studio = { UnlockAllGear = false }, Teleport = { TransitionHoldSeconds = 60, RecoveryTimeoutSeconds = 20 } },
 		["Shared/PlayerDataSchema"] = { Version = 12 },
 		["Server/InventoryService"] = inv,
 		["Server/PlayerDataResetConfig"] = { tokenFor = function() return nil end },
@@ -174,6 +175,7 @@ end
 '@
 $harness += "`nsource = function(script, game, require)`n$source`nend`n"
 $harness += "`nlocal arenaSource = function(script, game, require)`n$arenaSource`nend`n"
+$harness += "`nlocal teleportSource = function(script, game, require, Enum, Instance)`n$teleportSource`nend`n"
 $harness += @'
 
 -- 1. JOIN: a new player gets the lock, nothing else is stored yet
@@ -447,40 +449,196 @@ local future = R.join(35)
 after(3)
 check(R.data.getStatus(future) == "Unsaved" and db.player_35.version == 13 and db.player_35.lock == nil, "an older schema cannot claim or overwrite a future profile")
 
--- The real Arena return caller must respect an unconfirmed transfer and recheck readiness
--- after preparing the rest of a group.
-local arenaReady, arenaEvents, teleported = {}, {}, {}
-local arenaMocks = {
-	CombatConfig = { Feedback = { Shop = "Shop" } },
-	Config = { ArenaRoleAttribute = "Role" },
-	EnvironmentConfig = { canTeleport = function() return true end },
-	MatchTypes = { Messages = { DATA_SAVE_FAILED = "Pending", TELEPORT_FAILED = "Failed" } },
-	PlayerDataService = {
-		beginTransfer = function(player) return arenaReady[player] ~= "denied" end,
-		isTransferPrepared = function(player) return arenaReady[player] == "prepared" end,
-		cancelTransfer = function() end,
-	},
-	Remotes = {
+-- Real TeleportUtil and ArenaReturnService against the deterministic scheduler and a fake engine.
+local function newTransport(data)
+	local api = { calls = {}, events = {}, failed = {} }
+	local removing, initFailed = signal(), signal()
+	local function options()
+		local object = { ReservedServerAccessCode = "", ServerInstanceId = "" }
+		function object:SetTeleportData(value) self.data = deep(value) end
+		function object:GetTeleportData() return deep(self.data) end
+		return object
+	end
+	local results = setmetatable({}, { __index = function(_, key) return key end })
+	local engine = { TeleportInitFailed = initFailed }
+	function engine:TeleportAsync(placeId, players, routing)
+		local record = { placeId = placeId, players = table.clone(players), routing = routing, wire = routing:GetTeleportData() }
+		table.insert(api.calls, record)
+		if api.onCall then api.onCall(record) end
+	end
+	local names = setmetatable({}, { __index = function(_, name) return name end })
+	local env = { canTeleport = function() return true end, get = function() return { HubPlaceId = 1, ArenaPlaceId = 2 } end }
+	local config = { TeleportStateAttribute = "Travel", ArenaRoleAttribute = "Role" }
+	local match = { Messages = { DATA_SAVE_FAILED = "Pending", TELEPORT_FAILED = "Failed", TELEPORT_TIMEOUT = "Timed out" } }
+	local remotes = {
 		CombatFeedback = { FireClient = function() end },
-		MatchEvent = { FireClient = function(_, player, kind) arenaEvents[player] = kind end },
-	},
-	TeleportUtil = { toHub = function(players)
-		for _, player in players do table.insert(teleported, player) end
-	end },
+		MatchEvent = { FireClient = function(_, player, kind, value) api.events[player] = { kind, value } end },
+	}
+	local mocks = {
+		Config = config, EnvironmentConfig = env, MatchTypes = match, PlayerDataService = data, Remotes = remotes,
+		CombatConfig = { Feedback = { Shop = "Shop" } },
+		ExperienceConfig = { Teleport = { TravelTimeoutSeconds = 40, ReturnRetries = 2, ReturnRetryDelaySeconds = 3, Retries = 2, RetryDelaySeconds = 2 } },
+	}
+	local services = {
+		Players = { PlayerRemoving = removing }, ReplicatedStorage = { Shared = names }, TeleportService = engine,
+		HttpService = { GenerateGUID = function() guid += 1 return "attempt-" .. guid end },
+	}
+	local fakeGame = { GetService = function(_, service) return services[service] end }
+	local fakeRequire = function(name) return assert(mocks[name], name) end
+	local util = teleportSource({ Parent = names }, fakeGame, fakeRequire, { TeleportResult = results }, { new = options })
+	mocks.TeleportUtil = util
+	api.arena = arenaSource({ Parent = { Parent = names } }, fakeGame, fakeRequire)
+	api.util = util
+	util.init()
+	function api.failure(player, record, result, place, serverInstance)
+		local retry = options() -- Roblox provides a different options instance for the callback
+		retry:SetTeleportData(record.wire)
+		retry.ServerInstanceId = serverInstance or ""
+		retry.ReservedServerAccessCode = record.routing.ReservedServerAccessCode
+		initFailed.fire(player, result, "mock failure", place or record.placeId, retry)
+	end
+	function api.leave(player)
+		player.Parent = nil
+		removing.fire(player)
+	end
+	function api.start(players)
+		return util.toHub(players, { kind = "ToHub" }, function(player, code)
+			api.failed[player] = (api.failed[player] or 0) + 1
+			api.lastCode = code
+		end)
+	end
+	return api
+end
+
+local live = newServer("Travel")
+local refused, ongoing = live.join(40), live.join(41)
+after(3)
+local transport = newTransport(live.data)
+live.earn(refused, 5)
+store.faultKey, store.rejectNext = "player_40", 1
+transport.arena.send({ refused })
+after(3)
+check(#transport.calls == 0 and transport.events[refused][1] == "ReturnFailed"
+	and live.data.getStatus(refused) == "Loaded", "a refused write blocks the Arena teleport and recovers profile access")
+
+store.latency = 3
+live.earn(ongoing, 2)
+local flushBeforeTravel = call(live.data.flush, ongoing)
+after(1)
+live.earn(ongoing, 7)
+transport.arena.send({ ongoing })
+after(1)
+check(#transport.calls == 0 and not flushBeforeTravel.done and ongoing.attrs.Travel == "Preparing", "travel waits behind the running save")
+after(7)
+check(#transport.calls == 1 and db.player_41.denarii == 9 and db.player_41.lock == nil, "the native engine only sees the confirmed newest revision")
+transport.leave(ongoing)
+live.leave(ongoing)
+store.latency = 1
+
+local function travelPlayer(id)
+	local p = { UserId = id, Parent = true, attrs = {}, cancellations = 0 }
+	function p:GetAttribute(k) return self.attrs[k] end
+	function p:SetAttribute(k, v) self.attrs[k] = v end
+	return p
+end
+local fakeData = {
+	getStatus = function() return "Loaded" end,
+	beginTransfer = function(p) p.prepared = true return true end,
+	isTransferPrepared = function(p) return p.prepared == true end,
+	cancelTransfer = function(p) p.cancellations += 1 p.prepared = false end,
 }
-local arenaNames = setmetatable({}, { __index = function(_, name) return name end })
-local arenaServices = { Players = {}, ReplicatedStorage = { Shared = arenaNames } }
-local arena = arenaSource({ Parent = { Parent = arenaNames } }, {
-	GetService = function(_, service) return arenaServices[service] end,
-}, function(name) return arenaMocks[name] end)
-local denied, expired, prepared = { Parent = true }, { Parent = true }, {
-	Parent = true,
-	GetAttribute = function() return "FIGHTER" end,
-}
-arenaReady[denied], arenaReady[expired], arenaReady[prepared] = "denied", "expired", "prepared"
-arena.send({ denied, expired, prepared })
-check(#teleported == 1 and teleported[1] == prepared, "Arena only teleports players with a confirmed, still-frozen transfer")
-check(arenaEvents[denied] == "ReturnFailed" and arenaEvents[expired] == "ReturnFailed", "failed and expired preparations show a retry")
+local a, b = travelPlayer(101), travelPlayer(102)
+transport = newTransport(fakeData)
+check(#transport.start({ a, b, a }) == 2 and #transport.start({ a }) == 0 and #transport.calls == 1, "one transfer owns each player even in overlapping group requests")
+local group = transport.calls[1]
+transport.failure(a, group, "Failure", 99)
+after(3.1)
+check(#transport.calls == 1, "failure for another place is ignored")
+transport.failure(a, group, "Failure", nil, "hub-instance")
+transport.failure(a, group, "Failure", nil, "hub-instance")
+after(3.1)
+check(#transport.calls == 2 and #transport.calls[2].players == 1 and transport.calls[2].players[1] == a
+	and transport.calls[2].routing.ServerInstanceId == "hub-instance", "a repeated group failure retries only the failed player at the original destination")
+local retry = transport.calls[2]
+transport.failure(a, group, "Failure")
+after(3.1)
+check(#transport.calls == 2, "late failure from the previous attempt cannot spend the new retry")
+transport.failure(a, retry, "Failure")
+after(3.1)
+transport.failure(a, transport.calls[3], "Failure")
+after(1)
+check(transport.failed[a] == 1 and a.cancellations == 1 and a.attrs.Travel == "Failed"
+	and transport.util.isPending(b), "retry exhaustion restores only the failed group member")
+transport.leave(b)
+
+local left = travelPlayer(103)
+transport.start({ left })
+transport.failure(left, transport.calls[#transport.calls], "Failure")
+local countBeforeLeave = #transport.calls
+transport.leave(left)
+after(4)
+check(#transport.calls == countBeforeLeave and left.cancellations == 0 and not transport.util.isPending(left)
+	and transport.lastCode == "LEFT", "leaving during retry stops attempts and clears source bookkeeping")
+
+local throws = travelPlayer(107)
+transport = newTransport(fakeData)
+transport.onCall = function(record)
+	transport.failure(throws, record, "Failure")
+	error("native error for the same attempt")
+end
+transport.start({ throws })
+after(8)
+check(#transport.calls == 3 and transport.failed[throws] == 1, "a native throw and a failure event for the same attempt schedule only one retry")
+
+local slow = travelPlayer(104)
+transport = newTransport(fakeData)
+transport.onCall = function() task.wait(50) end
+transport.start({ slow })
+local slowAttempt = transport.calls[1]
+after(41)
+check(transport.lastCode == "TELEPORT_TIMEOUT" and slow.cancellations == 1 and #transport.start({ slow }) == 0,
+	"timeout restores local state without launching against a pending native call")
+after(10)
+check(#transport.start({ slow }) == 0 and #transport.calls == 1, "late success remains ambiguous without departure or definitive failure")
+transport.failure(slow, slowAttempt, "Failure")
+transport.onCall = nil
+check(#transport.start({ slow }) == 1 and #transport.calls == 2, "definitive late failure clears only that attempt's quarantine")
+transport.failure(slow, slowAttempt, "Failure")
+check(transport.util.isPending(slow) and slow.cancellations == 1, "a definitive callback for an old attempt cannot cancel a new transfer")
+transport.leave(slow)
+
+local hint = travelPlayer(105)
+function hint:GetJoinData() return { TeleportData = { kind = "ToArena", matchId = "match", role = "FIGHTER", reward = 999, accessCode = "untrusted", attemptId = "old" } } end
+local clean = transport.util.joinPayload(hint)
+check(clean.matchId == "match" and clean.role == nil and clean.reward == nil and clean.accessCode == nil and clean.attemptId == nil,
+	"destination hints exclude roles, receipts, secrets and attempt correlation")
+transport.util.markArrived(hint)
+check(hint.attrs.Travel == "Arrived", "the destination marks arrival independently of source callbacks")
+
+local outbound = travelPlayer(106)
+transport = newTransport(fakeData)
+transport.util.toReserved({ outbound }, function() return "server-only" end, {
+	kind = "ToArena", matchId = "match", role = "FIGHTER", mode = "SOLO_ZOMBIES", accessCode = "injected",
+}, function() end)
+local reservedCall = transport.calls[1]
+check(reservedCall.placeId == 2 and reservedCall.routing.ReservedServerAccessCode == "server-only"
+	and reservedCall.wire.matchId == "match" and reservedCall.wire.accessCode == nil
+	and reservedCall.wire.role == nil and reservedCall.wire.mode == nil, "outgoing reserved routing keeps credentials and roles out of TeleportData")
+transport.leave(outbound)
+
+local recovering = live.join(42)
+after(3)
+local committedTransfer = call(live.data.beginTransfer, recovering)
+after(3)
+check(committedTransfer.value == true, "the recovery timeout scenario starts with a released durable profile")
+store.latency = 32
+live.data.cancelTransfer(recovering)
+after(21)
+check(live.data.getStatus(recovering) == "Unsaved" and live.data.isReady(recovering) and not live.data.canPersist(recovering),
+	"unavailable recovery restores session-only control within its deadline")
+store.latency = 1
+after(13)
+check(live.data.getStatus(recovering) == "Unsaved", "late lease acknowledgement cannot restore persistence after recovery timed out")
 
 -- A clean, idle profile still has an active lease after the heartbeat.
 local H = newServer("H")

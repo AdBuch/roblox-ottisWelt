@@ -31,10 +31,11 @@ local sent = nil
 local lastFighters = nil
 local GameStates = {StateAttribute="GameState",Countdown="COUNTDOWN",PartyForming="PARTY_FORMING",isInLobby=function(state) return state=="LOBBY" or state=="PARTY_FORMING" end}
 local modules = {
-	GameStates=GameStates,MatchTypes={},LobbyService={},
+	GameStates=GameStates,MatchTypes={},LobbyService={},ExperienceConfig={Teleport={TravelTimeoutSeconds=40}},
 	CombatUtil={getLivingCharacter=function(p) if p.alive then return {},{},{Position=p.position} end return nil,nil,nil end},
 	InventoryService={hasValidLoadout=function(p) return p.valid,"invalid gear" end},
 	PlayerDataService={isReady=function(p) return p.loaded end},
+	TeleportUtil={isPending=function(p) return p.travel == true end},
 	PartyService={padParty=function(id) return parties[id] end,setLocked=function(party,locked) party.locked=locked end},
 	MatchmakingService={isQueued=function(p) return p.queued end},
 	ArenaReservationService={
@@ -55,9 +56,9 @@ local modules = {
 		return players
 	end},
 }
-local server = {CombatUtil="CombatUtil",InventoryService="InventoryService",PlayerDataService="PlayerDataService",LobbyService="LobbyService"}
+local server = {CombatUtil="CombatUtil",InventoryService="InventoryService",PlayerDataService="PlayerDataService",TeleportUtil="TeleportUtil",LobbyService="LobbyService"}
 local script = {Parent={Parent=server,PartyService="PartyService",MatchmakingService="MatchmakingService",ArenaReservationService="ArenaReservationService",HubTeleportService="HubTeleportService"}}
-local shared = {GameStates="GameStates",MatchTypes="MatchTypes"}
+local shared = {GameStates="GameStates",MatchTypes="MatchTypes",ExperienceConfig="ExperienceConfig"}
 local services = {Players={GetPlayers=function() return all end,PlayerRemoving=signal()},ReplicatedStorage={Shared=shared}}
 local game = {GetService=function(_,name) return services[name] end}
 local require = function(key) return assert(modules[key],"unknown module") end
@@ -73,7 +74,7 @@ teams.init({pad("TeamSchili",0,"Blue"),pad("TeamKrokero",40,"Red")})
 local function reset()
 	for _,fn in delayed do fn() end
 	table.clear(delayed)
-	for _,p in all do p.Parent=true;p.loaded=true;p.valid=true;p.queued=false;p.alive=true;p.attrs.GameState="LOBBY" end
+	for _,p in all do p.Parent=true;p.loaded=true;p.valid=true;p.queued=false;p.alive=true;p.travel=false;p.attrs.GameState="LOBBY" end
 	a.position.X=0;b.position.X=40;c.position.X=0;d.position.X=40
 	parties={TeamSchili={id="blue",members={a},locked=false},TeamKrokero={id="red",members={b},locked=false}}
 	mock=true;reserveFails=false;sendFails=false;reserveHook=nil;sent=nil;lastFighters=nil
@@ -117,6 +118,8 @@ reset();b.valid=false
 check(not teams.confirm(a,"TeamSchili"),"invalid opponent gear blocks start")
 reset();b.queued=true
 check(not teams.confirm(a,"TeamSchili"),"queued opponent cannot be double assigned")
+reset();b.travel=true
+check(not teams.confirm(a,"TeamSchili"),"a travelling opponent cannot be reserved again")
 reset();b.alive=false
 check(not teams.confirm(a,"TeamSchili"),"dead opponent cannot start")
 reset();parties.TeamKrokero=nil

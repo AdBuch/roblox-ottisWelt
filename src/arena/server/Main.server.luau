@@ -45,7 +45,6 @@ local TeleportUtil = require(Server.TeleportUtil)
 local WaveService = require(Server.WaveService)
 local ZombieService = require(Server.ZombieService)
 local ArenaMatchService = require(script.Parent.ArenaMatchService)
-local ArenaReturnService = require(script.Parent.ArenaReturnService)
 local ArenaSpectatorService = require(script.Parent.ArenaSpectatorService)
 local EliminationService = require(script.Parent.EliminationService)
 local FirstToKillsService = require(script.Parent.FirstToKillsService)
@@ -124,7 +123,6 @@ TeamBattleService.setRules({
 	ELIMINATION = EliminationService,
 })
 ArenaSpectatorService.init()
-ArenaReturnService.init()
 ArenaMatchService.init(arena) -- MatchService, admission, heartbeat, return requests
 ArenaSafetyService.init()
 AuraService.startActivityTracking() -- active fighting seconds for the honest play-time estimate

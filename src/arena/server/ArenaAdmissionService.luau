@@ -155,6 +155,7 @@ local function admit(player: Player)
 		admitted[player] = { role = "SPECTATOR", team = "" }
 		currentHooks.spectatorAdmitted(player)
 	end
+	TeleportUtil.markArrived(player)
 	print(PREFIX, ("%s admitted as %s"):format(player.Name, ticket.role))
 end
 
