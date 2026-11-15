@@ -431,10 +431,7 @@ function PlayerCombatService.refreshEquipment(player: Player)
 
 	if shield then
 		local shieldModel, shieldCore = EquipmentModels.buildShield(shield.Id)
-		local paint = InventoryService.shieldDesign(player, shield.Id)
-		if paint then
-			ForgeDefinitions.applyDesign(shieldModel, { [ForgeDefinitions.ShieldSlot.id] = paint }, true)
-		end
+		ForgeDefinitions.applyDesign(shieldModel, InventoryService.shieldDesign(player, shield.Id), true) -- paint, edge, boss, ornaments (cosmetic)
 		local sound = Instance.new("Sound")
 		sound.Name = "BlockSound"
 		sound.SoundId = CombatConfig.ShieldSoundId

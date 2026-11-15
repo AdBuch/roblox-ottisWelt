@@ -51,6 +51,9 @@ mocks["Shared/EnvironmentConfig"] = { role = function() return role end }
 mocks["Server/PlayerDataService"] = { isReady = function(p) return ready[p] ~= false end }
 mocks["Server/PlayerCombatService"] = { refreshEquipment = function() refreshed += 1 end }
 mocks["Server/Remotes"] = { LoadoutRequest = {} }
+local shopSells = nil -- the kind the shop room the player stands in sells (nil = not in a shop)
+mocks["Server/CombatUtil"] = { getLivingCharacter = function() return {}, {}, { Position = Vector3.new(0, 0, 0) } end }
+mocks["Server/LobbyArchitecture"] = { armorySells = function(_, kind) return shopSells == kind end }
 
 local function newPlayer(id)
 	local p = { UserId = id, Name = "P" .. id, attrs = { GameState = "LOBBY", Location = "Lobby" } }
@@ -59,7 +62,7 @@ local function newPlayer(id)
 	return p
 end
 '@
-foreach ($name in 'ArmorDefinitions','Config','CurrencyConfig','GladiatorLevelDefinitions','PlayerDataSchema','ShieldDefinitions','WeaponDefinitions','SpecialMoveDefinitions','GameStates','WeaponBalanceConfig','WeaponSpecialDefinitions','WeaponAttackDefinitions','SpecialPracticeDefinitions','ForgeDefinitions') {
+foreach ($name in 'ArmorDefinitions','HelmetDefinitions','Config','CurrencyConfig','GladiatorLevelDefinitions','PlayerDataSchema','ShieldDefinitions','WeaponDefinitions','SpecialMoveDefinitions','GameStates','WeaponBalanceConfig','WeaponSpecialDefinitions','WeaponAttackDefinitions','SpecialPracticeDefinitions','ForgeDefinitions') {
     $harness += Wrap "Shared/$name" "src/shared/$name.luau"
 }
 foreach ($name in 'InventoryService','LoadoutRequestService','RateLimiter') {
@@ -133,7 +136,7 @@ check(Weapons.ById[Weapons.Starter].LevelRequired == 1 and Shields.ById[Shields.
 check(math.abs(Balance.pveFactor("BattleAxe") - (1 + 4 * Balance.PvELevelStep)) < 1e-9, "PvE damage unchanged by the new level numbers (tier 5)")
 
 ------------------------------------------------------------------ migration of older profiles
-check(Schema.Version == 10, "schema v10")
+check(Schema.Version == 12, "schema v12")
 local v6 = { version = 6, auraPoints = 3200, denarii = 540, ownedWeapons = "RustyGladius,BattleAxe", ownedShields = "WoodenBuckler,ThraexShield", ownedArmor = "RecruitLeather,ChampionArmor", equippedWeapon = "BattleAxe", equippedShield = "ThraexShield", equippedArmor = "ChampionArmor", preferences = { HudMode = "Minimal" }, stats = { zombieKills = 40 } }
 Inv.migrateProfile(v6)
 check(v6.auraPoints == 3200 and v6.denarii == 540, "v6 keeps Aura and Denarii")
@@ -145,7 +148,7 @@ Inv.migrateProfile(v6)
 check(v6.auraPoints == 3200 and v6.denarii == 540 and v6.earnings.aura == 0 and v6.earnings.since == since, "migration repeatable without double values")
 local v7 = { version = 7, specialAttempts = { ["RustyGladius:Gladius_SpecCleave"] = 12 } }
 Inv.migrateProfile(v7)
-check(v7.version == 10 and v7.specialAttempts["RustyGladius:Gladius_SpecCleave"] == 12 and v7.earnings.complete == false, "v7 keeps special practice and starts earnings tracking")
+check(v7.version == 12 and v7.specialAttempts["RustyGladius:Gladius_SpecCleave"] == 12 and v7.earnings.complete == false, "v7 keeps special practice and starts earnings tracking")
 local v4 = { version = 4, auraPoints = 300, ownedWeapons = "RustyGladius,LegionSword", ownedShields = "", ownedArmor = "" }
 Inv.migrateProfile(v4)
 check(v4.denarii == 300 and v4.auraPoints == 380 and v4.earnings.complete == false, "v4 -> v8 keeps the Denarii conversion")
@@ -241,13 +244,37 @@ local before = refreshed
 r = Loadout.handle(d, "Equip", "Weapon", "LegionSword") -- same clock: rate limited
 check(not r.ok and r.code == "RATE" and refreshed == before, "rate limited")
 
+------------------------------------------------------------------ buying in Rome's shops (shop menu)
+local function buy(kind, id) now += 1; return Loadout.handle(d, "Buy", kind, id) end
+r = buy("Helmet", "SpartaHelm")
+check(not r.ok and r.code == "NOT_IN_SHOP" and Inv.getDenarii(d) == 77, "no purchase outside a shop")
+shopSells = "Weapon"
+r = buy("Helmet", "SpartaHelm")
+check(not r.ok and r.code == "NOT_IN_SHOP", "the weapon shop sells no helmets")
+shopSells = "Helmet"
+Inv.addDenarii(d, 100)
+r = buy("Helmet", "SpartaHelm")
+check(r.ok and r.code == "BOUGHT" and Inv.getDenarii(d) == 177 - 90 and d.attrs.EquippedHelmet == "SpartaHelm", "a Denarii helmet: charged once, worn at once")
+r = buy("Helmet", "SpartaHelm")
+check(not r.ok and r.code == "OWNED" and Inv.getDenarii(d) == 87, "never bought twice")
+r = buy("Helmet", "DragonHead")
+check(not r.ok and r.code == "REFUSED" and not Inv.owns(d, "Helmet", "DragonHead") and Inv.getDenarii(d) == 87, "a Robux helmet is never sold for Denarii (no Robux counter here)")
+local asked = nil
+Loadout.setRobuxBuyer(function(player, id) asked = id return { ok = false, code = "ROBUX", message = "prompt", productId = 4711 } end)
+r = buy("Helmet", "DragonHead")
+check(asked == "DragonHead" and not r.ok and r.code == "ROBUX" and r.productId == 4711 and not Inv.owns(d, "Helmet", "DragonHead") and Inv.getDenarii(d) == 87, "a Robux helmet: the product to prompt, nothing granted before the receipt")
+check(Inv.grantItem(d, "Helmet", "DragonHead") and not Inv.grantItem(d, "Helmet", "DragonHead") and Inv.owns(d, "Helmet", "DragonHead"), "the receipt's grant gives the helmet once")
+r = ask("Helmet", "DragonHead")
+check(r.ok and d.attrs.EquippedHelmet == "DragonHead", "the granted helmet can be worn")
+shopSells = nil
+
 ------------------------------------------------------------------ saved and carried into the Arena / rejoin
 local saved = Inv.serialize(d)
 local e = newPlayer(4)
 Inv.forget(d)
 Inv.load(e, saved, 0, 0, nil)
 check(e.attrs.EquippedWeapon == "RustyGladius" and e.attrs.EquippedShield == "LegionShield", "loadout survives a rejoin / the trip to the Arena")
-check(Inv.getAura(e) == 50000 and Inv.getDenarii(e) == 77, "balance survives")
+check(Inv.getAura(e) == 50000 and Inv.getDenarii(e) == 87, "balance survives")
 local savedB = Inv.serialize(b)
 local f = newPlayer(9)
 Inv.load(f, savedB, 0, 0, nil)

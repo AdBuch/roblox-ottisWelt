@@ -157,7 +157,12 @@ local function newItem(kind: ItemKind, id: string, price: number, levelRequired:
 	return item
 end
 
+local menuOnly = false -- Rome's shops: no prompt per display, the shop menu sells (LoadoutRequestService "Buy")
 local function addPrompt(item: Model, anchor: BasePart, kind: ItemKind, id: string, name: string)
+	CollectionService:AddTag(item, Config.ShopItemTag) -- the menu's item previews clone these displays
+	if menuOnly then
+		return
+	end
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "ShopPrompt"
 	prompt.Style = Enum.ProximityPromptStyle.Custom -- the client draws the compact info card
@@ -172,7 +177,6 @@ local function addPrompt(item: Model, anchor: BasePart, kind: ItemKind, id: stri
 	prompt.Triggered:Connect(function(player)
 		onTriggered(player, kind, id, anchor)
 	end)
-	CollectionService:AddTag(item, Config.ShopItemTag)
 end
 
 -- Evenly spreads `count` displays along a line (at most `maxSpacing` apart). Returns slot CFrames.
@@ -290,7 +294,8 @@ end
 local function buildHelmetDisplay(parent: Instance, slot: CFrame, helmet: HelmetDefinitions.HelmetDefinition)
 	local item = newItem("Helmet", helmet.Id, helmet.Price, helmet.LevelRequired)
 	local base = slot * CFrame.new(0, 0.85, 0)
-	local stand = makePart("Stand", Vector3.new(2.4, 0.3, 2.4), base * CFrame.new(0, 0.15, 0), DARK_WOOD, Enum.Material.Wood, item)
+	local stand = makePart("Stand", Vector3.new(2, 0.3, 2), base * CFrame.new(0, 0.15, 0), DARK_WOOD, Enum.Material.Wood, item)
+	item:SetAttribute("Robux", helmet.Robux) -- 0 = sold for Denarii
 	local body = buildMannequin(item, base * CFrame.new(0, 0.3, 0))
 	local helmetModel = EquipmentModels.buildHelmet(helmet.Id, body)
 	if helmetModel then
@@ -327,9 +332,12 @@ export type ShopLayout = {
 	shields: { [string]: DisplayLine }?,
 	armor: DisplayLine?,
 	helmets: DisplayLine?,
+	helmetLines: { DisplayLine }?, -- more helmet walls: the helmets are spread over all of them
 }
 
-function EquipmentShopService.build(parent: Instance, armory: ShopLayout)
+-- `noPrompts`: displays only (the look and the menu's previews); buying happens in the shop menu.
+function EquipmentShopService.build(parent: Instance, armory: ShopLayout, noPrompts: boolean?)
+	menuOnly = noPrompts == true
 	local shop = Instance.new("Folder")
 	shop.Name = "ArmoryDisplays"
 
@@ -370,8 +378,21 @@ function EquipmentShopService.build(parent: Instance, armory: ShopLayout)
 				table.insert(helmets, def)
 			end
 		end
-		for i, slot in slots(armory.helmets, #helmets, 9) do
-			buildHelmetDisplay(shop, slot, helmets[i])
+		-- over every helmet wall, each wall its share by length
+		local lines: { DisplayLine } = { armory.helmets }
+		local total = armory.helmets.length
+		for _, line in armory.helmetLines or {} do
+			table.insert(lines, line)
+			total += line.length
+		end
+		local first = 1
+		for n, line in lines do
+			local left = #helmets - first + 1
+			local count = if n == #lines then left else math.min(left, math.floor(#helmets * line.length / total + 0.5))
+			for i, slot in slots(line, count, 9) do
+				buildHelmetDisplay(shop, slot, helmets[first + i - 1])
+			end
+			first += count
 		end
 	end
 	shop.Parent = parent

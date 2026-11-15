@@ -27,9 +27,13 @@
 -- `receipts` (processed Robux purchase ids). The v9 `forge` stage moves onto each owned weapon's
 -- first copy; every owned weapon gets one copy. Nothing is taken away.
 -- v11: helmets (`ownedHelmets`, `equippedHelmet`, HelmetDefinitions). Old profiles own only the bare head.
+-- v12: `shieldDesigns` is shield id -> { slot -> option } (paint, edge, boss, ornaments; the v10
+-- paint id becomes the Paint slot). The helmet "Galea" became "SpartaHelm" (owners keep it).
+-- The saved record also carries PlayerDataService's own fields, which are not part of the profile:
+-- `lock` (the server that holds the profile), `saveId`, `savedAt`, `session`.
 
 local PlayerDataSchema = {
-	Version = 11,
+	Version = 12,
 
 	-- A new play session starts when the profile was not seen for this long (teleports take seconds)
 	SessionGapSeconds = 20 * 60,

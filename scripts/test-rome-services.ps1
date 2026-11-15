@@ -51,7 +51,7 @@ local function newPlayer(id)
 	return p
 end
 '@
-foreach ($name in 'ArmorDefinitions','Config','CurrencyConfig','GladiatorLevelDefinitions','PlayerDataSchema','ShieldDefinitions','WeaponDefinitions','SpecialMoveDefinitions','GameStates','WeaponBalanceConfig','WeaponSpecialDefinitions','WeaponAttackDefinitions','SpecialPracticeDefinitions','ForgeDefinitions','OracleDefinitions') {
+foreach ($name in 'ArmorDefinitions','HelmetDefinitions','Config','CurrencyConfig','GladiatorLevelDefinitions','PlayerDataSchema','ShieldDefinitions','WeaponDefinitions','SpecialMoveDefinitions','GameStates','WeaponBalanceConfig','WeaponSpecialDefinitions','WeaponAttackDefinitions','SpecialPracticeDefinitions','ForgeDefinitions','OracleDefinitions') {
     $harness += Wrap "Shared/$name" "src/shared/$name.luau"
 }
 $harness += Wrap "Server/InventoryService" "src/server/InventoryService.luau"
@@ -199,11 +199,62 @@ check(r.ok and inHand.job == nil and inHand.wear == 0 and Inv.credits(p, "Skip")
 -- SHIELD PAINT (Robux)
 local shieldId = require("Shared/ShieldDefinitions").Starter
 tick()
-r = Town.request(p, "Paint", { token = token, shieldId = shieldId, option = "LegionRed" })
+r = Town.request(p, "Paint", { token = token, shieldId = shieldId, slot = "Paint", option = "LegionRed" })
 check(not r.ok and r.needProduct == "DesignToken", "shield paint needs the Robux product")
 tick()
 r = Town.request(p, "Buy", { token = token, key = "DesignToken" })
-check(r.ok and Inv.shieldDesign(p, shieldId) == "LegionRed", "shield painted after the purchase")
+check(r.ok and Inv.shieldDesign(p, shieldId).Paint == "LegionRed", "shield painted after the purchase")
+-- SHIELD in detail: edge, boss and ornaments one by one; credits can be bought in advance
+tick()
+r = Town.request(p, "Buy", { token = token, key = "DesignPack" })
+check(r.ok and Inv.credits(p, "Design") == 3, "three design credits bought in advance (nothing pending)")
+tick()
+r = Town.request(p, "Paint", { token = token, shieldId = shieldId, slot = "Trim", option = "Gold" })
+check(r.ok and Inv.credits(p, "Design") == 2 and Inv.shieldDesign(p, shieldId).Trim == "Gold", "gilded edge paid with a credit")
+tick()
+r = Town.request(p, "Paint", { token = token, shieldId = shieldId, slot = "Boss", option = "Silver" })
+check(r.ok and Inv.shieldDesign(p, shieldId).Boss == "Silver" and Inv.shieldDesign(p, shieldId).Paint == "LegionRed", "silvered boss; the paint stays")
+tick()
+r = Town.request(p, "Paint", { token = token, shieldId = shieldId, slot = "Boss", option = "Silver" })
+check(not r.ok and Inv.credits(p, "Design") == 1, "the same design again costs nothing and changes nothing")
+tick()
+r = Town.request(p, "Paint", { token = token, shieldId = shieldId, slot = "Blade", option = "Gold" })
+check(not r.ok and Inv.credits(p, "Design") == 1, "a weapon slot is no shield slot")
+tick()
+r = Town.request(p, "Paint", { token = token, shieldId = "TowerShield", slot = "Trim", option = "Gold" })
+check(not r.ok and Inv.credits(p, "Design") == 1, "no design on a shield the player doesn't own")
+check(r.state == nil or #last().payload.shieldSlots == 4, "four shield slots offered")
+tick()
+r = Town.request(p, "Buy", { token = token, key = "SkipChest" })
+check(r.ok and Inv.credits(p, "Skip") == 10, "ten fast-forwards in advance")
+-- HELMETS: Denarii helmets by level, Robux helmets only through a receipt
+local Helmets = require("Shared/HelmetDefinitions")
+local robuxHelmets, denariiHelmets = 0, 0
+for _, def in Helmets.Ordered do
+	if def.Robux > 0 then
+		robuxHelmets += 1
+		check(Forge.product(Helmets.productKey(def.Id)).helmet == def.Id and def.Reduction <= Helmets.ById.ChampionCrest.Reduction, "Robux helmet has its product and no better protection: " .. def.Id)
+	elseif def.Id ~= Helmets.Starter then
+		denariiHelmets += 1
+	end
+end
+check(robuxHelmets == 10 and denariiHelmets == 3, "10 Robux helmets and 3 Denarii helmets")
+local okBuy, why = Inv.purchase(p, "Helmet", "DragonHead")
+check(not okBuy and why:find("Robux") and not Inv.owns(p, "Helmet", "DragonHead"), "a Robux helmet can't be bought with Denarii")
+tick()
+r = Town.request(p, "Buy", { token = token, key = Helmets.productKey("DragonHead") })
+check(not r.ok and not Inv.owns(p, "Helmet", "DragonHead"), "helmets are not sold at the smith's counter")
+local h = Town.buyHelmet(p, "DragonHead")
+check(h.ok and h.code == "BOUGHT" and Inv.owns(p, "Helmet", "DragonHead") and Inv.getEquippedHelmet(p).Id == "DragonHead", "Studio test purchase grants and equips the helmet")
+h = Town.buyHelmet(p, "DragonHead")
+check(not h.ok and h.code == "OWNED", "never bought twice")
+h = Town.buyHelmet(p, "SpartaHelm")
+check(not h.ok and not Inv.owns(p, "Helmet", "SpartaHelm"), "a Denarii helmet is no Robux product")
+check(Town.grant(p, Forge.product(Helmets.productKey("OttiHead")), "R-H1") and Town.grant(p, Forge.product(Helmets.productKey("OttiHead")), "R-H1") and Inv.owns(p, "Helmet", "OttiHead"), "a helmet receipt grants once")
+studio = false
+h = Town.buyHelmet(p, "KrokoHead")
+check(not h.ok and not Inv.owns(p, "Helmet", "KrokoHead"), "without a product id a Robux helmet is not sold outside Studio")
+studio = true
 studio = false
 -- invalid requests and wrong states: the balance never changes
 balance = Inv.getDenarii(p)
@@ -244,16 +295,23 @@ check(not r.ok and Inv.getDenarii(p) == balance, "an expired offer is refused")
 -- SAVE DATA: copies, jobs, wear, designs, credits, receipts survive a rejoin / teleport (serialized)
 Inv.addWear(p, starter, 3)
 local saved = Inv.serialize(p)
-check(saved.version == 10 and #saved.weaponCopies[starter] == 2 and saved.weaponCopies[starter][1].design.Grip == "Gold" and table.find(saved.receipts, "R-1"), "copies, designs and receipts in the saved profile (v10)")
+check(saved.version == 12 and saved.ownedHelmets:find("DragonHead") and saved.shieldDesigns[shieldId].Trim == "Gold" and #saved.weaponCopies[starter] == 2 and saved.weaponCopies[starter][1].design.Grip == "Gold" and table.find(saved.receipts, "R-1"), "copies, designs and receipts in the saved profile (v12)")
 local q = newPlayer(2)
 Inv.load(q, saved, 0, 0, nil)
-check(#Inv.copies(q, starter) == 2 and Inv.forgeLevel(q, starter) == Inv.forgeLevel(p, starter) and Inv.hasReceipt(q, "R-1") and Inv.shieldDesign(q, shieldId) == "LegionRed", "all of it after rejoin")
+check(#Inv.copies(q, starter) == 2 and Inv.forgeLevel(q, starter) == Inv.forgeLevel(p, starter) and Inv.hasReceipt(q, "R-1") and Inv.shieldDesign(q, shieldId).Paint == "LegionRed" and Inv.shieldDesign(q, shieldId).Boss == "Silver", "all of it after rejoin")
+check(Inv.owns(q, "Helmet", "DragonHead") and Inv.owns(q, "Helmet", "OttiHead") and Inv.getEquippedHelmet(q).Id == saved.equippedHelmet, "owned and worn helmets survive the rejoin")
+local v11 = table.clone(saved)
+v11.version, v11.shieldDesigns, v11.ownedHelmets, v11.equippedHelmet = 11, { [shieldId] = "ImperialBlue", Fake = "Gold" }, "Galea,NoHelmet", "Galea"
+local m = newPlayer(7)
+Inv.load(m, v11, 0, 0, nil)
+check(Inv.shieldDesign(m, shieldId).Paint == "ImperialBlue" and Inv.serialize(m).shieldDesigns.Fake == nil, "v11 shield paint becomes the Paint slot")
+check(Inv.owns(m, "Helmet", "SpartaHelm") and Inv.getEquippedHelmet(m).Id == "SpartaHelm" and not Inv.serialize(m).ownedHelmets:find("Galea"), "the old Galea becomes the Sparta helmet")
 local v9 = table.clone(saved)
 v9.version, v9.weaponCopies, v9.activeCopy, v9.receipts = 9, nil, nil, nil
 v9.forge = { [starter] = 1 }
 local o = newPlayer(3)
 Inv.load(o, v9, 0, 0, nil)
-check(#Inv.copies(o, starter) == 1 and Inv.forgeLevel(o, starter) == 1 and Inv.serialize(o).version == 10 and Inv.serialize(o).forge == nil, "v9 stage moves onto the first copy")
+check(#Inv.copies(o, starter) == 1 and Inv.forgeLevel(o, starter) == 1 and Inv.serialize(o).version == 12 and Inv.serialize(o).forge == nil, "v9 stage moves onto the first copy")
 local junk = table.clone(saved)
 junk.weaponCopies = { [starter] = { { uid = "a", forge = 9, wear = 400, design = { Grip = "Diamond" }, job = { kind = "Melt", untilTime = 1 } }, { uid = "a", forge = 1 } }, Fake = { { uid = "f" } } }
 local j = newPlayer(4)

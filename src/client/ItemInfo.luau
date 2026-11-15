@@ -32,7 +32,8 @@ export type Card = {
 	values: { Value },
 	notes: { string }, -- facts without a number (two-handed, projectile, specials)
 	levelRequired: number,
-	price: number,
+	price: number, -- Denarii
+	robux: number?, -- sold for Robux instead (helmets of the helm shop)
 }
 
 export type Difference = { label: string, from: string, to: string, change: string, verdict: number } -- verdict: 1 better, -1 worse, 0 same / neutral
@@ -143,9 +144,10 @@ function ItemInfo.describe(kind: string, id: string): Card?
 			values = {
 				value("reduction", "Schadensminderung", helmet.Reduction, pct(helmet.Reduction), 1),
 			},
-			notes = { "Ein Helm zur Zeit · Wechsel nur in der Lobby" },
+			notes = if helmet.Robux > 0 then { "Ein Helm zur Zeit · Wechsel nur in der Lobby", "Für Robux · kein Level nötig · schützt nie besser als der beste Denarii-Helm" } else { "Ein Helm zur Zeit · Wechsel nur in der Lobby" },
 			levelRequired = helmet.LevelRequired,
 			price = helmet.Price,
+			robux = if helmet.Robux > 0 then helmet.Robux else nil,
 		}
 	elseif kind == "Armor" then
 		local armor = ArmorDefinitions.ById[id]

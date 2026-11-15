@@ -137,12 +137,20 @@ Dialog `src/hub/client/RomeDialog.client.luau`.
   den der PvP-Multiplikator wieder herausteilt: **PvP unverändert.** Der Dialog zeigt den
   Grundschlag gegen Zombies mit diesem Faktor und erklärt, was erst beim Treffer wirkt
   (`ForgeDefinitions.ValueNote`).
-- **Designs (kosmetisch, Robux):** Griff (Gold, Silber, Purpurleder), Klinge (Poliert, Geschwärzt,
-  Bronze), Beschläge (Gold, Silber, Bronze) je Exemplar; Schildbemalung (Legionsrot, Kaiserblau,
-  Gold) je Schild. Färbt die benannten Teile des Waffen-/Schildmodells beim Ausrüsten.
+- **Designs (kosmetisch, Robux, je 1 Design-Gutschrift):** `ForgeDefinitions.DesignSlots` je
+  Exemplar: **Klinge** (vergoldet, versilbert, Bronze, Rotgold, Schwarzeisen, polierter Stahl,
+  geschwärzt, Damaszener, Obsidian, Glut-, Frost-, Gift-, Rubinklinge), **Griff** (dieselben
+  Metalle, Leder in sechs Farben, Ebenholz), **Beschläge** (Metalle, Rubin-, Saphir-,
+  Smaragdbesatz). `ForgeDefinitions.ShieldSlots` je Schild, jeder Teil einzeln: **Bemalung** der
+  Fläche (neun Farben, vergoldet, versilbert, Bronze), **Rand**, **Schildbuckel** und
+  **Verzierung** (Metalle, beim Buckel auch Rubin und Saphir). Edelmetalle glänzen
+  (`Reflectance`). Färbt die benannten Teile des Modells beim Ausrüsten
+  (`ForgeDefinitions.applyDesign`). Im Dialog klappt DESIGN die Auswahl je Exemplar / Schild auf.
 - **Robux (Platzhalter):** `ForgeDefinitions.Products`: 250 / 1200 / 3000 Denarii (25 / 99 / 199 R$),
   Auftrag sofort fertig (15 R$), Design anfertigen (49 R$). **SALE-Bundles:** 3× Vorspulen (39 R$ statt 45),
-  3× Design (129 R$ statt 147), Starterpaket 1200 Denarii + 1 Vorspulen + 1 Design (149 R$ statt 163).
+  10× Vorspulen (99 R$ statt 150), 3× Design (129 R$ statt 147), 10× Design (349 R$ statt 490),
+  Starterpaket 1200 Denarii + 1 Vorspulen + 1 Design (149 R$ statt 163). Gutschriften lassen sich
+  im Schmied-Dialog auch auf Vorrat kaufen. Dazu je Robux-Helm ein Produkt (`Helmet_<Id>`, s. u.).
   Gutschriften stehen in `Product.credits` und werden in `TownServices.grant` je Receipt einmal gewährt. `productId = 0` bis die Produkte im
   Creator Hub angelegt sind: in Studio laufen Testkäufe über denselben Gewährungsweg, ausserhalb
   werden sie abgelehnt. `MarketplaceService.ProcessReceipt` (nur Hub) gewährt jede Quittung einmal
@@ -263,10 +271,29 @@ Später: Questfiguren/Anschlagtafel, Hausinnenräume, Trireme und Reisen, geheim
   Schmiede (BN1, Waffen), Helmhändler gegenüber (BS1, Helme), Rüstungsladen neben dem Helmhändler
   (BS1, Rüstungen), Schildhaus (BS1, Schilde). Je ein Händler-NPC hinter dem Tresen. Die Taverne
   bleibt, wo sie war. Die Gladiatorenwaffenkammer in der Arena ist leer.
+- **Kaufen über das Menü:** Die Ständer in den Läden sind nur Ausstellung (keine Prompts). Wer einen
+  Laden betritt (unsichtbare `ShopZone`, Tag `Config.ShopZoneTag`), dem öffnet sich das Menü auf
+  AUSRÜSTUNG im Ladenmodus: alle Waren des Ladens mit Preis und Level, KAUFEN rüstet gleich aus
+  (`LoadoutRequest "Buy"`, Server prüft den passenden Laden über `LobbyArchitecture.armorySells`).
+  Beim Hinausgehen schließt es sich.
+- **Grauer Boden:** Die `Baseplate` der Studio-Vorlage im Place wird beim Bau von Rom entfernt.
 - **Helme (`src/shared/HelmetDefinitions.luau`):** eigener Ausrüstungs-Slot neben der Rüstung, Profil v11
   (`ownedHelmets`, `equippedHelmet`). „Kein Helm“ ist kostenlos. Helme bringen etwas Schadensminderung
   zusätzlich zur Rüstung (`PlayerCombatService.armorReduction`) und werden am Kopf angebracht
-  (`EquipmentModels.buildHelmet`).
+  (`EquipmentModels.buildHelmet`, Maße in Kopf-Einheiten).
+  - **3 für Denarii** (Level nötig): Spartaner (90 D, Level 6, 4 %), Gladiator (200 D, Level 16, 8 %),
+    Römischer General (380 D, Level 32, 12 %). Die frühere „Galea“ wird beim Laden zum Spartaner.
+  - **10 für Robux** (kein Level, alle 8 %, also nie besser als der beste Denarii-Helm): die drei
+    Freunde Otti-, Schili-, Kroko-Kopf (je 99 R$), Drachenkopf (149), Nashornkopf (119), Toro (119),
+    Affenkopf (99), Samurai (129), Soldat 1944 (99, ohne Abzeichen), Inka (129).
+  - **Kauf:** im Ladenmenü KAUFEN · R$. `LoadoutRequest "Buy"` gibt für einen Robux-Helm die
+    Produkt-ID zurück (`TownServices.buyHelmet`), der Client öffnet den Roblox-Kauf, `ProcessReceipt`
+    gewährt den Helm einmal und rüstet ihn aus. `ProductId = 0` in `HelmetDefinitions`: nur
+    Studio-Testkauf, bis das Developer Product im Creator Hub angelegt und die ID eingetragen ist.
+- **Schilddesigns, Profil v12:** `shieldDesigns` ist Schild → { Slot → Option }; die alte Bemalung
+  (eine Option je Schild) wird zum Slot `Paint`.
+- **Robux-Käufe nur auf speicherbarem Profil:** `ProcessReceipt` gewährt nur, wenn das Profil geladen
+  und speicherbar ist, und meldet Roblox „gewährt“ erst nach bestätigtem Speichern (README, „Saving“).
 - **Training:** auf dem Kolosseums-Vorplatz vor dem Westbogen (`LobbyArchitecture` FORECOURT), nicht mehr
   auf dem Sand. Die Kampfregel „nur Strohpuppen im Trainingsbereich“ gilt dort.
 - **Gathering-Punkte:** Co-op- und Team-Mosaike liegen jetzt in den Hallen-Buchten unter den Tribünen,

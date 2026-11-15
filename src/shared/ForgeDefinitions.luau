@@ -14,11 +14,13 @@
 --   Harden   +1 stage (max MaxLevel)               price: 50 % of the weapon price, min 40
 --   Sharpen  wear -35                                price: 10 + 4 % of the weapon price
 --   Repair   wear 0                                  price: 15 + 20 % of the weapon price x wear share
---   Design   a cosmetic option (paid with Robux: DesignToken), no effect on combat
+--   Design   a cosmetic option (paid with Robux: a Design credit), no effect on combat: blade,
+--            grip and fittings of a weapon; paint, edge, boss and ornaments of a shield
 --   Copy     a further copy of the same weapon       price: base x 2^(copies owned), base min 40
 -- Missing Denarii can be bought with Robux (Denarii packs). All Robux products are configured
 -- here; productId 0 = not created yet (Studio test purchases only).
 
+local HelmetDefinitions = require(script.Parent.HelmetDefinitions)
 local SpecialMoveDefinitions = require(script.Parent.SpecialMoveDefinitions)
 local WeaponBalanceConfig = require(script.Parent.WeaponBalanceConfig)
 local WeaponDefinitions = require(script.Parent.WeaponDefinitions)
@@ -45,13 +47,52 @@ export type Copy = {
 	job: Job?,
 }
 
-export type DesignOption = { id: string, label: string, color: Color3?, material: Enum.Material? }
+export type DesignOption = { id: string, label: string, color: Color3?, material: Enum.Material?, reflectance: number? }
 export type DesignSlot = { id: string, label: string, parts: { string }, options: { DesignOption } }
-export type Product = { key: string, productId: number, robux: number, label: string, denarii: number?, credits: { [string]: number }? }
+export type Product = { key: string, productId: number, robux: number, label: string, denarii: number?, credits: { [string]: number }?, helmet: string? }
 
 local GOLD = Color3.fromRGB(232, 186, 82)
 local SILVER = Color3.fromRGB(206, 210, 216)
 local BRONZE = Color3.fromRGB(176, 125, 60)
+local METAL = Enum.Material.Metal
+local PAINT = Enum.Material.SmoothPlastic
+
+local function option(id: string, label: string, color: Color3, material: Enum.Material, reflectance: number?): DesignOption
+	return table.freeze({ id = id, label = label, color = color, material = material, reflectance = reflectance }) :: any
+end
+local function designSlot(id: string, label: string, parts: { string }, options: { DesignOption }): DesignSlot
+	return table.freeze({ id = id, label = label, parts = table.freeze(parts), options = table.freeze(options) }) :: any
+end
+
+-- precious metals shine (Reflectance), paints and leather don't
+local function metals(suffix: string): { DesignOption }
+	return {
+		option("Gold", "Vergoldet" .. suffix, GOLD, METAL, 0.35),
+		option("Silver", "Versilbert" .. suffix, SILVER, METAL, 0.4),
+		option("Bronze", "Bronze" .. suffix, BRONZE, METAL, 0.15),
+		option("RoseGold", "Rotgold" .. suffix, Color3.fromRGB(214, 150, 120), METAL, 0.3),
+		option("Iron", "Schwarzeisen" .. suffix, Color3.fromRGB(52, 52, 58), METAL, 0.05),
+	}
+end
+local function with(list: { DesignOption }, more: { DesignOption }): { DesignOption }
+	for _, o in more do
+		table.insert(list, o)
+	end
+	return list
+end
+local function paints(): { DesignOption }
+	return {
+		option("LegionRed", "Legionsrot", Color3.fromRGB(150, 36, 34), PAINT),
+		option("ImperialBlue", "Kaiserblau", Color3.fromRGB(40, 66, 130), PAINT),
+		option("Emerald", "Smaragdgrün", Color3.fromRGB(34, 110, 70), PAINT),
+		option("Purple", "Purpur", Color3.fromRGB(96, 40, 110), PAINT),
+		option("Sun", "Sonnengelb", Color3.fromRGB(226, 180, 50), PAINT),
+		option("Ivory", "Elfenbein", Color3.fromRGB(236, 228, 206), PAINT),
+		option("Black", "Nachtschwarz", Color3.fromRGB(30, 30, 34), PAINT),
+		option("Orange", "Feuerorange", Color3.fromRGB(214, 110, 40), PAINT),
+		option("Teal", "Meergrün", Color3.fromRGB(40, 128, 128), PAINT),
+	}
+end
 
 local ForgeDefinitions = {
 	MaxLevel = 1,
@@ -80,45 +121,81 @@ local ForgeDefinitions = {
 	MaxCopies = 6, -- per weapon type
 	MinCopyPrice = 40,
 
-	-- COSMETIC designs (no effect on combat): slot -> options; the parts each slot recolours
+	-- COSMETIC weapon designs (no effect on combat): slot -> options; the parts each slot recolours.
+	-- Every option costs one Design credit (Robux) and a short job at the smith.
 	DesignSlots = table.freeze({
-		table.freeze({ id = "Grip", label = "Griff", parts = table.freeze({ "Grip", "Handle", "Haft", "Shaft", "Wrap" }), options = table.freeze({
-			table.freeze({ id = "Gold", label = "Goldener Griff", color = GOLD, material = Enum.Material.Metal }),
-			table.freeze({ id = "Silver", label = "Silbergriff", color = SILVER, material = Enum.Material.Metal }),
-			table.freeze({ id = "Purple", label = "Purpurleder", color = Color3.fromRGB(96, 40, 92), material = Enum.Material.Leather }),
-		}) }),
-		table.freeze({ id = "Blade", label = "Klinge", parts = table.freeze({ "Blade", "Tip", "Edge", "Head", "HeadTip", "Spike", "Prong", "Barb", "Ball" }), options = table.freeze({
-			table.freeze({ id = "Polished", label = "Poliert", color = Color3.fromRGB(226, 230, 236), material = Enum.Material.Metal }),
-			table.freeze({ id = "Blackened", label = "Geschwärzt", color = Color3.fromRGB(46, 46, 52), material = Enum.Material.Metal }),
-			table.freeze({ id = "Bronze", label = "Bronzeklinge", color = BRONZE, material = Enum.Material.Metal }),
-		}) }),
-		table.freeze({ id = "Fittings", label = "Beschläge", parts = table.freeze({ "Guard", "Pommel", "Collar", "Cap", "Band", "Socket", "Butt", "Sauroter", "Link" }), options = table.freeze({
-			table.freeze({ id = "Gold", label = "Goldbeschläge", color = GOLD, material = Enum.Material.Metal }),
-			table.freeze({ id = "Silver", label = "Silberbeschläge", color = SILVER, material = Enum.Material.Metal }),
-			table.freeze({ id = "Bronze", label = "Bronzebeschläge", color = BRONZE, material = Enum.Material.Metal }),
-		}) }),
+		designSlot("Blade", "Klinge", { "Blade", "Tip", "Edge", "Head", "HeadTip", "Spike", "Prong", "Barb", "Ball" }, with(metals("e Klinge"), {
+			option("Polished", "Polierter Stahl", Color3.fromRGB(226, 230, 236), METAL, 0.45),
+			option("Blackened", "Geschwärzt", Color3.fromRGB(46, 46, 52), METAL),
+			option("Damascus", "Damaszenerstahl", Color3.fromRGB(120, 128, 140), Enum.Material.DiamondPlate, 0.2),
+			option("Obsidian", "Obsidian", Color3.fromRGB(24, 20, 34), Enum.Material.Glass, 0.3),
+			option("Ember", "Glutklinge", Color3.fromRGB(255, 110, 40), Enum.Material.Neon),
+			option("Frost", "Frostklinge", Color3.fromRGB(130, 210, 255), Enum.Material.Neon),
+			option("Venom", "Giftklinge", Color3.fromRGB(120, 230, 90), Enum.Material.Neon),
+			option("Ruby", "Rubinklinge", Color3.fromRGB(190, 30, 50), Enum.Material.Glass, 0.25),
+		})),
+		designSlot("Grip", "Griff", { "Grip", "Handle", "Haft", "Shaft", "Wrap" }, with(metals("er Griff"), {
+			option("Purple", "Purpurleder", Color3.fromRGB(96, 40, 92), Enum.Material.Leather),
+			option("RedLeather", "Rotes Leder", Color3.fromRGB(140, 36, 34), Enum.Material.Leather),
+			option("BlackLeather", "Schwarzes Leder", Color3.fromRGB(32, 30, 30), Enum.Material.Leather),
+			option("WhiteLeather", "Weisses Leder", Color3.fromRGB(232, 224, 206), Enum.Material.Leather),
+			option("BlueLeather", "Blaues Leder", Color3.fromRGB(40, 66, 130), Enum.Material.Leather),
+			option("GreenLeather", "Grünes Leder", Color3.fromRGB(40, 104, 66), Enum.Material.Leather),
+			option("Ebony", "Ebenholz", Color3.fromRGB(44, 32, 26), Enum.Material.Wood),
+		})),
+		designSlot("Fittings", "Beschläge", { "Guard", "Pommel", "Collar", "Cap", "Band", "Socket", "Butt", "Sauroter", "Link", "Fuller" }, with(metals("e Beschläge"), {
+			option("Ruby", "Rubinbesatz", Color3.fromRGB(190, 30, 50), Enum.Material.Glass, 0.25),
+			option("Sapphire", "Saphirbesatz", Color3.fromRGB(40, 80, 200), Enum.Material.Glass, 0.25),
+			option("Emerald", "Smaragdbesatz", Color3.fromRGB(30, 150, 90), Enum.Material.Glass, 0.25),
+		})),
 	}) :: { DesignSlot },
-	-- Shield paint (per shield type, cosmetic)
-	ShieldSlot = table.freeze({ id = "Paint", label = "Schildbemalung", parts = table.freeze({ "Face", "Body" }), options = table.freeze({
-		table.freeze({ id = "LegionRed", label = "Legionsrot", color = Color3.fromRGB(150, 36, 34), material = Enum.Material.SmoothPlastic }),
-		table.freeze({ id = "ImperialBlue", label = "Kaiserblau", color = Color3.fromRGB(40, 66, 130), material = Enum.Material.SmoothPlastic }),
-		table.freeze({ id = "Gold", label = "Goldschild", color = GOLD, material = Enum.Material.Metal }),
-	}) }) :: DesignSlot,
+	-- SHIELD designs (per shield type, cosmetic): the face, the edge, the boss and the ornaments
+	-- are coloured one by one, so a shield can be painted, gilded and silvered in detail. Shields
+	-- without a part of a slot (a plain buckler has no edge strips) simply don't change there.
+	ShieldSlots = table.freeze({
+		designSlot("Paint", "Bemalung", { "Face", "Body", "Panel", "Center", "Inner" }, with(paints(), {
+			option("Gold", "Vergoldete Fläche", GOLD, METAL, 0.35),
+			option("Silver", "Versilberte Fläche", SILVER, METAL, 0.4),
+			option("Bronze", "Bronzefläche", BRONZE, METAL, 0.15),
+		})),
+		designSlot("Trim", "Rand", { "Rim", "EdgeSide", "EdgeEnd" }, metals("er Rand")),
+		designSlot("Boss", "Schildbuckel", { "Boss" }, with(metals("er Buckel"), {
+			option("Ruby", "Rubinbuckel", Color3.fromRGB(190, 30, 50), Enum.Material.Glass, 0.25),
+			option("Sapphire", "Saphirbuckel", Color3.fromRGB(40, 80, 200), Enum.Material.Glass, 0.25),
+		})),
+		designSlot("Ornament", "Verzierung", { "Stripe", "Bar", "Stud", "Spine", "Wing", "Meander", "Diamond", "Ring", "Band", "Plank" }, with(metals("e Verzierung"), {
+			option("Ivory", "Elfenbein", Color3.fromRGB(236, 228, 206), PAINT),
+			option("Black", "Nachtschwarz", Color3.fromRGB(30, 30, 34), PAINT),
+			option("LegionRed", "Legionsrot", Color3.fromRGB(150, 36, 34), PAINT),
+			option("ImperialBlue", "Kaiserblau", Color3.fromRGB(40, 66, 130), PAINT),
+		})),
+	}) :: { DesignSlot },
 
-	-- ROBUX developer products (create them in the Creator Hub, then enter the ids)
-	Products = (table.freeze({
+	-- ROBUX developer products (create them in the Creator Hub, then enter the ids). The Robux
+	-- helmets (HelmetDefinitions) are appended below, one product per helmet.
+	Products = {
 		table.freeze({ key = "DenariiSmall", productId = 0, robux = 25, label = "250 Denarii", denarii = 250 } :: Product),
 		table.freeze({ key = "DenariiMedium", productId = 0, robux = 99, label = "1200 Denarii", denarii = 1200 } :: Product),
 		table.freeze({ key = "DenariiLarge", productId = 0, robux = 199, label = "3000 Denarii", denarii = 3000 } :: Product),
-		table.freeze({ key = "ForgeSkip", productId = 0, robux = 15, label = "Auftrag sofort fertig", credits = table.freeze({ Skip = 1 }) } :: Product),
-		table.freeze({ key = "DesignToken", productId = 0, robux = 49, label = "Design anfertigen", credits = table.freeze({ Design = 1 }) } :: Product),
-		-- SALE bundles: cheaper than buying the parts one by one
+		-- SPEED-UP: one credit finishes one running job of the smith at once
+		table.freeze({ key = "ForgeSkip", productId = 0, robux = 15, label = "1× Vorspulen (Auftrag sofort fertig)", credits = table.freeze({ Skip = 1 }) } :: Product),
 		table.freeze({ key = "SkipPack", productId = 0, robux = 39, label = "3× Vorspulen · SALE (statt 45 R$)", credits = table.freeze({ Skip = 3 }) } :: Product),
+		table.freeze({ key = "SkipChest", productId = 0, robux = 99, label = "10× Vorspulen · SALE (statt 150 R$)", credits = table.freeze({ Skip = 10 }) } :: Product),
+		-- DESIGN: one credit pays one design option of a weapon or a shield
+		table.freeze({ key = "DesignToken", productId = 0, robux = 49, label = "1× Design (Waffe oder Schild)", credits = table.freeze({ Design = 1 }) } :: Product),
 		table.freeze({ key = "DesignPack", productId = 0, robux = 129, label = "3× Design · SALE (statt 147 R$)", credits = table.freeze({ Design = 3 }) } :: Product),
+		table.freeze({ key = "DesignChest", productId = 0, robux = 349, label = "10× Design · SALE (statt 490 R$)", credits = table.freeze({ Design = 10 }) } :: Product),
+		-- SALE bundle: cheaper than buying the parts one by one
 		table.freeze({ key = "RomeStarter", productId = 0, robux = 149, label = "Starterpaket: 1200 Denarii + Vorspulen + Design · SALE (statt 163 R$)", denarii = 1200, credits = table.freeze({ Skip = 1, Design = 1 }) } :: Product),
-	}) :: any) :: { Product },
+	} :: { Product },
 	MaxReceipts = 50, -- processed purchase ids kept per profile (no double grant)
 }
+for _, def in HelmetDefinitions.Ordered do
+	if def.Robux > 0 then
+		table.insert(ForgeDefinitions.Products, table.freeze({ key = HelmetDefinitions.productKey(def.Id), productId = def.ProductId, robux = def.Robux, label = "Helm: " .. def.DisplayName, helmet = def.Id } :: Product))
+	end
+end
+table.freeze(ForgeDefinitions.Products)
 
 -- Clamp a saved stage.
 function ForgeDefinitions.clampLevel(value: unknown): number
@@ -233,12 +310,9 @@ function ForgeDefinitions.offer(weaponId: string, level: number): Offer?
 end
 
 function ForgeDefinitions.designSlot(slotId: unknown, shield: boolean?): DesignSlot?
-	if shield then
-		return if slotId == ForgeDefinitions.ShieldSlot.id then ForgeDefinitions.ShieldSlot else nil
-	end
-	for _, slot in ForgeDefinitions.DesignSlots do
-		if slot.id == slotId then
-			return slot
+	for _, s in if shield then ForgeDefinitions.ShieldSlots else ForgeDefinitions.DesignSlots do
+		if s.id == slotId then
+			return s
 		end
 	end
 	return nil
@@ -262,20 +336,47 @@ function ForgeDefinitions.product(key: unknown): Product?
 	return nil
 end
 
+-- Readable list of a design's options ("Vergoldete Klinge, Purpurleder"), or "Standard".
+function ForgeDefinitions.designText(design: { [string]: string }, shield: boolean?): string
+	local parts = {}
+	for _, s in if shield then ForgeDefinitions.ShieldSlots else ForgeDefinitions.DesignSlots do
+		local o = ForgeDefinitions.designOption(s, design[s.id])
+		if o then
+			table.insert(parts, o.label)
+		end
+	end
+	return if #parts > 0 then table.concat(parts, ", ") else "Standard"
+end
+
+-- Keeps only the known slot -> option pairs of a saved design.
+function ForgeDefinitions.cleanDesign(value: unknown, shield: boolean?): { [string]: string }
+	local design: { [string]: string } = {}
+	if typeof(value) == "table" then
+		for slotId, optionId in value :: { [any]: any } do
+			local s = ForgeDefinitions.designSlot(slotId, shield)
+			if s and ForgeDefinitions.designOption(s, optionId) then
+				design[slotId] = optionId
+			end
+		end
+	end
+	return design
+end
+
 -- Recolours a built weapon / shield model by its design (cosmetic only).
 function ForgeDefinitions.applyDesign(model: Instance, design: { [string]: string }, shield: boolean?)
-	local slots: { DesignSlot } = if shield then { ForgeDefinitions.ShieldSlot } else ForgeDefinitions.DesignSlots
-	for _, slot in slots do
-		local option = ForgeDefinitions.designOption(slot, design[slot.id])
-		if option then
+	local slots: { DesignSlot } = if shield then ForgeDefinitions.ShieldSlots else ForgeDefinitions.DesignSlots
+	for _, s in slots do
+		local o = ForgeDefinitions.designOption(s, design[s.id])
+		if o then
 			for _, part in model:GetDescendants() do
-				if part:IsA("BasePart") and table.find(slot.parts, part.Name) then
-					if option.color then
-						part.Color = option.color
+				if part:IsA("BasePart") and table.find(s.parts, part.Name) then
+					if o.color then
+						part.Color = o.color
 					end
-					if option.material then
-						part.Material = option.material
+					if o.material then
+						part.Material = o.material
 					end
+					part.Reflectance = o.reflectance or 0
 				end
 			end
 		end

@@ -85,7 +85,7 @@ export type Profile = {
 	weaponCopies: { [string]: { ForgeDefinitions.Copy } },
 	activeCopy: { [string]: string }, -- weapon id -> uid of the copy in use
 	nextCopy: number, -- uid counter
-	shieldDesigns: { [string]: string }, -- shield id -> paint option
+	shieldDesigns: { [string]: { [string]: string } }, -- shield id -> design slot -> option (ForgeDefinitions.ShieldSlots)
 	forgeCredits: { [string]: number }, -- Robux-bought, not yet used: Skip, Design
 	receipts: { string }, -- processed Robux purchase ids (newest last)
 	forge: { [string]: number }?, -- v9 stages, folded into the copies on migration
@@ -269,7 +269,21 @@ function InventoryService.migrateProfile(profile: Profile): Profile
 	profile.ownedWeapons = cleanSet(profile.ownedWeapons, WeaponDefinitions.ById)
 	profile.ownedShields = cleanSet(profile.ownedShields, ShieldDefinitions.ById)
 	profile.ownedArmor = cleanSet(profile.ownedArmor, ArmorDefinitions.ById)
-	profile.ownedHelmets = cleanSet(if typeof(profile.ownedHelmets) == "table" then profile.ownedHelmets else {}, HelmetDefinitions.ById)
+	-- helmets are saved as "Id,Id" like the other gear; a helmet that was renamed keeps its owner
+	local knownHelmets: { [string]: any } = table.clone(HelmetDefinitions.ById)
+	for oldId in HelmetDefinitions.Renamed do
+		knownHelmets[oldId] = true
+	end
+	profile.ownedHelmets = cleanSet(profile.ownedHelmets, knownHelmets)
+	for oldId, newId in HelmetDefinitions.Renamed do
+		if profile.ownedHelmets[oldId] then
+			profile.ownedHelmets[oldId] = nil
+			profile.ownedHelmets[newId] = true
+		end
+		if profile.equippedHelmet == oldId then
+			profile.equippedHelmet = newId
+		end
+	end
 	profile.ownedHelmets[HelmetDefinitions.Starter] = true
 	profile.ownedWeapons[WeaponDefinitions.Starter] = true
 	profile.ownedShields[ShieldDefinitions.Starter] = true
@@ -433,11 +447,16 @@ function InventoryService.migrateProfile(profile: Profile): Profile
 		active[id] = if valid then chosen else list[1].uid
 	end
 	profile.activeCopy = active
-	local shieldDesigns: { [string]: string } = {}
+	-- v12: a shield design is slot -> option (paint, edge, boss, ornaments). The v10 paint (one
+	-- option id per shield) becomes the Paint slot.
+	local shieldDesigns: { [string]: { [string]: string } } = {}
 	if typeof(profile.shieldDesigns) == "table" then
-		for id, option in profile.shieldDesigns :: any do
-			if ShieldDefinitions.ById[id] and ForgeDefinitions.designOption(ForgeDefinitions.ShieldSlot, option) then
-				shieldDesigns[id] = option
+		for id, saved in profile.shieldDesigns :: any do
+			if ShieldDefinitions.ById[id] then
+				local design = ForgeDefinitions.cleanDesign(if typeof(saved) == "string" then { Paint = saved } else saved, true)
+				if next(design) ~= nil then
+					shieldDesigns[id] = design
+				end
 			end
 		end
 	end
@@ -748,6 +767,9 @@ function InventoryService.purchase(player: Player, kind: ItemKind, id: string): 
 	if InventoryService.owns(player, kind, id) then
 		return false, name .. " is already owned"
 	end
+	if kind == "Helmet" and HelmetDefinitions.ById[id].Robux > 0 then
+		return false, name .. " kostet Robux" -- never for Denarii (InventoryService.grantItem after a receipt)
+	end
 	local profile = getProfile(player)
 	local locked = lockReason(profile, name, required)
 	if locked then
@@ -764,6 +786,22 @@ function InventoryService.purchase(player: Player, kind: ItemKind, id: string): 
 	InventoryService.publish(player)
 	changed(player)
 	return true, ("Bought %s for %d Denarii"):format(name, price)
+end
+
+-- Gives an item without a price: a granted Robux purchase (TownServices.grant, one receipt = one
+-- grant). Returns false when the item is unknown or already owned.
+function InventoryService.grantItem(player: Player, kind: ItemKind, id: string): boolean
+	if not InventoryService.isItem(kind, id) or InventoryService.owns(player, kind, id) then
+		return false
+	end
+	local profile = getProfile(player)
+	ownedSet(profile, kind)[id] = true
+	if kind == "Weapon" and not profile.weaponCopies[id] then
+		newCopy(profile, id, 0)
+	end
+	InventoryService.publish(player)
+	changed(player)
+	return true
 end
 
 -- Equips an OWNED item (exactly one per kind). The level only limits buying: gear that was bought
@@ -1072,22 +1110,35 @@ function InventoryService.finishJobNow(player: Player, weaponId: string, uid: st
 	return true, "Der Schmied ist fertig."
 end
 
-function InventoryService.shieldDesign(player: Player, shieldId: string): string?
-	return getProfile(player).shieldDesigns[shieldId]
+-- The design of a shield type: slot -> option (read-only for callers; empty = standard).
+function InventoryService.shieldDesign(player: Player, shieldId: string): { [string]: string }
+	return getProfile(player).shieldDesigns[shieldId] or {}
 end
 
-function InventoryService.setShieldDesign(player: Player, shieldId: string, option: string): (boolean, string)
+-- Sets one slot of a shield's design (paint, edge, boss, ornaments). Paid by the caller
+-- (TownServices: one Design credit). Returns (success, message).
+function InventoryService.setShieldDesign(player: Player, shieldId: string, slotId: string, option: string): (boolean, string)
 	local profile = getProfile(player)
 	if not profile.ownedShields[shieldId] then
 		return false, "Dieser Schild gehört dir nicht."
 	end
-	if not ForgeDefinitions.designOption(ForgeDefinitions.ShieldSlot, option) then
-		return false, "Diese Bemalung gibt es nicht."
+	local slot = ForgeDefinitions.designSlot(slotId, true)
+	local chosen = if slot then ForgeDefinitions.designOption(slot, option) else nil
+	if not slot or not chosen then
+		return false, "Dieses Schilddesign gibt es nicht."
 	end
-	profile.shieldDesigns[shieldId] = option
+	local design = profile.shieldDesigns[shieldId]
+	if not design then
+		design = {}
+		profile.shieldDesigns[shieldId] = design
+	end
+	if design[slotId] == option then
+		return false, "Der Schild hat dieses Design schon."
+	end
+	design[slotId] = option
 	InventoryService.publish(player)
 	changed(player)
-	return true, "Schild bemalt."
+	return true, ("%s: %s."):format(slot.label, chosen.label)
 end
 
 -- Robux credits (bought, not yet used): "Skip" finishes a job, "Design" pays a design.
@@ -1238,7 +1289,13 @@ function InventoryService.serialize(player: Player): { [string]: any }
 		end)(),
 		activeCopy = table.clone(profile.activeCopy),
 		nextCopy = profile.nextCopy,
-		shieldDesigns = table.clone(profile.shieldDesigns),
+		shieldDesigns = (function()
+			local copy = {}
+			for id, design in profile.shieldDesigns do
+				copy[id] = table.clone(design)
+			end
+			return copy
+		end)(),
 		forgeCredits = table.clone(profile.forgeCredits),
 		receipts = table.clone(profile.receipts),
 	}

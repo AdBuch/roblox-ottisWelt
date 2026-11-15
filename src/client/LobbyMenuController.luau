@@ -19,6 +19,7 @@
 -- Presentation only: every value comes from server-owned player attributes.
 
 local CollectionService = game:GetService("CollectionService")
+local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
@@ -441,6 +442,11 @@ function LobbyMenuController.start(deps: Deps): LobbyMenu
 	local selectedId: { [string]: string } = {}
 	local pending: { kind: Kind, id: string }? = nil
 	local confirmed: { [string]: string } = {} -- server-confirmed equips until the attribute arrives
+	-- Shop mode: while the player stands in one of Rome's shops (ShopZone), the AUSRÜSTUNG tab shows
+	-- EVERY item that shop sells, with price and level, and buys through LoadoutRequest "Buy".
+	local shopKinds: { Kind }? = nil
+	local shopName = ""
+	local bought: { [string]: boolean } = {} -- server-confirmed purchases until the attribute arrives
 
 	local function equippedId(kind: Kind): string
 		local _, equippedAttr = attrNames(kind)
@@ -456,15 +462,26 @@ function LobbyMenuController.start(deps: Deps): LobbyMenu
 		return if kind == "Weapon" then WeaponDefinitions.Starter elseif kind == "Shield" then ShieldDefinitions.Starter elseif kind == "Helmet" then HelmetDefinitions.Starter else ArmorDefinitions.Starter
 	end
 
-	local function ownedList(kind: Kind): ({ any }, number)
+	local function ownedSet(kind: Kind): { [string]: boolean }
 		local ownedAttr = attrNames(kind)
 		local owned = splitSet(player:GetAttribute(ownedAttr))
 		local starter = if kind == "Weapon" then WeaponDefinitions.Starter elseif kind == "Shield" then ShieldDefinitions.Starter elseif kind == "Helmet" then HelmetDefinitions.Starter else ArmorDefinitions.Starter
 		owned[starter] = true -- the starter can never be lost
+		for key in bought do
+			local k, id = key:match("^(%a+):(.+)$")
+			if k == kind and id then
+				owned[id] = true
+			end
+		end
+		return owned
+	end
+
+	local function ownedList(kind: Kind): ({ any }, number)
+		local owned = ownedSet(kind)
 		local list = {}
 		local all = definitionsOf(kind)
 		for _, def in all do
-			if owned[def.Id] then
+			if owned[def.Id] or shopKinds ~= nil then -- in a shop: everything it sells
 				table.insert(list, def)
 			end
 		end
@@ -473,7 +490,7 @@ function LobbyMenuController.start(deps: Deps): LobbyMenu
 
 	local renderGear: () -> ()
 
-	local function equip(kind: Kind, id: string)
+	local function request(action: "Equip" | "Buy", kind: Kind, id: string)
 		local remote = deps.loadoutRemote
 		if pending or not remote then
 			return
@@ -482,16 +499,25 @@ function LobbyMenuController.start(deps: Deps): LobbyMenu
 		renderGear()
 		task.spawn(function()
 			local ok, response = pcall(function()
-				return remote:InvokeServer("Equip", kind, id)
+				return remote:InvokeServer(action, kind, id)
 			end)
 			pending = nil
 			local card = ItemInfo.describe(kind, id)
 			local name = if card then card.title else id
 			if ok and typeof(response) == "table" and response.ok == true then
 				confirmed[kind] = id
-				deps.notify(if response.code == "ALREADY" then ("%s ist bereits ausgerüstet"):format(name) else ("%s ausgerüstet"):format(name))
+				if response.code == "BOUGHT" then
+					bought[kind .. ":" .. id] = true
+				end
+				deps.notify(if response.code == "ALREADY" then ("%s ist bereits ausgerüstet"):format(name) elseif response.code == "BOUGHT" then ("%s gekauft und ausgerüstet"):format(name) else ("%s ausgerüstet"):format(name))
 			elseif ok and typeof(response) == "table" then
 				deps.notify(tostring(response.message or "Wechsel nicht möglich"))
+				if typeof(response.productId) == "number" and response.productId ~= 0 then
+					-- a Robux helmet: Roblox asks, the server grants and equips it after the receipt
+					pcall(function()
+						MarketplaceService:PromptProductPurchase(player, response.productId)
+					end)
+				end
 			else
 				deps.notify("Keine Antwort vom Server · bitte erneut versuchen")
 			end
@@ -507,12 +533,36 @@ function LobbyMenuController.start(deps: Deps): LobbyMenu
 		local width = page.AbsoluteSize.X
 		local stacked = width < 560
 
-		-- category row
+		-- category row (in a shop: only what it sells, plus the shop's name and the purse)
+		local tabs: { { kind: Kind, label: string } } = {}
+		for _, entry in KIND_TABS do
+			if shopKinds == nil or table.find(shopKinds, entry.kind) then
+				table.insert(tabs, entry)
+			end
+		end
+		if shopKinds and not table.find(shopKinds, gearKind) then
+			gearKind = shopKinds[1]
+		end
 		local row = make("Frame", { Size = UDim2.new(1, 0, 0, THEME.TouchTarget), BackgroundTransparency = 1 }, page)
 		MenuSystem.list(row, 6, true)
-		for i, entry in KIND_TABS do
+		if shopKinds then
+			make("TextLabel", {
+				Size = UDim2.new(0.6, -4, 1, 0),
+				BackgroundTransparency = 1,
+				Font = THEME.TitleFont,
+				TextSize = 15,
+				TextWrapped = true,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextColor3 = THEME.Gold,
+				RichText = true,
+				Text = ("%s  <font color=\"#C6BAA8\">· %s Denarii</font>"):format(shopName, fmt(denarii())),
+				LayoutOrder = 0,
+			}, row)
+		end
+		local tabShare = if shopKinds then 0.4 else 1
+		for i, entry in tabs do
 			local b = MenuSystem.button(row, entry.label, "Tab", i)
-			b.Size = UDim2.new(1 / #KIND_TABS, -4, 1, 0)
+			b.Size = UDim2.new(tabShare / #tabs, -4, 1, 0)
 			MenuSystem.setState(b, if entry.kind == gearKind then "Selected" else "Normal")
 			b.Activated:Connect(function()
 				gearKind = entry.kind
@@ -522,6 +572,7 @@ function LobbyMenuController.start(deps: Deps): LobbyMenu
 
 		local body = make("Frame", { Position = UDim2.fromOffset(0, THEME.TouchTarget + 8), Size = UDim2.new(1, 0, 1, -(THEME.TouchTarget + 8)), BackgroundTransparency = 1 }, page)
 		local list, total = ownedList(gearKind)
+		local owned = ownedSet(gearKind)
 		local equipped = equippedId(gearKind)
 		local selected = selectedId[gearKind]
 		local valid = false
@@ -577,6 +628,18 @@ function LobbyMenuController.start(deps: Deps): LobbyMenu
 					Text = "AUSGERÜSTET",
 				}, tile)
 				MenuSystem.corner(tag, 9)
+			elseif shopKinds and not owned[def.Id] then
+				local tag = make("TextLabel", {
+					AnchorPoint = Vector2.new(0.5, 1),
+					Position = UDim2.new(0.5, 0, 1, -3),
+					Size = UDim2.new(1, -10, 0, 18),
+					BackgroundColor3 = THEME.Panel,
+					Font = THEME.TitleFont,
+					TextSize = 10,
+					TextColor3 = THEME.Gold,
+					Text = if (def.Robux or 0) > 0 then ("R$ %d"):format(def.Robux) else ("%s DENARII"):format(fmt(def.Price or 0)),
+				}, tile)
+				MenuSystem.corner(tag, 9)
 			end
 			tile.Activated:Connect(function()
 				selectedId[gearKind] = def.Id
@@ -592,7 +655,7 @@ function LobbyMenuController.start(deps: Deps): LobbyMenu
 			TextSize = 12,
 			TextWrapped = true,
 			TextColor3 = THEME.TextMuted,
-			Text = ("%d von %d im Besitz · weitere in der Gladiatorenwaffenkammer"):format(#list, total),
+			Text = if shopKinds then "Wähle einen Gegenstand · KAUFEN rüstet ihn gleich aus" else ("%d von %d im Besitz · weitere in den Läden in Rom"):format(#list, total),
 			LayoutOrder = #list + 1,
 		}, gridHolder)
 		hint.Size = UDim2.fromOffset(cell, cell)
@@ -624,7 +687,33 @@ function LobbyMenuController.start(deps: Deps): LobbyMenu
 
 		-- the action first: always visible without scrolling
 		local action = MenuSystem.button(detail, "", "Primary", 1)
-		if isEquipped then
+		local level = GladiatorLevelDefinitions.levelFor(aura()).Level
+		if not owned[selected] then
+			-- a shop item not owned yet (only listed in a shop)
+			if isPending then
+				action.Text = "WIRD GEKAUFT …"
+				MenuSystem.setState(action, "Pending")
+			elseif lock then
+				action.Text = "🔒  " .. lock
+				MenuSystem.setState(action, "Locked")
+			elseif not card.robux and level < card.levelRequired then
+				action.Text = ("🔒  AB LEVEL %d"):format(card.levelRequired)
+				MenuSystem.setState(action, "Locked")
+			elseif not card.robux and denarii() < card.price then
+				action.Text = ("%s DENARII · ZU WENIG"):format(fmt(card.price))
+				MenuSystem.setState(action, "Unavailable")
+			elseif pending then
+				action.Text = if card.robux then ("KAUFEN · R$ %d"):format(card.robux) else ("KAUFEN · %s DENARII"):format(fmt(card.price))
+				MenuSystem.setState(action, "Unavailable")
+			else
+				action.Text = if card.robux then ("KAUFEN · R$ %d"):format(card.robux) else ("KAUFEN · %s DENARII"):format(fmt(card.price))
+				MenuSystem.setState(action, "Normal")
+				local kind, id = gearKind, selected
+				action.Activated:Connect(function()
+					request("Buy", kind, id)
+				end)
+			end
+		elseif isEquipped then
 			action.Text = "✓  AUSGERÜSTET"
 			MenuSystem.setState(action, "Equipped")
 		elseif isPending then
@@ -640,7 +729,7 @@ function LobbyMenuController.start(deps: Deps): LobbyMenu
 			action.Text = "AUSRÜSTEN"
 			MenuSystem.setState(action, "Normal")
 			action.Activated:Connect(function()
-				equip(gearKind, selected)
+				request("Equip", gearKind, selected)
 			end)
 		end
 
@@ -730,7 +819,7 @@ function LobbyMenuController.start(deps: Deps): LobbyMenu
 		end
 		local milestones = MenuSystem.card(page, 3)
 		MenuSystem.heading(milestones, "MEILENSTEINE & FREISCHALTUNGEN", 1)
-		MenuSystem.label(milestones, "Freigeschaltete Ausrüstung kannst du in der Waffenkammer kaufen; gekaufte Ausrüstung bleibt immer nutzbar.", 12, THEME.BodyFont, THEME.TextMuted, 2)
+		MenuSystem.label(milestones, "Freigeschaltete Ausrüstung kannst du in den Läden in Rom kaufen; gekaufte Ausrüstung bleibt immer nutzbar.", 12, THEME.BodyFont, THEME.TextMuted, 2)
 		local levelsWithUnlocks = {}
 		for levelNumber in unlocks do
 			table.insert(levelsWithUnlocks, levelNumber)
@@ -900,6 +989,58 @@ function LobbyMenuController.start(deps: Deps): LobbyMenu
 		access.Visible = not isOpen
 		if not isOpen then
 			preview.frame.Parent = nil -- no hidden 3D preview while the menu is closed
+		end
+	end)
+
+	-- Rome's shops: walking into a shop room (ShopZone) opens the menu on the shop's goods; walking
+	-- out closes it again. Closing it inside keeps it closed until the player comes in again (or
+	-- opens the menu: the AUSRÜSTUNG tab stays in shop mode while inside).
+	local currentZone: BasePart? = nil
+	local function zoneAt(position: Vector3): BasePart?
+		for _, zone in CollectionService:GetTagged(Config.ShopZoneTag) do
+			if zone:IsA("BasePart") then
+				local o = zone.CFrame:PointToObjectSpace(position)
+				if math.abs(o.X) <= zone.Size.X / 2 and math.abs(o.Y) <= zone.Size.Y / 2 + 2 and math.abs(o.Z) <= zone.Size.Z / 2 then
+					return zone
+				end
+			end
+		end
+		return nil
+	end
+	task.spawn(function()
+		while true do
+			task.wait(0.25)
+			local character = player.Character
+			local root = character and character:FindFirstChild("HumanoidRootPart")
+			local zone = if root and root:IsA("BasePart") then zoneAt(root.Position) else nil
+			if zone ~= currentZone then
+				currentZone = zone
+				if zone then
+					local kinds: { Kind } = {}
+					for kind in tostring(zone:GetAttribute("ShopKinds") or "Weapon"):gmatch("[^,]+") do
+						table.insert(kinds, kind :: Kind)
+					end
+					shopKinds = kinds
+					shopName = tostring(zone:GetAttribute("ShopName") or "LADEN")
+					gearKind = kinds[1]
+					selectedId[gearKind] = nil
+					if window.isOpen() then
+						if window.selected() == "Gear" then
+							renderGear()
+						else
+							window.open("Gear")
+						end
+					elseif not MenuSystem.isOpen() then
+						open("Gear")
+					end
+				else
+					local wasShop = shopKinds ~= nil
+					shopKinds = nil
+					if wasShop and window.isOpen() and window.selected() == "Gear" then
+						window.close()
+					end
+				end
+			end
 		end
 	end)
 

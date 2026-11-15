@@ -2,7 +2,8 @@
 -- The two working counters of Rome, entirely server-decided:
 --   SMITH  every owned weapon as copies (ForgeDefinitions): harden (+10 % PvE), sharpen and repair
 --          (wear from PvE fights), a new design (Robux), a further copy (price doubles), choose the
---          copy to fight with, and paint a shield (Robux). Jobs take real time; a copy at the smith
+--          copy to fight with, and a shield's design (Robux: paint, edge, boss, ornaments). Jobs
+--          take real time; a copy at the smith
 --          can't be used. A Robux purchase finishes a job at once. Missing Denarii can be bought.
 --   ORACLE a priest offers a prophecy for OracleDefinitions.Price Denarii, charged exactly once
 --          per confirmed offer; the text names the Aura still missing for the next title.
@@ -18,11 +19,14 @@
 -- product into Denarii or a credit, uses a credit for the pending action, saves, then answers
 -- PurchaseGranted. Products with id 0 are not created yet: in Studio the same grant runs as a test
 -- purchase, anywhere else they are refused.
+-- Credits (Vorspulen, Design) can also be bought in advance, and the Robux HELMETS of the helm
+-- shop are granted by the same receipt handler (TownServices.buyHelmet, asked by the shop menu).
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 
 local ForgeDefinitions = require(ReplicatedStorage.Shared.ForgeDefinitions)
+local HelmetDefinitions = require(ReplicatedStorage.Shared.HelmetDefinitions)
 local OracleDefinitions = require(ReplicatedStorage.Shared.OracleDefinitions)
 local GameStates = require(ReplicatedStorage.Shared.GameStates)
 local WeaponDefinitions = require(ReplicatedStorage.Shared.WeaponDefinitions)
@@ -42,6 +46,7 @@ export type Deps = {
 
 type Offer = { kind: string, token: string, expires: number }
 type Pending = { action: string, weaponId: string?, uid: string?, slot: string?, option: string?, shieldId: string? }
+type Buyer = (player: Player, id: string) -> { [string]: any }
 
 local TownServices = {}
 
@@ -76,14 +81,20 @@ local function refusal(player: Player, at: Vector3?, distance: number): string?
 end
 
 local function designText(design: { [string]: string }): string
-	local parts = {}
-	for _, slot in ForgeDefinitions.DesignSlots do
-		local option = ForgeDefinitions.designOption(slot, design[slot.id])
-		if option then
-			table.insert(parts, option.label)
+	return ForgeDefinitions.designText(design)
+end
+
+-- A slot list for the client: ids and labels only (colours stay in the shared definitions).
+local function slotList(source: { ForgeDefinitions.DesignSlot }): { any }
+	local slots = {}
+	for _, slot in source do
+		local options = {}
+		for _, o in slot.options do
+			table.insert(options, { id = o.id, label = o.label })
 		end
+		table.insert(slots, { id = slot.id, label = slot.label, options = options })
 	end
-	return if #parts > 0 then table.concat(parts, ", ") else "Standard"
+	return slots
 end
 
 local function productReady(product: ForgeDefinitions.Product): boolean
@@ -137,26 +148,15 @@ local function smithState(player: Player, token: string?): { [string]: any }
 	local shields = {}
 	for _, shield in ShieldDefinitions.Ordered do
 		if inv.owns(player, "Shield", shield.Id) then
-			local paint = inv.shieldDesign(player, shield.Id)
-			local option = if paint then ForgeDefinitions.designOption(ForgeDefinitions.ShieldSlot, paint) else nil
-			table.insert(shields, { shieldId = shield.Id, name = shield.DisplayName, paint = paint, paintText = if option then option.label else "Standard" })
+			local design = inv.shieldDesign(player, shield.Id)
+			table.insert(shields, { shieldId = shield.Id, name = shield.DisplayName, design = table.clone(design), designText = ForgeDefinitions.designText(design, true) })
 		end
-	end
-	local slots = {}
-	for _, slot in ForgeDefinitions.DesignSlots do
-		local options = {}
-		for _, o in slot.options do
-			table.insert(options, { id = o.id, label = o.label })
-		end
-		table.insert(slots, { id = slot.id, label = slot.label, options = options })
-	end
-	local paints = {}
-	for _, o in ForgeDefinitions.ShieldSlot.options do
-		table.insert(paints, { id = o.id, label = o.label })
 	end
 	local products = {}
 	for _, p in ForgeDefinitions.Products do
-		table.insert(products, { key = p.key, label = p.label, robux = p.robux, denarii = p.denarii, ready = productReady(p) })
+		if not p.helmet then -- helmets are sold in the helm shop
+			table.insert(products, { key = p.key, label = p.label, robux = p.robux, denarii = p.denarii, credits = p.credits, ready = productReady(p) })
+		end
 	end
 	return {
 		token = token,
@@ -164,8 +164,8 @@ local function smithState(player: Player, token: string?): { [string]: any }
 		credits = { Skip = inv.credits(player, "Skip"), Design = inv.credits(player, "Design") },
 		weapons = weapons,
 		shields = shields,
-		slots = slots,
-		paints = paints,
+		slots = slotList(ForgeDefinitions.DesignSlots),
+		shieldSlots = slotList(ForgeDefinitions.ShieldSlots),
 		products = products,
 		note = ForgeDefinitions.ValueNote,
 		bonus = ForgeDefinitions.PvEBonus,
@@ -223,11 +223,11 @@ local function applyPending(player: Player): (boolean, string?)
 		pending[player] = nil
 		refresh(player)
 		return ok, message
-	elseif p.action == "Paint" and p.shieldId and p.option then
+	elseif p.action == "Paint" and p.shieldId and p.slot and p.option then
 		if inv.credits(player, "Design") < 1 then
 			return false, nil
 		end
-		local ok, message = inv.setShieldDesign(player, p.shieldId, p.option)
+		local ok, message = inv.setShieldDesign(player, p.shieldId, p.slot, p.option)
 		if ok then
 			inv.useCredit(player, "Design")
 		end
@@ -239,17 +239,24 @@ local function applyPending(player: Player): (boolean, string?)
 	return false, nil
 end
 
--- Grants one Robux receipt exactly once. Returns true when it is (now or already) granted.
+-- Grants one Robux receipt exactly once. Returns true only when the grant is CONFIRMED in the
+-- saved profile (PlayerDataService.flush): Roblox is told "granted" for nothing less, and asks
+-- again otherwise (the saved receipt id then prevents a second grant).
 function TownServices.grant(player: Player, product: ForgeDefinitions.Product, purchaseId: string): boolean
 	local inv = deps.inventory
 	if inv.hasReceipt(player, purchaseId) then
-		return true
+		-- granted before (in memory): confirmed only once that state is saved, too
+		return deps.save == nil or deps.save(player)
 	end
 	if product.denarii then
 		inv.addDenarii(player, product.denarii)
 	end
 	for key, count in product.credits or {} do
 		inv.addCredit(player, key, count)
+	end
+	if product.helmet and inv.grantItem(player, "Helmet", product.helmet) then
+		inv.equip(player, "Helmet", product.helmet) -- worn at once, like a Denarii purchase
+		refresh(player)
 	end
 	inv.recordReceipt(player, purchaseId)
 	local _, message = applyPending(player)
@@ -337,23 +344,28 @@ local function smithRequest(player: Player, action: string, data: { [string]: an
 		return answer(ok, message)
 	elseif action == "Paint" then
 		local shieldId, option = data.shieldId, data.option
-		if typeof(shieldId) ~= "string" or not ShieldDefinitions.ById[shieldId] or not ForgeDefinitions.designOption(ForgeDefinitions.ShieldSlot, option) then
+		local slot = ForgeDefinitions.designSlot(data.slot, true)
+		if typeof(shieldId) ~= "string" or not ShieldDefinitions.ById[shieldId] or not slot or not ForgeDefinitions.designOption(slot, option) then
 			return { ok = false, message = "Ungültige Anfrage." }
 		end
-		pending[player] = { action = "Paint", shieldId = shieldId, option = option }
+		if not inv.owns(player, "Shield", shieldId) then
+			return { ok = false, message = "Dieser Schild gehört dir nicht." }
+		end
+		if inv.shieldDesign(player, shieldId)[slot.id] == option then
+			return answer(false, "Der Schild hat dieses Design schon.")
+		end
+		pending[player] = { action = "Paint", shieldId = shieldId, slot = slot.id, option = option }
 		if inv.credits(player, "Design") < 1 then
-			return answer(false, "Eine Bemalung kostet Robux.", { needProduct = "DesignToken" })
+			return answer(false, "Ein Schilddesign kostet Robux.", { needProduct = "DesignToken" })
 		end
 		local ok, message = applyPending(player)
 		return answer(ok, message or "Ungültige Anfrage.")
 	elseif action == "Buy" then
 		local product = ForgeDefinitions.product(data.key)
-		if not product or typeof(data.key) ~= "string" then
+		if not product or typeof(data.key) ~= "string" or product.helmet then
 			return { ok = false, message = "Ungültige Anfrage." }
 		end
-		if not product.denarii and not pending[player] then
-			return { ok = false, message = "Wofür soll gekauft werden? Wähle zuerst eine Arbeit." }
-		end
+		-- credits may be bought in advance: without a chosen work they stay for later
 		if product.productId ~= 0 then
 			return { ok = true, message = "Kauf wird geöffnet ...", productId = product.productId }
 		end
@@ -415,6 +427,30 @@ function TownServices.request(player: Player, action: unknown, payload: unknown)
 	return result
 end
 
+-- The helm shop's Robux helmets (asked by LoadoutRequestService "Buy" inside the shop): answers
+-- the product id to prompt, or grants a Studio test purchase when the product isn't created yet.
+function TownServices.buyHelmet(player: Player, id: string): { [string]: any }
+	local def = HelmetDefinitions.ById[id]
+	local product = if def and def.Robux > 0 then ForgeDefinitions.product(HelmetDefinitions.productKey(id)) else nil
+	if not product then
+		return { ok = false, code = "INVALID", message = "Diesen Helm gibt es nicht für Robux" }
+	end
+	if deps.inventory.owns(player, "Helmet", id) then
+		return { ok = false, code = "OWNED", message = "Bereits in deinem Besitz" }
+	end
+	if product.productId ~= 0 then
+		return { ok = false, code = "ROBUX", message = "Kauf wird geöffnet …", productId = product.productId }
+	end
+	if deps.isStudio and deps.isStudio() then
+		studioReceipts += 1
+		if TownServices.grant(player, product, ("STUDIO-%d-%d"):format(player.UserId, studioReceipts)) then
+			return { ok = true, code = "BOUGHT", message = "Studio-Testkauf: " .. product.label }
+		end
+		return { ok = false, code = "REFUSED", message = "Der Kauf konnte nicht gespeichert werden" }
+	end
+	return { ok = false, code = "REFUSED", message = "Dieser Helm ist noch nicht erhältlich (Robux-Produkt fehlt)" }
+end
+
 -- Due jobs end by themselves; the weapon in hand follows.
 function TownServices.tick(player: Player)
 	if deps.inventory.settleJobs(player) then
@@ -466,13 +502,17 @@ function TownServices.start(request: RemoteFunction, event: RemoteEvent, smith: 
 	end, function(): Vector3?
 		return if oracle then oracle.Position else nil
 	end)
+	local LoadoutRequestService = require(Server.LoadoutRequestService) :: any
+	LoadoutRequestService.setRobuxBuyer(TownServices.buyHelmet) -- the helm shop's Robux helmets
 	request.OnServerInvoke = function(player: Player, action: unknown, payload: unknown)
 		return TownServices.request(player, action, payload)
 	end
 	MarketplaceService.ProcessReceipt = function(receipt: any): Enum.ProductPurchaseDecision
 		local player = Players:GetPlayerByUserId(receipt.PlayerId)
 		local product = ForgeDefinitions.product(receipt.ProductId)
-		if not player or not product or not PlayerDataService.isReady(player) then
+		-- only on a profile that is loaded AND can be saved (never on an "Unsaved" one: the purchase
+		-- would be lost with the session; Roblox asks again on the next join)
+		if not player or not product or not PlayerDataService.isReady(player) or not PlayerDataService.canPersist(player) then
 			return Enum.ProductPurchaseDecision.NotProcessedYet
 		end
 		local ok = TownServices.grant(player, product, tostring(receipt.PurchaseId))
