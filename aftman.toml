@@ -1,0 +1,5 @@
+# Toolchain of this repository (Aftman, https://github.com/LPGhatguy/aftman).
+# The versions here are the ones the release pipeline accepts (release/tools.json carries the
+# same versions with the download hashes for CI). Run `aftman install` in the repository root.
+[tools]
+rojo = "rojo-rbx/rojo@7.7.1"

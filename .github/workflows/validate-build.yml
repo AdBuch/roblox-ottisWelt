@@ -1,0 +1,47 @@
+# Validation and build of both places on every push and pull request. NO deployment: this
+# workflow has no secrets and no Open Cloud access. It installs the pinned tools
+# (release/tools.json, hash-checked), checks every Luau source, runs the local test suites,
+# builds OttiHub.rbxlx and OttiArena.rbxlx with the pinned rojo and keeps the artefacts with
+# their manifest for a reviewer. Actions are pinned by commit SHA (release/tools.json notes the tags).
+name: validate-build
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned tools (rojo, luau)
+        shell: powershell
+        run: .\scripts\release\Install-Tools.ps1
+
+      - name: Validate release preconditions (target DEV, no upload)
+        shell: powershell
+        run: .\scripts\release\Validate-Release.ps1 -Target DEV
+
+      - name: Build both places, run the local suites, write the manifest
+        shell: powershell
+        run: .\scripts\release\Build-Release.ps1 -Target DEV -RunTests -LuauPath .\.tools\luau.exe -OutputDir .\build\release\candidate
+
+      - name: Show the release summary
+        shell: powershell
+        run: Get-Content .\build\release\candidate\summary.txt
+
+      - name: Keep the artefacts and the manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-candidate-${{ github.sha }}
+          path: build/release/candidate/
+          if-no-files-found: error
+          retention-days: 30
