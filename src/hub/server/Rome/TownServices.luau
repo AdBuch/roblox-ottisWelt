@@ -239,14 +239,10 @@ local function applyPending(player: Player): (boolean, string?)
 	return false, nil
 end
 
--- Grants one Robux receipt exactly once. Returns true only when the grant is CONFIRMED in the
--- saved profile (PlayerDataService.flush): Roblox is told "granted" for nothing less, and asks
--- again otherwise (the saved receipt id then prevents a second grant).
-function TownServices.grant(player: Player, product: ForgeDefinitions.Product, purchaseId: string): boolean
+local function applyGrant(player: Player, product: ForgeDefinitions.Product, purchaseId: string): string?
 	local inv = deps.inventory
 	if inv.hasReceipt(player, purchaseId) then
-		-- granted before (in memory): confirmed only once that state is saved, too
-		return deps.save == nil or deps.save(player)
+		return nil
 	end
 	if product.denarii then
 		inv.addDenarii(player, product.denarii)
@@ -256,15 +252,32 @@ function TownServices.grant(player: Player, product: ForgeDefinitions.Product, p
 	end
 	if product.helmet and inv.grantItem(player, "Helmet", product.helmet) then
 		inv.equip(player, "Helmet", product.helmet) -- worn at once, like a Denarii purchase
-		refresh(player)
 	end
 	inv.recordReceipt(player, purchaseId)
+	if product.helmet then
+		refresh(player)
+	end
 	local _, message = applyPending(player)
-	if deps.save and not deps.save(player) then
-		return false -- not saved: Roblox asks again later, the receipt id prevents a double grant
+	return message
+end
+
+-- Marketplace confirmation uses the durable path. A repeated receipt still has to flush.
+function TownServices.grant(player: Player, product: ForgeDefinitions.Product, purchaseId: string): boolean
+	local save = deps.save
+	if not save or not deps.isReady(player) then
+		return false
+	end
+	local message = applyGrant(player, product, purchaseId)
+	if not save(player) then
+		return false
 	end
 	deps.fire(player, "ForgeUpdate", { state = smithState(player, nil), message = message or ("Gekauft: " .. product.label), ok = true })
 	return true
+end
+
+local function simulatePurchase(player: Player, product: ForgeDefinitions.Product)
+	studioReceipts += 1
+	applyGrant(player, product, ("STUDIO-%d-%d"):format(player.UserId, studioReceipts))
 end
 
 -- The NPC prompts: open an offer (or explain why not).
@@ -370,8 +383,7 @@ local function smithRequest(player: Player, action: string, data: { [string]: an
 			return { ok = true, message = "Kauf wird geöffnet ...", productId = product.productId }
 		end
 		if deps.isStudio and deps.isStudio() then
-			studioReceipts += 1
-			TownServices.grant(player, product, ("STUDIO-%d-%d"):format(player.UserId, studioReceipts))
+			simulatePurchase(player, product)
 			return answer(true, "Studio-Testkauf: " .. product.label, { studio = true })
 		end
 		return { ok = false, message = "Dieses Robux-Produkt ist noch nicht eingerichtet." }
@@ -430,6 +442,9 @@ end
 -- The helm shop's Robux helmets (asked by LoadoutRequestService "Buy" inside the shop): answers
 -- the product id to prompt, or grants a Studio test purchase when the product isn't created yet.
 function TownServices.buyHelmet(player: Player, id: string): { [string]: any }
+	if not deps.isReady(player) then
+		return { ok = false, code = "REFUSED", message = "Dieses Profil ist gerade nicht verfügbar" }
+	end
 	local def = HelmetDefinitions.ById[id]
 	local product = if def and def.Robux > 0 then ForgeDefinitions.product(HelmetDefinitions.productKey(id)) else nil
 	if not product then
@@ -442,11 +457,8 @@ function TownServices.buyHelmet(player: Player, id: string): { [string]: any }
 		return { ok = false, code = "ROBUX", message = "Kauf wird geöffnet …", productId = product.productId }
 	end
 	if deps.isStudio and deps.isStudio() then
-		studioReceipts += 1
-		if TownServices.grant(player, product, ("STUDIO-%d-%d"):format(player.UserId, studioReceipts)) then
-			return { ok = true, code = "BOUGHT", message = "Studio-Testkauf: " .. product.label }
-		end
-		return { ok = false, code = "REFUSED", message = "Der Kauf konnte nicht gespeichert werden" }
+		simulatePurchase(player, product)
+		return { ok = true, code = "BOUGHT", message = "Studio-Testkauf: " .. product.label }
 	end
 	return { ok = false, code = "REFUSED", message = "Dieser Helm ist noch nicht erhältlich (Robux-Produkt fehlt)" }
 end

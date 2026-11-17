@@ -1,6 +1,6 @@
 --!strict
 -- Arena -> Hub. After the result sequence (or on request) every player is sent back:
---   flush validated rewards (PlayerDataService.flush) -> freeze the profile (beginTransfer) ->
+--   freeze the profile and commit rewards (PlayerDataService.beginTransfer) ->
 --   TeleportUtil.toHub (retries) -> on failure the client shows the emergency RETURN TO HUB button
 -- Rewards are already paid once by MatchService; nothing here grants anything. Spectators return
 -- near the live-battle board (payload.fromSpectating, display hint only).
@@ -37,22 +37,34 @@ function ArenaReturnService.send(players: { Player }, code: string?)
 		end
 		return
 	end
-	local spectators, fighters = {}, {}
+	local ready = {}
+	local function failed(player: Player, failCode: string)
+		returning[player] = nil
+		PlayerDataService.cancelTransfer(player)
+		if player.Parent then
+			message(player, (MatchTypes.Messages :: any)[failCode] or MatchTypes.Messages.TELEPORT_FAILED, false)
+			Remotes.MatchEvent:FireClient(player, "ReturnFailed")
+		end
+	end
 	for _, player in players do
 		if player.Parent and not returning[player] then
 			returning[player] = true
-			PlayerDataService.flush(player)
-			PlayerDataService.beginTransfer(player)
+			if PlayerDataService.beginTransfer(player) and player.Parent then
+				table.insert(ready, player)
+			else
+				failed(player, "DATA_SAVE_FAILED")
+			end
+		end
+	end
+	local spectators, fighters = {}, {}
+	for _, player in ready do
+		if not PlayerDataService.isTransferPrepared(player) or not player.Parent then
+			failed(player, "DATA_SAVE_FAILED")
+		else
 			Remotes.MatchEvent:FireClient(player, "Teleport", "Returning", "HUB")
 			local role = player:GetAttribute(Config.ArenaRoleAttribute)
 			table.insert(if role == "FIGHTER" then fighters else spectators, player)
 		end
-	end
-	local function failed(player: Player, failCode: string)
-		returning[player] = nil
-		PlayerDataService.cancelTransfer(player)
-		message(player, (MatchTypes.Messages :: any)[failCode] or MatchTypes.Messages.TELEPORT_FAILED, false)
-		Remotes.MatchEvent:FireClient(player, "ReturnFailed")
 	end
 	if #fighters > 0 then
 		TeleportUtil.toHub(fighters, { kind = "ToHub", message = code, fromSpectating = false }, failed)
@@ -88,7 +100,10 @@ end
 
 -- RETURN TO HUB button / door (spectators any time, fighters after their part is over).
 function ArenaReturnService.request(player: Player)
-	returning[player] = nil -- emergency retry allowed
+	-- Allow a retry after the hold elapsed and the original profile lease was recovered.
+	if returning[player] and PlayerDataService.canPersist(player) then
+		returning[player] = nil
+	end
 	ArenaReturnService.send({ player }, nil)
 end
 

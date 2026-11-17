@@ -1,7 +1,7 @@
 --!strict
 -- Server-owned inventory per player: Aura (progress), Denarii (money), owned weapons/shields/armor,
--- the equipped item of each kind and a few player preferences. Profiles live in memory keyed by
--- UserId; PlayerDataService loads them from the DataStore on join (load) and saves serialize().
+-- the equipped item of each kind and a few player preferences. Each Player instance has its own
+-- profile so that a reconnect cannot share memory with a previous session that is still closing.
 --   Aura     experience: earned by playing, never spent. It gives the GLADIATOR LEVEL
 --            (GladiatorLevelDefinitions); an item is UNLOCKED at its LevelRequired.
 --   Denarii  earned with every Aura reward and spent on unlocked items (their Price).
@@ -101,8 +101,10 @@ local PREFERENCES: { [string]: { string } } = PlayerDataSchema.Preferences :: an
 
 local InventoryService = {}
 
-local profiles: { [number]: Profile } = {}
-local changedListeners: { (player: Player) -> () } = {}
+local profiles: { [Player]: Profile } = setmetatable({}, { __mode = "k" })
+local changedListeners: { (player: Player, deferSave: boolean?) -> () } = {}
+local mutationGuard: ((player: Player, preloadReward: boolean?) -> boolean)? = nil
+local PROFILE_FROZEN = "Dieses Profil kann gerade nicht geändert werden."
 local practiceKeys: { [string]: boolean } = {}
 for _, weapon in WeaponDefinitions.ById do
 	local families = WeaponSpecialDefinitions.forPrefix(WeaponAttackDefinitions.prefixOf(weapon.Basic))
@@ -234,7 +236,6 @@ local function usableCopy(profile: Profile, weaponId: string): ForgeDefinitions.
 	if not list then
 		return nil
 	end
-	settle(profile, os.time())
 	local chosen = profile.activeCopy[weaponId]
 	local fallback: ForgeDefinitions.Copy? = nil
 	for _, copy in list do
@@ -485,12 +486,10 @@ function InventoryService.migrateProfile(profile: Profile): Profile
 end
 
 local function getProfile(player: Player): Profile
-	local profile = profiles[player.UserId]
+	local profile = profiles[player]
 	if not profile then
 		profile = newProfile()
-		profiles[player.UserId] = profile
-	elseif profile.version < PROFILE_VERSION or profile.coins ~= nil then
-		InventoryService.migrateProfile(profile)
+		profiles[player] = profile
 	end
 	return profile
 end
@@ -506,15 +505,38 @@ local function joinOwned(owned: { [string]: boolean }): string
 	return table.concat(ids, ",")
 end
 
-local function changed(player: Player)
+local function changed(player: Player, deferSave: boolean?)
 	for _, callback in changedListeners do
-		task.spawn(callback, player)
+		callback(player, deferSave)
 	end
 end
 
--- Called after every change that should be saved (PlayerDataService marks the profile dirty).
-function InventoryService.onChanged(callback: (player: Player) -> ())
+-- Observers must not yield. The revision advances in the same turn as the mutation.
+function InventoryService.onChanged(callback: (player: Player, deferSave: boolean?) -> ())
 	table.insert(changedListeners, callback)
+end
+
+function InventoryService.setMutationGuard(guard: (player: Player, preloadReward: boolean?) -> boolean)
+	mutationGuard = guard
+end
+
+local function canMutate(player: Player, preloadReward: boolean?): boolean
+	local guard = mutationGuard
+	return guard == nil or guard(player, preloadReward)
+end
+
+local function settleForPlayer(player: Player, profile: Profile, now: number): boolean
+	if not canMutate(player) or not settle(profile, now) then
+		return false
+	end
+	changed(player)
+	return true
+end
+
+local function liveCopy(player: Player, weaponId: string): ForgeDefinitions.Copy?
+	local profile = getProfile(player)
+	settleForPlayer(player, profile, os.time())
+	return usableCopy(profile, weaponId)
 end
 
 -- Mirrors the profile to player attributes for the HUD and shop displays (display only).
@@ -580,13 +602,17 @@ function InventoryService.load(player: Player, saved: { [string]: any }?, earned
 	if resetToken then
 		profile.resetToken = resetToken -- this profile is reset at most once per token
 	end
-	profiles[player.UserId] = profile
+	settle(profile, now)
+	profiles[player] = profile
 	InventoryService.publish(player)
 end
 
 -- Studio test switch (ExperienceConfig.Studio.UnlockAllGear): every item owned, top level.
 -- Only called for mock player data, so it is never written to a DataStore.
 function InventoryService.unlockAll(player: Player)
+	if not canMutate(player) then
+		return
+	end
 	local profile = getProfile(player)
 	for id in WeaponDefinitions.ById do
 		profile.ownedWeapons[id] = true
@@ -605,11 +631,12 @@ function InventoryService.unlockAll(player: Player)
 	end
 	local levels = GladiatorLevelDefinitions.Levels
 	profile.auraPoints = math.max(profile.auraPoints, levels[#levels].Aura)
+	changed(player)
 	InventoryService.publish(player)
 end
 
 function InventoryService.forget(player: Player)
-	profiles[player.UserId] = nil
+	profiles[player] = nil
 end
 
 function InventoryService.getAura(player: Player): number
@@ -622,28 +649,31 @@ end
 
 -- Aura is progress: it only ever grows.
 function InventoryService.addAura(player: Player, amount: number)
-	if amount ~= amount or amount <= 0 then
+	if not canMutate(player, true) or amount ~= amount or amount <= 0 then
 		return
 	end
 	local profile = getProfile(player)
 	profile.auraPoints += math.floor(amount)
-	InventoryService.publish(player)
 	changed(player)
+	InventoryService.publish(player)
 end
 
 function InventoryService.addDenarii(player: Player, amount: number)
-	if amount ~= amount or amount <= 0 then
+	if not canMutate(player, true) or amount ~= amount or amount <= 0 then
 		return
 	end
 	local profile = getProfile(player)
 	profile.denarii += math.floor(amount)
-	InventoryService.publish(player)
 	changed(player)
+	InventoryService.publish(player)
 end
 
 -- One server-decided reward: Aura + Denarii, counted ONCE in the persistent earnings, the session,
 -- the last battle (if one was started) and, unless `active` is false, the active-play statistics.
 function InventoryService.addReward(player: Player, aura: number, denarii: number, active: boolean?)
+	if not canMutate(player, true) then
+		return
+	end
 	local a = if aura == aura then math.max(0, math.floor(aura)) else 0
 	local d = if denarii == denarii then math.max(0, math.floor(denarii)) else 0
 	if a <= 0 and d <= 0 then
@@ -665,25 +695,29 @@ function InventoryService.addReward(player: Player, aura: number, denarii: numbe
 		profile.activity.aura += a
 		profile.activity.rewards += 1
 	end
-	InventoryService.publish(player)
 	changed(player)
+	InventoryService.publish(player)
 end
 
 -- A battle starts: its rewards are collected as "last battle" from now on.
 function InventoryService.beginBattle(player: Player, mode: string)
+	if not canMutate(player) then
+		return
+	end
 	local profile = getProfile(player)
 	profile.lastBattle = { aura = 0, denarii = 0, mode = mode, at = os.time() }
-	InventoryService.publish(player)
 	changed(player)
+	InventoryService.publish(player)
 end
 
 -- Seconds of ACTIVE fighting (match states only; lobby waiting never counts).
 function InventoryService.addActiveSeconds(player: Player, seconds: number)
-	if seconds ~= seconds or seconds <= 0 then
+	if not canMutate(player) or seconds ~= seconds or seconds <= 0 then
 		return
 	end
 	local profile = getProfile(player)
 	profile.activity.seconds += math.floor(seconds + 0.5)
+	changed(player, true) -- include in the next write without starting a timer for activity alone
 	player:SetAttribute(Config.AuraPerHourAttribute, InventoryService.auraPerActiveHour(player))
 end
 
@@ -760,6 +794,9 @@ end
 -- Buys an unlocked item with Denarii. Never allows duplicates, a locked item or a negative balance.
 -- Returns (success, message).
 function InventoryService.purchase(player: Player, kind: ItemKind, id: string): (boolean, string)
+	if not canMutate(player) then
+		return false, PROFILE_FROZEN
+	end
 	local name, price, required = lookup(kind, id)
 	if not name then
 		return false, "Unknown item"
@@ -783,15 +820,15 @@ function InventoryService.purchase(player: Player, kind: ItemKind, id: string): 
 	if kind == "Weapon" and not profile.weaponCopies[id] then
 		newCopy(profile, id, 0) -- the first copy of a bought weapon
 	end
-	InventoryService.publish(player)
 	changed(player)
+	InventoryService.publish(player)
 	return true, ("Bought %s for %d Denarii"):format(name, price)
 end
 
 -- Gives an item without a price: a granted Robux purchase (TownServices.grant, one receipt = one
 -- grant). Returns false when the item is unknown or already owned.
 function InventoryService.grantItem(player: Player, kind: ItemKind, id: string): boolean
-	if not InventoryService.isItem(kind, id) or InventoryService.owns(player, kind, id) then
+	if not canMutate(player) or not InventoryService.isItem(kind, id) or InventoryService.owns(player, kind, id) then
 		return false
 	end
 	local profile = getProfile(player)
@@ -799,8 +836,8 @@ function InventoryService.grantItem(player: Player, kind: ItemKind, id: string):
 	if kind == "Weapon" and not profile.weaponCopies[id] then
 		newCopy(profile, id, 0)
 	end
-	InventoryService.publish(player)
 	changed(player)
+	InventoryService.publish(player)
 	return true
 end
 
@@ -808,6 +845,9 @@ end
 -- legitimately stays usable after a re-balance of LevelRequired. Never costs Denarii.
 -- Returns (success, message).
 function InventoryService.equip(player: Player, kind: ItemKind, id: string): (boolean, string)
+	if not canMutate(player) then
+		return false, PROFILE_FROZEN
+	end
 	if not InventoryService.isItem(kind, id) then
 		return false, "Unknown item"
 	end
@@ -818,8 +858,8 @@ function InventoryService.equip(player: Player, kind: ItemKind, id: string): (bo
 	local profile = getProfile(player)
 	if kind == "Helmet" then
 		profile.equippedHelmet = id
-		InventoryService.publish(player)
 		changed(player)
+		InventoryService.publish(player)
 		return true, name .. " equipped"
 	end
 	local message = name .. " equipped"
@@ -838,8 +878,8 @@ function InventoryService.equip(player: Player, kind: ItemKind, id: string): (bo
 	else
 		profile.equippedArmor = id
 	end
-	InventoryService.publish(player)
 	changed(player)
+	InventoryService.publish(player)
 	return true, message
 end
 
@@ -848,7 +888,7 @@ end
 function InventoryService.getEquippedWeapon(player: Player): WeaponDefinition
 	local profile = getProfile(player)
 	local def = WeaponDefinitions.ById[profile.equippedWeapon]
-	if def and profile.ownedWeapons[def.Id] and usableCopy(profile, def.Id) then
+	if def and profile.ownedWeapons[def.Id] and liveCopy(player, def.Id) then
 		return def
 	end
 	return WeaponDefinitions.ById[WeaponDefinitions.Starter]
@@ -909,7 +949,7 @@ end
 
 -- Stores a whitelisted preference. Returns true when it changed.
 function InventoryService.setPreference(player: Player, key: unknown, value: unknown): boolean
-	if typeof(key) ~= "string" or typeof(value) ~= "string" then
+	if not canMutate(player) or typeof(key) ~= "string" or typeof(value) ~= "string" then
 		return false
 	end
 	local allowed = PREFERENCES[key]
@@ -921,14 +961,14 @@ function InventoryService.setPreference(player: Player, key: unknown, value: unk
 		return false
 	end
 	profile.preferences[key] = value
-	player:SetAttribute(Config.PreferencePrefix .. key, value)
 	changed(player)
+	player:SetAttribute(Config.PreferencePrefix .. key, value)
 	return true
 end
 
 -- Increases a saved statistic (server decisions only, e.g. a validated kill or victory).
 function InventoryService.addStat(player: Player, key: string, amount: number?)
-	if not PlayerDataSchema.isStat(key) then
+	if not canMutate(player) or not PlayerDataSchema.isStat(key) then
 		return
 	end
 	local value = math.floor(amount or 1)
@@ -950,29 +990,43 @@ end
 
 -- Hardening stage of the copy the player fights with (0 = none or no free copy).
 function InventoryService.forgeLevel(player: Player, weaponId: string): number
-	local copy = usableCopy(getProfile(player), weaponId)
+	local copy = liveCopy(player, weaponId)
 	return if copy then copy.forge else 0
 end
 
 -- The PvE factor of the copy in use (hardening x wear); 1 for a loaner or without a copy.
 function InventoryService.copyFactor(player: Player, weaponId: string): number
-	local copy = usableCopy(getProfile(player), weaponId)
+	local copy = liveCopy(player, weaponId)
 	return if copy then ForgeDefinitions.copyFactor(copy.forge, copy.wear) else 1
 end
 
 -- The copy in use (read-only for callers: designs for the weapon model, values for dialogs).
+local function copySnapshot(copy: ForgeDefinitions.Copy): ForgeDefinitions.Copy
+	return {
+		uid = copy.uid,
+		forge = copy.forge,
+		wear = copy.wear,
+		design = table.clone(copy.design),
+		job = if copy.job then table.clone(copy.job) else nil,
+	}
+end
+
 function InventoryService.copyInUse(player: Player, weaponId: string): ForgeDefinitions.Copy?
-	return usableCopy(getProfile(player), weaponId)
+	local copy = liveCopy(player, weaponId)
+	return if copy then copySnapshot(copy) else nil
 end
 
 -- Every copy of a weapon (jobs settled), oldest first.
 function InventoryService.copies(player: Player, weaponId: string): { ForgeDefinitions.Copy }
 	local profile = getProfile(player)
-	if settle(profile, os.time()) then
+	if settleForPlayer(player, profile, os.time()) then
 		InventoryService.publish(player)
-		changed(player)
 	end
-	return profile.weaponCopies[weaponId] or {}
+	local copies = {}
+	for _, copy in profile.weaponCopies[weaponId] or {} do
+		table.insert(copies, copySnapshot(copy))
+	end
+	return copies
 end
 
 function InventoryService.activeCopyId(player: Player, weaponId: string): string?
@@ -982,9 +1036,8 @@ end
 -- Completes due jobs. Returns true when a job ended (callers refresh the equipment).
 function InventoryService.settleJobs(player: Player): boolean
 	local profile = getProfile(player)
-	if settle(profile, os.time()) then
+	if settleForPlayer(player, profile, os.time()) then
 		InventoryService.publish(player)
-		changed(player)
 		return true
 	end
 	return false
@@ -993,35 +1046,38 @@ end
 -- PvE wear on the copy in use (hits on zombies and bosses only; PlayerCombatService). Publishes
 -- only when the copy passes into another wear step.
 function InventoryService.addWear(player: Player, weaponId: string, amount: number)
-	if amount ~= amount or amount <= 0 then
+	if not canMutate(player) or amount ~= amount or amount <= 0 then
 		return
 	end
-	local copy = usableCopy(getProfile(player), weaponId)
+	local copy = liveCopy(player, weaponId)
 	if not copy then
 		return
 	end
 	local before = ForgeDefinitions.wearStep(copy.wear)
 	copy.wear = ForgeDefinitions.clampWear(copy.wear + amount)
+	changed(player)
 	if ForgeDefinitions.wearStep(copy.wear) ~= before then
 		InventoryService.publish(player)
 	end
-	changed(player)
 end
 
 -- Which copy to fight with (a free one of the player's own).
 function InventoryService.setActiveCopy(player: Player, weaponId: string, uid: string): (boolean, string)
+	if not canMutate(player) then
+		return false, PROFILE_FROZEN
+	end
 	local profile = getProfile(player)
 	local copy = findCopy(profile, weaponId, uid)
 	if not copy then
 		return false, "Dieses Exemplar gehört dir nicht."
 	end
-	settle(profile, os.time())
+	settleForPlayer(player, profile, os.time())
 	if copy.job then
 		return false, "Dieses Exemplar ist noch beim Schmied."
 	end
 	profile.activeCopy[weaponId] = uid
-	InventoryService.publish(player)
 	changed(player)
+	InventoryService.publish(player)
 	return true, "Exemplar gewählt."
 end
 
@@ -1031,6 +1087,9 @@ end
 -- copy (uid ignored). `Design` is paid with a Robux credit (TownServices), so its price here is 0.
 -- Returns (success, message, price, uid of the copy worked on).
 function InventoryService.startJob(player: Player, weaponId: string, uid: string?, kind: ForgeDefinitions.JobKind, slot: string?, option: string?): (boolean, string, number, string?)
+	if not canMutate(player) then
+		return false, PROFILE_FROZEN, 0, nil
+	end
 	if not ForgeDefinitions.isSupported(weaponId) then
 		return false, "Diese Waffe kennt der Schmied nicht.", 0, nil
 	end
@@ -1040,7 +1099,7 @@ function InventoryService.startJob(player: Player, weaponId: string, uid: string
 		return false, name .. " gehört dir nicht.", 0, nil
 	end
 	local now = os.time()
-	settle(profile, now)
+	settleForPlayer(player, profile, now)
 	local seconds = (ForgeDefinitions.JobSeconds :: any)[kind]
 	if not seconds then
 		return false, "Diese Arbeit kennt der Schmied nicht.", 0, nil
@@ -1091,33 +1150,40 @@ function InventoryService.startJob(player: Player, weaponId: string, uid: string
 	end
 	local worked = copy :: ForgeDefinitions.Copy
 	worked.job = { kind = kind, untilTime = now + seconds, slot = slot, option = option }
-	InventoryService.publish(player)
 	changed(player)
+	InventoryService.publish(player)
 	local label = (ForgeDefinitions.JobLabels :: any)[kind]
 	return true, ("%s: %s, fertig in %d Minuten%s."):format(name, label, math.ceil(seconds / 60), if price > 0 then (" (%d Denarii)"):format(price) else ""), price, worked.uid
 end
 
 -- Finishes a running job now (a ForgeSkip purchase). Returns (success, message).
 function InventoryService.finishJobNow(player: Player, weaponId: string, uid: string): (boolean, string)
+	if not canMutate(player) then
+		return false, PROFILE_FROZEN
+	end
 	local profile = getProfile(player)
 	local copy = findCopy(profile, weaponId, uid)
 	if not copy or not copy.job then
 		return false, "Für dieses Exemplar läuft keine Arbeit."
 	end
 	finishJob(copy)
-	InventoryService.publish(player)
 	changed(player)
+	InventoryService.publish(player)
 	return true, "Der Schmied ist fertig."
 end
 
 -- The design of a shield type: slot -> option (read-only for callers; empty = standard).
 function InventoryService.shieldDesign(player: Player, shieldId: string): { [string]: string }
-	return getProfile(player).shieldDesigns[shieldId] or {}
+	local design = getProfile(player).shieldDesigns[shieldId]
+	return if design then table.clone(design) else {}
 end
 
 -- Sets one slot of a shield's design (paint, edge, boss, ornaments). Paid by the caller
 -- (TownServices: one Design credit). Returns (success, message).
 function InventoryService.setShieldDesign(player: Player, shieldId: string, slotId: string, option: string): (boolean, string)
+	if not canMutate(player) then
+		return false, PROFILE_FROZEN
+	end
 	local profile = getProfile(player)
 	if not profile.ownedShields[shieldId] then
 		return false, "Dieser Schild gehört dir nicht."
@@ -1136,8 +1202,8 @@ function InventoryService.setShieldDesign(player: Player, shieldId: string, slot
 		return false, "Der Schild hat dieses Design schon."
 	end
 	design[slotId] = option
-	InventoryService.publish(player)
 	changed(player)
+	InventoryService.publish(player)
 	return true, ("%s: %s."):format(slot.label, chosen.label)
 end
 
@@ -1147,12 +1213,18 @@ function InventoryService.credits(player: Player, key: string): number
 end
 
 function InventoryService.addCredit(player: Player, key: string, count: number?)
+	if not canMutate(player) then
+		return
+	end
 	local profile = getProfile(player)
 	profile.forgeCredits[key] = (profile.forgeCredits[key] or 0) + (count or 1)
 	changed(player)
 end
 
 function InventoryService.useCredit(player: Player, key: string): boolean
+	if not canMutate(player) then
+		return false
+	end
 	local profile = getProfile(player)
 	if (profile.forgeCredits[key] or 0) < 1 then
 		return false
@@ -1168,6 +1240,9 @@ function InventoryService.hasReceipt(player: Player, purchaseId: string): boolea
 end
 
 function InventoryService.recordReceipt(player: Player, purchaseId: string)
+	if not canMutate(player) then
+		return
+	end
 	local receipts = getProfile(player).receipts
 	table.insert(receipts, purchaseId)
 	while #receipts > ForgeDefinitions.MaxReceipts do
@@ -1178,7 +1253,7 @@ end
 
 -- Pays a fixed service price (e.g. the oracle) exactly once. Never makes the balance negative.
 function InventoryService.spendDenarii(player: Player, amount: number): boolean
-	if amount ~= amount or amount <= 0 or amount % 1 ~= 0 then
+	if not canMutate(player) or amount ~= amount or amount <= 0 or amount % 1 ~= 0 then
 		return false
 	end
 	local profile = getProfile(player)
@@ -1186,8 +1261,8 @@ function InventoryService.spendDenarii(player: Player, amount: number): boolean
 		return false
 	end
 	profile.denarii -= amount
-	InventoryService.publish(player)
 	changed(player)
+	InventoryService.publish(player)
 	return true
 end
 
@@ -1209,6 +1284,9 @@ function InventoryService.practiceSpecial(player: Player, weaponId: string, move
 	local steps = SpecialPracticeDefinitions.clampSteps(profile.specialAttempts[key] or 0)
 	local failure = SpecialPracticeDefinitions.failure(steps)
 	local perfect = SpecialPracticeDefinitions.perfect(steps)
+	if not canMutate(player) then
+		return failure, perfect
+	end
 	local today = currentDay()
 	local stored = profile.specialDaily[key]
 	local daily: { day: number, Training: number, Arena: number }
@@ -1216,11 +1294,11 @@ function InventoryService.practiceSpecial(player: Player, weaponId: string, move
 		daily = stored
 	else
 		daily = { day = today, Training = 0, Arena = 0 }
-		profile.specialDaily[key] = daily
 	end
 	local step = SpecialPracticeDefinitions.PerfectStep
 	local used = if source == "Training" then daily.Training else daily.Arena
 	if steps < SpecialPracticeDefinitions.MaxSteps and used + step <= allowance + 1e-9 then
+		profile.specialDaily[key] = daily
 		if source == "Training" then
 			daily.Training += step
 		else
@@ -1228,8 +1306,8 @@ function InventoryService.practiceSpecial(player: Player, weaponId: string, move
 		end
 		steps += 1
 		profile.specialAttempts[key] = steps
-		player:SetAttribute(SpecialPracticeDefinitions.attribute(key), steps)
 		changed(player)
+		player:SetAttribute(SpecialPracticeDefinitions.attribute(key), steps)
 	end
 	return failure, perfect
 end
@@ -1281,7 +1359,7 @@ function InventoryService.serialize(player: Player): { [string]: any }
 			for id, list in profile.weaponCopies do
 				local out = {}
 				for _, c in list do
-					table.insert(out, { uid = c.uid, forge = c.forge, wear = c.wear, design = table.clone(c.design), job = if c.job then table.clone(c.job) else nil })
+					table.insert(out, copySnapshot(c))
 				end
 				copy[id] = out
 			end

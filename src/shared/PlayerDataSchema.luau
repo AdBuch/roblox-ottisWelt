@@ -29,8 +29,8 @@
 -- v11: helmets (`ownedHelmets`, `equippedHelmet`, HelmetDefinitions). Old profiles own only the bare head.
 -- v12: `shieldDesigns` is shield id -> { slot -> option } (paint, edge, boss, ornaments; the v10
 -- paint id becomes the Paint slot). The helmet "Galea" became "SpartaHelm" (owners keep it).
--- The saved record also carries PlayerDataService's own fields, which are not part of the profile:
--- `lock` (the server that holds the profile), `saveId`, `savedAt`, `session`.
+-- PlayerDataService adds `lock`, `leaseEpoch`, `saveId` and `savedAt` to the record.
+-- `session` belongs to the profile and stores gameplay earnings.
 
 local PlayerDataSchema = {
 	Version = 12,

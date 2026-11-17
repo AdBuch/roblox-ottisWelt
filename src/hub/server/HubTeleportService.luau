@@ -63,11 +63,21 @@ function HubTeleportService.send(players: { Player }, options: Options): { Playe
 	end
 	local ready = {}
 	for _, player in players do
-		if player.Parent and PlayerDataService.beginTransfer(player) then
+		if player.Parent and PlayerDataService.beginTransfer(player) and player.Parent then
 			table.insert(ready, player)
-			Remotes.MatchEvent:FireClient(player, "Teleport", "Travelling", options.mode)
 		elseif player.Parent then
-			failed(player, "TELEPORT_FAILED")
+			failed(player, "DATA_SAVE_FAILED")
+		end
+	end
+	for index = #ready, 1, -1 do
+		local player = ready[index]
+		if not player.Parent then
+			table.remove(ready, index)
+		elseif not PlayerDataService.isTransferPrepared(player) then
+			table.remove(ready, index)
+			failed(player, "DATA_SAVE_FAILED")
+		else
+			Remotes.MatchEvent:FireClient(player, "Teleport", "Travelling", options.mode)
 		end
 	end
 	if #ready == 0 then

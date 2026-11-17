@@ -77,6 +77,7 @@ local events = {}
 local tokens = 0
 local refreshed = 0
 local studio = false
+local confirmedSave = true
 Town.init({
 	inventory = Inv,
 	isReady = function(p) return ready[p] ~= false end,
@@ -85,7 +86,7 @@ Town.init({
 	now = function() return now end,
 	token = function() tokens += 1 return "T" .. tokens end,
 	refresh = function() refreshed += 1 end,
-	save = function() return true end,
+	save = function() return confirmedSave end,
 	isStudio = function() return studio end,
 }, function() return vec(0, 0, 0) end, function() return vec(100, 0, 0) end)
 local function last() return events[#events] end
@@ -184,6 +185,12 @@ check(Inv.copies(p, starter)[1].design.Grip == "Gold", "golden grip on copy 1")
 balance = Inv.getDenarii(p)
 local pack = Forge.product("DenariiSmall")
 check(Town.grant(p, pack, "R-1") and Town.grant(p, pack, "R-1") and Inv.getDenarii(p) == balance + pack.denarii, "a receipt grants its Denarii exactly once")
+local receiptBalance = Inv.getDenarii(p)
+confirmedSave = false
+check(not Town.grant(p, pack, "R-UNCONFIRMED") and Inv.getDenarii(p) == receiptBalance + pack.denarii, "an unconfirmed receipt is pending")
+check(not Town.grant(p, pack, "R-UNCONFIRMED") and Inv.getDenarii(p) == receiptBalance + pack.denarii, "an unconfirmed receipt retry does not grant twice")
+confirmedSave = true
+check(Town.grant(p, pack, "R-UNCONFIRMED") and Inv.getDenarii(p) == receiptBalance + pack.denarii, "an acknowledged retry confirms the pending receipt")
 -- SKIP (Robux): finishes a running job at once
 tick()
 local inHand = Inv.copyInUse(p, starter)
