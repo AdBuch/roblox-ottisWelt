@@ -255,6 +255,10 @@ function ShopController.start(names: Names, group: GroupFn)
 		if loading then
 			action.Text = "AUSRÜSTUNG LÄDT …"
 			action.Active = false
+		elseif player:GetAttribute(names.dataStatus) == "Incompatible" then
+			status.Text = "Spielversion passt nicht zu deinen Daten. Bitte neu beitreten."
+			action.Text = "UPDATE ERFORDERLICH"
+			action.Active = false
 		end
 		action.AutoButtonColor = action.Active
 		focus.Adornee = item

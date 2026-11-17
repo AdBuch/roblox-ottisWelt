@@ -10,6 +10,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
 local MatchTypes = require(ReplicatedStorage.Shared.MatchTypes)
+local PlayerDataService = require(script.Parent.Parent.PlayerDataService)
 local Server = script.Parent.Parent
 local AdmissionTicketService = require(Server.AdmissionTicketService)
 local MatchRecordService = require(Server.MatchRecordService)
@@ -39,6 +40,7 @@ export type Options = {
 -- Returns the players accepted for preparation.
 function HubTeleportService.send(players: { Player }, options: Options): { Player }
 	local function failed(player: Player, code: string)
+		if PlayerDataService.getStatus(player) == "Incompatible" then code = "UPDATE" end
 		local key = MatchTypes.ticketKey(options.matchId, player.UserId)
 		revoking[key] = true
 		if player.Parent then
@@ -63,8 +65,10 @@ function HubTeleportService.send(players: { Player }, options: Options): { Playe
 
 	local payload: MatchTypes.TeleportPayload = { kind = "ToArena", matchId = options.matchId, mode = options.mode }
 	local accepted = TeleportUtil.toReserved(players, function()
+		local record, problem = MatchRecordService.getMatch(options.matchId)
+		if not record then return nil, problem end
 		local connection = MatchRecordService.getConnection(options.matchId)
-		return if connection then connection.accessCode else nil
+		return if connection then connection.accessCode else nil, nil
 	end, payload, failed)
 	local skipped: { [Player]: boolean } = {}
 	for _, player in players do

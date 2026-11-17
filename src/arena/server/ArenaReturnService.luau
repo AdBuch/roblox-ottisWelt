@@ -11,10 +11,12 @@ local MatchTypes = require(ReplicatedStorage.Shared.MatchTypes)
 local Server = script.Parent.Parent
 local Remotes = require(Server.Remotes)
 local TeleportUtil = require(Server.TeleportUtil)
+local PlayerDataService = require(Server.PlayerDataService)
 
 local ArenaReturnService = {}
 
 local function failed(player: Player, code: string)
+	if PlayerDataService.getStatus(player) == "Incompatible" then code = "UPDATE" end
 	if player.Parent then
 		local text = (MatchTypes.Messages :: any)[code] or MatchTypes.Messages.TELEPORT_FAILED
 		Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Shop, text, false)

@@ -8,6 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ExperienceConfig = require(ReplicatedStorage.Shared.ExperienceConfig)
 local MatchTypes = require(ReplicatedStorage.Shared.MatchTypes)
+local GameProtocol = require(ReplicatedStorage.Shared.GameProtocol)
 local MemoryStoreAdapter = require(script.Parent.MemoryStoreAdapter)
 
 type MatchRecord = MatchTypes.MatchRecord
@@ -20,12 +21,14 @@ local function ttl(): number
 end
 
 function MatchRecordService.saveMatch(record: MatchRecord): boolean
+	if not GameProtocol.isRecordCompatible(record) then return false end
 	return MemoryStoreAdapter.map("Matches").set(record.matchId, record, ttl())
 end
 
-function MatchRecordService.getMatch(matchId: string): MatchRecord?
+function MatchRecordService.getMatch(matchId: string): (MatchRecord?, string?)
 	local ok, value = MemoryStoreAdapter.map("Matches").get(matchId)
 	if ok and typeof(value) == "table" and value.matchId == matchId then
+		if not GameProtocol.isRecordCompatible(value) then return nil, "UPDATE" end
 		return value :: MatchRecord
 	end
 	return nil
@@ -38,6 +41,7 @@ end
 function MatchRecordService.getConnection(matchId: string): ConnectionRecord?
 	local ok, value = MemoryStoreAdapter.map("Private").get(matchId)
 	if ok and typeof(value) == "table" and typeof(value.accessCode) == "string" and value.accessCode ~= "" then
+		if value.matchId ~= matchId then return nil end
 		return value :: ConnectionRecord
 	end
 	return nil

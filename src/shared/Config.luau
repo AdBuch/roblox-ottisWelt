@@ -99,6 +99,7 @@ local Config = {
 	AuraPerHourAttribute = "AuraPerActiveHour", -- 0 = not enough real data for an estimate
 	MatchTransitionAttribute = "MatchTransition", -- true while the Hub prepares this player's match (gear locked)
 	TeleportStateAttribute = "TeleportState",
+	DataStatusMessageAttribute = "DataStatusMessage",
 
 	RemotesFolderName = "Remotes",
 	CombatActionRemoteName = "CombatAction",

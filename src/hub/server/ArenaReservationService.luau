@@ -64,6 +64,7 @@ function ArenaReservationService.create(mode: MatchTypes.MatchMode, fighters: { 
 		matchId = matchId,
 		mode = mode,
 		protocol = GameProtocol.Version,
+		compatibility = GameProtocol.describe(),
 		privateServerId = privateServerId,
 		fighters = fighters,
 		policy = policy or ExperienceConfig.Spectating.DefaultPolicy,

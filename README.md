@@ -639,6 +639,7 @@ mock data unless `StudioMockData = false`. Loaded data always goes through
   See [paid purchases and the prompt switch](docs/PURCHASE_RECEIPTS.md).
 - **Combat recovery** commits each reward and personal checkpoint with its stable reward ID.
   Confirmed claims survive in the [reward inbox](docs/COMBAT_REWARD_RECOVERY.md) until the profile save succeeds.
+- **Version compatibility** requires matching Hub/Arena contracts. See the [compatibility matrix and rollout order](docs/VERSION_COMPATIBILITY.md).
 - **Test:** `scripts/test-player-data.ps1 -LuauPath <luau.exe>` (mock DataStore, several servers).
 - **Preferences:** the client may only send whitelisted values (`SavePreference` remote, rate limited).
 - **Schema v6:** Aura is experience; levels are derived, not stored. The old `ControlMode` / `BloodFx` preferences are

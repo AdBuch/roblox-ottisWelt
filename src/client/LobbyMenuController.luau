@@ -325,6 +325,8 @@ function LobbyMenuController.start(deps: Deps): LobbyMenu
 		local status = player:GetAttribute(Config.DataStatusAttribute)
 		if status == "Loading" then
 			return "Deine Ausrüstung wird noch geladen …"
+		elseif status == "Incompatible" then
+			return "Diese Daten benötigen eine andere Spielversion. Bitte neu beitreten."
 		elseif status == "Transferring" then
 			return "Reise in die Arena · kein Wechsel möglich"
 		end

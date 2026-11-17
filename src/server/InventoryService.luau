@@ -17,8 +17,8 @@
 -- Denarii EARNED since tracking began, never derived from the balance), the play session, the last
 -- battle and the active-play statistics for the time estimate. Old profiles start these counters at
 -- 0 and are marked `complete = false` ("since tracking began"); nothing is invented.
--- migrateProfile() is safe to call repeatedly and also removes unknown ids, so a saved profile can
--- never equip something that no longer exists, and no value is ever granted twice.
+-- migrateProfile() is repeatable. Unsupported inventory IDs or nested fields refuse the load
+-- so that an older catalog cannot silently remove newer economic data.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -263,8 +263,66 @@ local function findCopy(profile: Profile, weaponId: string, uid: string): ForgeD
 	return nil
 end
 
--- Brings any profile (new, legacy, or loaded from the DataStore) to the current version.
+local function deepCopy(value: any): any
+	if typeof(value) ~= "table" then return value end
+	local copy = {}
+	for key, entry in value do copy[key] = deepCopy(entry) end
+	return copy
+end
+
+-- Unfamiliar data cannot be normalized safely. Only documented legacy transformations
+-- may remove or change existing values.
+local function assertRetained(old: any, new: any, path: string, version: number)
+	if path == "profile.version" then return end
+	if version < 5 and (path == "profile.auraPoints" or path == "profile.denarii") then return end
+	if version < 10 and (path == "profile.nextCopy" or path == "profile.activeCopy") then return end
+	if version < 14 and (path == "profile.coins" or path == "profile.forge"
+		or path == "profile.preferences.ControlMode" or path == "profile.preferences.BloodFx") then return end
+	if version < 12 and (path == "profile.ownedHelmets.Galea" or
+		(path == "profile.equippedHelmet" and old == "Galea" and new == "SpartaHelm")) then return end
+	if version <= 12 and path == "profile.receipts" and typeof(old) == "table" then
+		for key, value in old do
+			local id = if typeof(key) == "string" and value == true then key else value
+			assert(typeof(id) == "string" and new[id] == true, "Unsupported receipt evidence")
+		end
+		return
+	end
+	assert(new ~= nil, "Unsupported profile field " .. path)
+	if typeof(old) ~= "table" or typeof(new) ~= "table" then
+		if typeof(old) ~= "table" and typeof(new) ~= "table" then
+			assert(old == new, "Unsupported profile value " .. path)
+		end
+		return
+	end
+	for key, value in old do
+		local field = path .. "." .. tostring(key)
+		assertRetained(value, new[key], field, version)
+	end
+end
+
+-- Brings any supported profile to the write version; reject before touching a future record.
 function InventoryService.migrateProfile(profile: Profile): Profile
+	assert(PlayerDataSchema.canRead(profile.version), "Unsupported profile schema")
+	local target = profile
+	local original = target
+	profile = deepCopy(target)
+	if original then
+		for name, definitions in {
+			ownedWeapons = WeaponDefinitions.ById, ownedShields = ShieldDefinitions.ById,
+			ownedArmor = ArmorDefinitions.ById, ownedHelmets = HelmetDefinitions.ById,
+		} do
+			local owned: any = original[name]
+			if typeof(owned) == "string" then
+				for id in owned:gmatch("[^,]+") do
+					assert(definitions[id] or (name == "ownedHelmets" and HelmetDefinitions.Renamed[id]), "Unsupported inventory ID " .. id)
+				end
+			elseif typeof(owned) == "table" then
+				for id, value in owned do
+					if value == true then assert(definitions[id] or (name == "ownedHelmets" and HelmetDefinitions.Renamed[id]), "Unsupported inventory ID " .. tostring(id)) end
+				end
+			end
+		end
+	end
 	local savedVersion = tonumber(profile.version) or 0
 	local legacy = profile.coins
 	if legacy ~= nil then
@@ -505,8 +563,18 @@ function InventoryService.migrateProfile(profile: Profile): Profile
 		clears[mode] = chapters
 	end
 	profile.campaignClears = clears
-	profile.version = math.max(PROFILE_VERSION, savedVersion)
-	return profile
+	profile.version = PlayerDataSchema.WriteVersion
+	assertRetained(original, profile, "profile", savedVersion)
+	table.clear(target)
+	for key, value in profile :: any do (target :: any)[key] = value end
+	return target
+end
+
+function InventoryService.canWriteRecord(record: any): boolean
+	if typeof(record) ~= "table" then return false end
+	if record.empty == true then return PlayerDataSchema.canRead(record.version) end
+	local ok = pcall(InventoryService.migrateProfile, deepCopy(record))
+	return ok
 end
 
 local function getProfile(player: Player): Profile
@@ -606,7 +674,7 @@ end
 -- finished (`earnedAura`, `earnedDenarii`) are kept on top, so nothing is lost while the
 -- DataStore answers.
 function InventoryService.load(player: Player, saved: { [string]: any }?, earnedAura: number, earnedDenarii: number, resetToken: string?)
-	local profile: Profile = if saved then (table.clone(saved) :: any) else newProfile()
+	local profile: Profile = if saved then (deepCopy(saved) :: any) else newProfile()
 	InventoryService.migrateProfile(profile)
 	local now = os.time()
 	if now - profile.session.lastSeen > SESSION_GAP then
@@ -1413,8 +1481,10 @@ end
 
 function InventoryService.serialize(player: Player): { [string]: any }
 	local profile = getProfile(player)
-	return {
-		version = PROFILE_VERSION,
+	assert(PlayerDataSchema.canWrite(profile.version), "Unsupported profile writer")
+	local snapshot = deepCopy(profile) -- preserve unfamiliar top-level fields
+	local known = {
+		version = PlayerDataSchema.WriteVersion,
 		auraPoints = profile.auraPoints,
 		denarii = profile.denarii,
 		ownedWeapons = joinOwned(profile.ownedWeapons),
@@ -1469,6 +1539,13 @@ function InventoryService.serialize(player: Player): { [string]: any }
 			return copy
 		end)(),
 	}
+	for key, value in known do snapshot[key] = value end
+	-- Optional fields and storage metadata have explicit owners and removal semantics.
+	snapshot.lastBattle = known.lastBattle
+	snapshot.resetToken = known.resetToken
+	snapshot.coins, snapshot.forge = nil, nil
+	snapshot.lock, snapshot.leaseEpoch, snapshot.saveId, snapshot.savedAt, snapshot.empty = nil, nil, nil, nil, nil
+	return snapshot
 end
 
 return InventoryService

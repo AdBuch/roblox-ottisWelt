@@ -114,7 +114,8 @@ local guid = 0
 local source
 -- One "server": its own PlayerDataService, InventoryService mock, Players service and BindToClose.
 local resetRequested = false
-local function newServer(name, mockData)
+local function newServer(name, mockData, writerVersion)
+	writerVersion = writerVersion or 14
 	local server = { name = name, profiles = {}, changed = {}, players = {}, loaded = 0 }
 	local added, removing = signal(), signal()
 	local inv = {}
@@ -124,13 +125,14 @@ local function newServer(name, mockData)
 	end
 	function inv.getAura(p) return profile(p).aura end
 	function inv.getDenarii(p) return profile(p).denarii end
+	function inv.canWriteRecord(record) return record.invalidFields ~= true end
 	function inv.load(p, saved, earnedAura, earnedDenarii)
 		server.profiles[p] = { denarii = (saved and saved.denarii or 0) + earnedDenarii, aura = (saved and saved.auraPoints or 0) + earnedAura,
 			receipts = deep(saved and saved.receipts or {}), rewardIds = deep(saved and saved.rewardIds or {}),
 			campaignClears = deep(saved and saved.campaignClears or {}), stats = deep(saved and saved.stats or {}) }
 	end
 	function inv.serialize(p)
-		return { version = 14, denarii = profile(p).denarii, auraPoints = profile(p).aura, session = { aura = 17, denarii = 9 },
+		return { version = writerVersion, denarii = profile(p).denarii, auraPoints = profile(p).aura, session = { aura = 17, denarii = 9 },
 			receipts = deep(profile(p).receipts), rewardIds = deep(profile(p).rewardIds), campaignClears = deep(profile(p).campaignClears), stats = deep(profile(p).stats) }
 	end
 	function inv.setMutationGuard(fn) server.canMutate = fn end
@@ -171,10 +173,14 @@ local function newServer(name, mockData)
 	end
 	server.inventory = inv
 	local mocks = {
-		["Shared/Config"] = { DataStatusAttribute = "DataStatus", IntroSeenAttribute = "IntroSeen" },
+		["Shared/Config"] = { DataStatusAttribute = "DataStatus", IntroSeenAttribute = "IntroSeen", DataStatusMessageAttribute = "DataMessage" },
 		["Shared/EnvironmentConfig"] = { get = function() return { DataStoreName = "Store" } end, useMockData = function() return mockData == true end, describe = function() return "test" end, name = function() return "DEV" end },
 		["Shared/ExperienceConfig"] = { Studio = { UnlockAllGear = false }, Teleport = { TransitionHoldSeconds = 60, RecoveryTimeoutSeconds = 20 } },
-		["Shared/PlayerDataSchema"] = { Version = 14 },
+		["Shared/PlayerDataSchema"] = {
+			Version = writerVersion, WriteVersion = writerVersion,
+			canRead = function(v) return v == nil or (type(v) == "number" and v % 1 == 0 and v >= 0 and v <= writerVersion) end,
+			canWrite = function(v) return v == writerVersion end,
+		},
 		["Server/InventoryService"] = inv,
 		["Server/PlayerDataResetConfig"] = { tokenFor = function() return if resetRequested then "test-reset" else nil end },
 		["Server/Remotes"] = { SavePreference = { OnServerEvent = signal() } },
@@ -494,7 +500,30 @@ check(call(M.data.flush, mocked).value == false and call(M.data.beginTransfer, m
 db.player_35 = { version = 15, denarii = 99 }
 local future = R.join(35)
 after(3)
-check(R.data.getStatus(future) == "Unsaved" and db.player_35.version == 15 and db.player_35.lock == nil, "an older schema cannot claim or overwrite a future profile")
+check(R.data.getStatus(future) == "Incompatible" and future.attrs.DataMessage ~= nil and db.player_35.version == 15 and db.player_35.lock == nil, "an older schema cannot claim or overwrite a future profile")
+local guardedWrite = R.join(37)
+after(3)
+R.earn(guardedWrite, 5)
+db.player_37.version, db.player_37.newInventory = 15, { helmet = "keep", credits = 9, receipts = { paid = true } }
+local deniedWrite = call(R.data.flush, guardedWrite)
+after(3)
+check(deniedWrite.value == false and R.data.getStatus(guardedWrite) == "Incompatible"
+	and db.player_37.version == 15 and db.player_37.newInventory.receipts.paid and db.player_37.denarii == nil,
+	"every UpdateAsync write fences an unexpectedly newer profile under the same lease")
+local extensionWrite = R.join(38)
+after(3)
+db.player_38.newField = { design = "unchanged" }
+R.earn(extensionWrite, 2)
+local retainedExtension = call(R.data.flush, extensionWrite)
+after(3)
+check(retainedExtension.value and db.player_38.newField.design == "unchanged", "a concurrent top-level extension survives the current writer")
+local oldWriter = newServer("GuardedOldWriter", false, 13)
+db.player_39 = { version = 14, denarii = 80, receipts = { paid = true }, rewardIds = { reward = true } }
+local tooNew = oldWriter.join(39)
+after(3)
+check(oldWriter.data.getStatus(tooNew) == "Incompatible" and db.player_39.lock == nil
+	and db.player_39.denarii == 80 and db.player_39.receipts.paid,
+	"profile 14 cannot be claimed by a guarded writer limited to 13")
 
 -- Real TeleportUtil and ArenaReturnService against the deterministic scheduler and a fake engine.
 local function newTransport(data)
