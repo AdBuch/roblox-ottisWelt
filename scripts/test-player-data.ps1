@@ -6,6 +6,7 @@ param([string]$LuauPath = 'luau')
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $source = Get-Content -LiteralPath (Join-Path $repo 'src/server/PlayerDataService.luau') -Raw
+$arenaSource = Get-Content -LiteralPath (Join-Path $repo 'src/arena/server/ArenaReturnService.luau') -Raw
 
 $harness = @'
 local checks = 0
@@ -58,20 +59,34 @@ local function deep(value)
 	return copy
 end
 local db = {}
-local store = { latency = 1, failNext = 0, writes = 0, inFlight = {}, maxInFlight = 0 }
+local store = { latency = 1, failNext = 0, rejectNext = 0, loseAck = 0, responseDelay = 0, writes = 0, inFlight = {}, maxInFlight = 0 }
 function store:UpdateAsync(key, transform)
 	self.inFlight[key] = (self.inFlight[key] or 0) + 1
 	self.maxInFlight = math.max(self.maxInFlight, self.inFlight[key])
 	task.wait(self.latency)
-	self.inFlight[key] -= 1
 	if self.failNext > 0 then
+		self.inFlight[key] -= 1
 		self.failNext -= 1
 		error("DataStore request failed")
 	end
 	local new = transform(deep(db[key]))
-	if new == nil then return nil end
+	if self.rejectNext > 0 and key == self.faultKey then
+		self.rejectNext -= 1
+		self.inFlight[key] -= 1
+		return deep(db[key]) -- a successful request without our committed value
+	end
+	if new == nil then
+		self.inFlight[key] -= 1
+		return nil
+	end
 	self.writes += 1
 	db[key] = deep(new)
+	if self.responseDelay > 0 then task.wait(self.responseDelay) end
+	self.inFlight[key] -= 1
+	if self.loseAck > 0 and key == self.faultKey then
+		self.loseAck -= 1
+		error("Response lost after commit")
+	end
 	return deep(new)
 end
 function store:GetAsync(key) task.wait(self.latency) return deep(db[key]) end
@@ -88,7 +103,7 @@ end
 local guid = 0
 local source
 -- One "server": its own PlayerDataService, InventoryService mock, Players service and BindToClose.
-local function newServer(name)
+local function newServer(name, mockData)
 	local server = { name = name, profiles = {}, changed = {}, players = {}, loaded = 0 }
 	local added, removing = signal(), signal()
 	local inv = {}
@@ -101,20 +116,26 @@ local function newServer(name)
 	function inv.load(p, saved, earnedAura, earnedDenarii)
 		server.profiles[p] = { denarii = (saved and saved.denarii or 0) + earnedDenarii, aura = (saved and saved.auraPoints or 0) + earnedAura }
 	end
-	function inv.serialize(p) return { version = 12, denarii = profile(p).denarii, auraPoints = profile(p).aura } end
+	function inv.serialize(p)
+		return { version = 12, denarii = profile(p).denarii, auraPoints = profile(p).aura, session = { aura = 17, denarii = 9 } }
+	end
+	function inv.setMutationGuard(fn) server.canMutate = fn end
 	function inv.onChanged(fn) table.insert(server.changed, fn) end
 	function inv.forget(p) server.profiles[p] = nil end
 	function inv.getPreference() return nil end
 	function inv.setPreference() end
 	function inv.unlockAll() end
 	function server.earn(p, amount)
+		if not server.canMutate(p, true) then return false end
 		profile(p).denarii += amount
-		for _, fn in server.changed do task.spawn(fn, p) end
+		for _, fn in server.changed do fn(p) end
+		return true
 	end
 	local mocks = {
 		["Shared/Config"] = { DataStatusAttribute = "DataStatus", IntroSeenAttribute = "IntroSeen" },
-		["Shared/EnvironmentConfig"] = { get = function() return { DataStoreName = "Store" } end, useMockData = function() return false end, describe = function() return "test" end, name = function() return "DEV" end },
+		["Shared/EnvironmentConfig"] = { get = function() return { DataStoreName = "Store" } end, useMockData = function() return mockData == true end, describe = function() return "test" end, name = function() return "DEV" end },
 		["Shared/ExperienceConfig"] = { Studio = { UnlockAllGear = false }, Teleport = { TransitionHoldSeconds = 30 } },
+		["Shared/PlayerDataSchema"] = { Version = 12 },
 		["Server/InventoryService"] = inv,
 		["Server/PlayerDataResetConfig"] = { tokenFor = function() return nil end },
 		["Server/Remotes"] = { SavePreference = { OnServerEvent = signal() } },
@@ -152,6 +173,7 @@ local function call(fn, ...)
 end
 '@
 $harness += "`nsource = function(script, game, require)`n$source`nend`n"
+$harness += "`nlocal arenaSource = function(script, game, require)`n$arenaSource`nend`n"
 $harness += @'
 
 -- 1. JOIN: a new player gets the lock, nothing else is stored yet
@@ -166,6 +188,7 @@ check(db.player_1.lock.server:find("^A%-") ~= nil and db.player_1.empty == true,
 A.earn(p, 100)
 after(12)
 check(db.player_1.denarii == 100 and db.player_1.saveId ~= nil and db.player_1.empty == nil and db.player_1.lock.server:find("^A%-") ~= nil, "the change is written with a save id and the lock")
+check(db.player_1.session.aura == 17 and db.player_1.session.denarii == 9, "lease metadata does not overwrite gameplay session earnings")
 local writes = store.writes
 local r = call(A.data.flush, p)
 after(3)
@@ -208,13 +231,17 @@ store.latency = 1
 -- 5. HANDOFF (teleport): the flush releases the lock, the destination loads at once
 local B = newServer("B")
 A.earn(p, 4)
+local firstEpoch = db.player_1.leaseEpoch
 r = call(A.data.beginTransfer, p)
+local duplicateTransfer = call(A.data.beginTransfer, p)
 check(not A.data.isReady(p), "frozen while the transfer flush runs")
+check(not A.earn(p, 700), "mutations are rejected before a transfer can yield")
 after(3)
-check(r.value == true and db.player_1.denarii == 170 and db.player_1.lock == nil and A.data.getStatus(p) == "Transferring", "transfer: flushed, lock released")
+check(r.value == true and duplicateTransfer.value == true and db.player_1.denarii == 170 and db.player_1.lock == nil and A.data.getStatus(p) == "Transferring", "both transfer callers wait for the same confirmed release")
 local pB = B.join(1)
 after(3)
 check(B.data.getStatus(pB) == "Loaded" and B.profiles[pB].denarii == 170 and db.player_1.lock.server:find("^B%-") ~= nil, "the destination loads the flushed profile without waiting")
+check(db.player_1.leaseEpoch == firstEpoch + 1, "destination allocates a new fence")
 B.earn(pB, 30)
 after(12)
 check(db.player_1.denarii == 200, "the destination saves")
@@ -242,20 +269,34 @@ store.failNext = 3
 A.earn(q, 1)
 r = call(A.data.beginTransfer, q)
 after(12)
-check(r.value == false and A.data.getStatus(q) == "Loaded" and db.player_2.lock ~= nil, "no teleport without a confirmed flush")
+check(r.value == false and A.data.getStatus(q) == "Transferring" and db.player_2.lock ~= nil, "no teleport without a confirmed flush")
+A.data.cancelTransfer(q)
+after(2)
+check(A.data.getStatus(q) == "Loaded", "recover the original lease after an unconfirmed transfer")
 
--- 7. TWO SERVERS AT ONCE: a profile held by a live server is not read; after the wait it is taken
---    over, and the first server can no longer write (no overwrite, the player is sent out)
+-- 7. TWO SERVERS AT ONCE: contention times out without revoking a live lease.
 A.earn(q, 2)
+local aEpoch = db.player_2.leaseEpoch
 local qB = B.join(2)
 after(10)
 check(B.data.getStatus(qB) == "Loading", "the second server waits for the lock")
 after(25)
-check(B.data.getStatus(qB) == "Loaded" and db.player_2.lock.server:find("^B%-") ~= nil, "after the wait the second server takes the profile over")
+check(B.data.getStatus(qB) == "Unsaved" and db.player_2.leaseEpoch == aEpoch and db.player_2.lock.server:find("^A%-") ~= nil, "waiting cannot steal a live lease")
+check(not B.data.canPersist(qB), "the contending server has no persistence authority")
+B.leave(qB)
+
+-- Atomic takeover uses a new fence when the old lease has actually expired.
+db.player_2.lock.expiresAt = os.time() - 1
+qB = B.join(2)
+after(3)
+check(B.data.getStatus(qB) == "Loaded" and db.player_2.leaseEpoch == aEpoch + 1, "an expired lease can be acquired")
 local taken = B.profiles[qB].denarii
 B.earn(qB, 500)
 after(12)
 check(db.player_2.denarii == taken + 500, "the new holder saves")
+B.leave(qB)
+after(4)
+check(db.player_2.lock == nil, "the newer owner already released its lease")
 A.earn(q, 9999)
 r = call(A.data.flush, q)
 after(4)
@@ -265,8 +306,6 @@ writes = store.writes
 A.leave(q)
 after(5)
 check(store.writes == writes and db.player_2.denarii == taken + 500, "nothing written on leave either")
-B.leave(qB)
-after(4)
 
 -- 8. CRASHED SERVER: an old lock is taken over at once
 db.player_3 = { version = 12, denarii = 77, auraPoints = 0, lock = { server = "DEAD", at = os.time() - 31 * 60 } }
@@ -289,12 +328,14 @@ check(r.value == false and store.writes == writes and db.player_4 == nil, "an un
 
 -- 10. LEFT WHILE LOADING: the claimed lock is given back
 store.latency = 4
+store.responseDelay = 2
 local l = A.join(5)
-after(1)
+after(4.5) -- the lease was written, but Load is still waiting for the returned record
 A.leave(l)
 after(12)
 check(db.player_5 ~= nil and db.player_5.lock == nil, "leaving during the load releases the lock")
 store.latency = 1
+store.responseDelay = 0
 
 -- 11. SHUTDOWN: BindToClose waits for the leave saves and running writes, and releases the locks
 local S = newServer("S")
@@ -319,6 +360,138 @@ S.leave(s2) S.leave(s3)
 after(5)
 check(db.player_12.denarii == 2 and db.player_13.denarii == 33, "the leave events after the shutdown save change nothing")
 
+-- A returned pre-write record is a refusal. A lost acknowledgement, in contrast, is
+-- reconciled by the same operation's saveId in a subsequent UpdateAsync.
+store.latency = 1
+local R = newServer("R")
+local rp = R.join(31)
+after(3)
+R.earn(rp, 11)
+store.faultKey = "player_31"
+store.rejectNext = 1
+r = call(R.data.flush, rp)
+after(2)
+check(r.value == false and db.player_31.denarii == nil, "a returned pre-write record cannot acknowledge a save")
+store.loseAck = 1
+r = call(R.data.flush, rp)
+after(7)
+check(r.value == true and db.player_31.denarii == 11, "retry reconciles a committed write after the acknowledgement was lost")
+
+-- PlayerRemoving waits behind a write, includes the intervening mutation, and freezes
+-- the same Player instance before a reconnect can inherit its pending profile.
+store.latency = 3
+R.earn(rp, 10)
+running = call(R.data.flush, rp)
+after(0.5)
+R.earn(rp, 20)
+R.leave(rp)
+local rpNew = R.join(31)
+check(not R.earn(rp, 1000) and R.profiles[rp] ~= nil, "leave freezes and retains the pending profile")
+after(4)
+check(running.value == true and db.player_31.denarii == 21 and R.profiles[rp] ~= nil, "PlayerRemoving waits for both writes")
+after(12)
+check(db.player_31.denarii == 41 and R.profiles[rp] == nil, "the release commits the newer revision before forgetting it")
+check(R.data.getStatus(rpNew) == "Loaded" and R.profiles[rpNew].denarii == 41, "a reconnect loads the committed profile under a fresh lease")
+store.latency = 1
+R.earn(rpNew, 8)
+store.faultKey = "player_31"
+store.rejectNext = 1
+R.leave(rpNew)
+after(3)
+check(R.profiles[rpNew] ~= nil and db.player_31.denarii == 41 and db.player_31.lock ~= nil, "an unconfirmed leave keeps its frozen revision pending")
+after(6)
+check(R.profiles[rpNew] == nil and db.player_31.denarii == 49 and db.player_31.lock == nil, "a pending leave retries and commits before cleanup")
+
+-- Cancellation after the destination already released its lease cannot resurrect the source.
+local handoff = R.join(32)
+after(3)
+R.earn(handoff, 4)
+store.faultKey = "player_32"
+store.loseAck = 1
+r = call(R.data.beginTransfer, handoff)
+after(7)
+check(r.value == true and db.player_32.lock == nil, "release acknowledgement can be reconciled too")
+local destination = B.join(32)
+after(3)
+B.earn(destination, 19)
+B.leave(destination)
+after(4)
+R.data.cancelTransfer(handoff)
+after(4)
+check(R.data.getStatus(handoff) == "Unsaved" and db.player_32.denarii == 23 and db.player_32.lock == nil, "cancel cannot reuse a release fence after the destination has finished")
+
+-- A timed-out caller cannot report success or overlap the in-flight write. The worker
+-- continues, and a later write commits the newer revision.
+local timeout = R.join(33)
+after(3)
+store.latency = 19
+R.earn(timeout, 3)
+local timedOut = call(R.data.flush, timeout)
+after(1)
+R.earn(timeout, 7)
+after(15)
+check(timedOut.done and timedOut.value == false and db.player_33.denarii == nil and store.inFlight.player_33 == 1, "flush deadline is not a durable acknowledgement")
+store.latency = 1
+r = call(R.data.flush, timeout)
+after(8)
+check(r.value == true and db.player_33.denarii == 10 and store.inFlight.player_33 == 0, "the next flush waits and commits the newest revision")
+
+local M = newServer("M", true)
+local mocked = M.join(34)
+after(1)
+check(M.data.getStatus(mocked) == "Mock" and M.data.isReady(mocked) and not M.data.canPersist(mocked), "Studio mock is playable without persistence")
+check(call(M.data.flush, mocked).value == false and call(M.data.beginTransfer, mocked).value == false and db.player_34 == nil, "Studio mock cannot claim a durable write or transfer")
+
+db.player_35 = { version = 13, denarii = 99 }
+local future = R.join(35)
+after(3)
+check(R.data.getStatus(future) == "Unsaved" and db.player_35.version == 13 and db.player_35.lock == nil, "an older schema cannot claim or overwrite a future profile")
+
+-- The real Arena return caller must respect an unconfirmed transfer and recheck readiness
+-- after preparing the rest of a group.
+local arenaReady, arenaEvents, teleported = {}, {}, {}
+local arenaMocks = {
+	CombatConfig = { Feedback = { Shop = "Shop" } },
+	Config = { ArenaRoleAttribute = "Role" },
+	EnvironmentConfig = { canTeleport = function() return true end },
+	MatchTypes = { Messages = { DATA_SAVE_FAILED = "Pending", TELEPORT_FAILED = "Failed" } },
+	PlayerDataService = {
+		beginTransfer = function(player) return arenaReady[player] ~= "denied" end,
+		isTransferPrepared = function(player) return arenaReady[player] == "prepared" end,
+		cancelTransfer = function() end,
+	},
+	Remotes = {
+		CombatFeedback = { FireClient = function() end },
+		MatchEvent = { FireClient = function(_, player, kind) arenaEvents[player] = kind end },
+	},
+	TeleportUtil = { toHub = function(players)
+		for _, player in players do table.insert(teleported, player) end
+	end },
+}
+local arenaNames = setmetatable({}, { __index = function(_, name) return name end })
+local arenaServices = { Players = {}, ReplicatedStorage = { Shared = arenaNames } }
+local arena = arenaSource({ Parent = { Parent = arenaNames } }, {
+	GetService = function(_, service) return arenaServices[service] end,
+}, function(name) return arenaMocks[name] end)
+local denied, expired, prepared = { Parent = true }, { Parent = true }, {
+	Parent = true,
+	GetAttribute = function() return "FIGHTER" end,
+}
+arenaReady[denied], arenaReady[expired], arenaReady[prepared] = "denied", "expired", "prepared"
+arena.send({ denied, expired, prepared })
+check(#teleported == 1 and teleported[1] == prepared, "Arena only teleports players with a confirmed, still-frozen transfer")
+check(arenaEvents[denied] == "ReturnFailed" and arenaEvents[expired] == "ReturnFailed", "failed and expired preparations show a retry")
+
+-- A clean, idle profile still has an active lease after the heartbeat.
+local H = newServer("H")
+local idle = H.join(36)
+after(3)
+r = call(H.data.flush, idle)
+after(3)
+local oldExpiry, oldEpoch = db.player_36.lock.expiresAt, db.player_36.leaseEpoch
+after(122)
+check(r.value == true and db.player_36.lock.expiresAt > oldExpiry and db.player_36.leaseEpoch == oldEpoch, "autosave renews a clean lease without changing ownership")
+
 -- 12. SHUTDOWN with a DataStore that doesn't answer: gives up before Roblox's 30 s
 local T = newServer("T")
 local t1 = T.join(21)
@@ -329,6 +502,7 @@ local started = now
 closed = call(T.close)
 after(28)
 check(closed.done and closed.at - started <= 26 and closed.at - started >= 24, "BindToClose stops waiting after 25 s")
+check(warnings[#warnings]:find("release unconfirmed") ~= nil and db.player_21.denarii == nil, "shutdown logs the unconfirmed profile instead of claiming success")
 
 realPrint("PASS: " .. checks .. " checks, PlayerDataService against the actual Luau source (mock DataStore, several servers).")
 '@
