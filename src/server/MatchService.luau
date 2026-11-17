@@ -14,10 +14,12 @@
 -- Also installs CombatRules (who may hit whom).
 
 local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local CombatConfig = require(ReplicatedStorage.Shared.CombatConfig)
 local Config = require(ReplicatedStorage.Shared.Config)
+local CurrencyConfig = require(ReplicatedStorage.Shared.CurrencyConfig)
 local GameModeDefinitions = require(ReplicatedStorage.Shared.GameModeDefinitions)
 local GameStates = require(ReplicatedStorage.Shared.GameStates)
 local OttiBossConfig = require(ReplicatedStorage.Shared.OttiBossConfig)
@@ -31,6 +33,7 @@ local CombatRules = require(script.Parent.CombatRules)
 local CombatUtil = require(script.Parent.CombatUtil)
 local DamageEffectsService = require(script.Parent.DamageEffectsService)
 local InventoryService = require(script.Parent.InventoryService)
+local PlayerDataService = require(script.Parent.PlayerDataService)
 local MatchSpawnService = require(script.Parent.MatchSpawnService)
 local MomentumService = require(script.Parent.MomentumService)
 local MomentumConfig = require(ReplicatedStorage.Shared.MomentumConfig)
@@ -61,6 +64,7 @@ export type Hooks = {
 
 type Match = {
 	id: number,
+	rewardId: string,
 	mode: ModeId,
 	participants: { Player },
 	alive: { [Player]: boolean }, -- zombie modes: currently fighting (not waiting to revive)
@@ -211,10 +215,9 @@ local function endZombieMatch(current: Match, victory: boolean, resultText: stri
 		current.rewarded = true
 		for _, player in current.participants do
 			if player.Parent then
-				InventoryService.addStat(player, "zombieRuns", 1)
-				if victory then
-					InventoryService.addStat(player, if current.mode == "Solo" then "soloVictories" else "coopVictories", 1)
-				end
+				local stats = { zombieRuns = 1 }
+				if victory then stats[if current.mode == "Solo" then "soloVictories" else "coopVictories"] = 1 end
+				task.spawn(AuraService.grant, player, current.rewardId, "result", 0, 0, stats)
 			end
 		end
 	end
@@ -286,35 +289,32 @@ end
 local startCampaignWave: (Match) -> ()
 
 -- Each victory unlocks the next chapter for this roster.
-local function onBossDefeated(current: Match, damageBy: { [Player]: number })
-	if match ~= current or current.ended or current.rewarded or current.bossRewarded then
+local function onBossDefeated(current: Match, damageBy: { [Player]: number }, stage: number)
+	if match ~= current or current.campaignStage ~= stage or current.ended or current.rewarded or current.bossRewarded then
 		return
 	end
 	current.bossRewarded = true
 	local rewards: { { player: Player, amount: number } } = {}
 	for _, player in current.participants do
-		if player.Parent then
+		if player.Parent or (damageBy[player] or 0) > 0 then
 			if current.mode == "Solo" then
 				table.insert(rewards, { player = player, amount = OttiBossConfig.SoloReward })
 			elseif current.alive[player] then
 				table.insert(rewards, { player = player, amount = OttiBossConfig.CoopSurvivorReward })
 			elseif (damageBy[player] or 0) > 0 then
 				table.insert(rewards, { player = player, amount = OttiBossConfig.CoopContributorReward })
-			end
-			if current.alive[player] or (damageBy[player] or 0) > 0 then
-				InventoryService.addStat(player, "bossDefeats", 1)
+			else
+				table.insert(rewards, { player = player, amount = 0 }) -- present, but no contribution: checkpoint only
 			end
 		end
 	end
-	AuraService.awardBossVictory(rewards)
-	local stage = current.campaignStage
 	local bossName = current.boss or Campaign.Bosses[stage]
 	local key = current.campaignKey
-	local saved = not key or Campaign.clearStage(key, stage)
+	local saved = AuraService.awardBossVictory(rewards, current.rewardId, stage, if key then current.mode else nil)
 	if match ~= current or current.ended or current.rewarded then return end
 	if not saved then
 		for _, player in current.participants do
-			message(player, "Campaign checkpoint could not be saved.", false)
+			if player.Parent then message(player, "Reward/checkpoint pending. Rejoin to recover confirmed claims.", false) end
 		end
 		endZombieMatch(current, true, string.upper(bossName) .. " DEFEATED")
 		return
@@ -351,6 +351,7 @@ local function startBossRound(current: Match)
 	ProjectileService.clear()
 	CombatEffects.clear() -- detached limbs, markers
 	local key = current.campaignKey
+	local stage = current.campaignStage
 	local firstAttempt = key ~= nil and Campaign.beginBoss(key, current.campaignStage)
 	if match ~= current or current.ended or current.rewarded then return end
 	OttiBossService.startEncounter({
@@ -383,14 +384,14 @@ local function startBossRound(current: Match)
 			end
 		end,
 		onDefeated = function(damageBy)
-			onBossDefeated(current, damageBy)
+			onBossDefeated(current, damageBy, stage)
 		end,
 	})
 end
 
 local function newMatch(mode: ModeId, players: { Player }): Match
 	nextMatchId += 1
-	return { id = nextMatchId, mode = mode, participants = players, alive = {}, ended = false, rewarded = false, bossRewarded = false, campaignStage = 1 }
+	return { id = nextMatchId, rewardId = HttpService:GenerateGUID(false), mode = mode, participants = players, alive = {}, ended = false, rewarded = false, bossRewarded = false, campaignStage = 1 }
 end
 
 -- Starts the zombie run for the admitted fighters ("Solo" or "Coop").
@@ -425,7 +426,6 @@ function MatchService.startZombies(mode: ModeId, players: { Player }, bossId: st
 
 	for index, player in valid do
 		current.alive[player] = true
-		AuraService.resetRunStats(player, if bossId then "BOSS_" .. string.upper(bossId) else mode)
 		PlayerCombatService.resetCombatState(player)
 		MomentumService.reset(player, if mode == "Coop" then MomentumConfig.Start.Coop else MomentumConfig.Start.Solo)
 		PlayerCombatService.refreshEquipment(player) -- the saved weapon, shield and armor
@@ -439,8 +439,19 @@ function MatchService.startZombies(mode: ModeId, players: { Player }, bossId: st
 	print(PREFIX, ("Match: %s started with %d player(s), %d shells"):format(mode, #valid, shellCount))
 
 	task.delay(0.5, function()
+		local deadline = os.clock() + 20
+		for _, player in valid do
+			while player.Parent and PlayerDataService.getStatus(player) == "Loading" and os.clock() < deadline do task.wait(0.1) end
+			if not player.Parent or not PlayerDataService.isReady(player) then
+				if match == current then cleanupMatch("profile not ready", false) end
+				return
+			end
+		end
 		if match ~= current or current.ended then
 			return
+		end
+		for _, player in valid do
+			AuraService.resetRunStats(player, if bossId then "BOSS_" .. string.upper(bossId) else mode, current.rewardId)
 		end
 		for _, player in livingParticipants(current) do
 			setState(player, GameStates.MatchActive)
@@ -451,7 +462,7 @@ function MatchService.startZombies(mode: ModeId, players: { Player }, bossId: st
 			return
 		end
 		local key = Campaign.key(mode, valid)
-		local stage = Campaign.loadStage(key)
+		local stage = Campaign.loadStage(key, valid, mode)
 		if match ~= current or current.ended or current.rewarded then return end
 		if stage == nil then
 			for _, player in valid do message(player, "Campaign progress could not be loaded. Try again.", false) end
@@ -494,14 +505,14 @@ startCampaignWave = function(current: Match)
 			end
 		end,
 		onRoundComplete = function(round: number)
-			if match ~= current then
+			if match ~= current or current.ended or current.campaignStage ~= stage then
 				return
 			end
 			setMatchState(GameStates.RoundComplete)
 			for _, player in livingParticipants(current) do
 				setState(player, GameStates.RoundComplete)
 			end
-			AuraService.awardRoundComplete(livingParticipants(current), current.id, (stage - 1) * RoundDefinitions.TotalRounds + round)
+			AuraService.awardRoundComplete(livingParticipants(current), current.rewardId, (stage - 1) * RoundDefinitions.TotalRounds + round)
 			reviveWaitingPlayers(current)
 			OttiSpectatorService.react("RoundComplete") -- applause from the imperial box
 		end,
@@ -509,6 +520,7 @@ startCampaignWave = function(current: Match)
 			startBossRound(current)
 		end,
 		onZombieDied = function(zombie, killer, damagers)
+			if match ~= current or current.ended or current.campaignStage ~= stage then return end
 			local assist = if mode == "Coop" then GameModeDefinitions.Coop.AssistRewardFraction else 0
 			local rewarded = {}
 			for _, player in damagers do
@@ -517,10 +529,7 @@ startCampaignWave = function(current: Match)
 				end
 			end
 			local validKiller = if killer and isParticipant(killer) then killer else nil
-			if validKiller then
-				InventoryService.addStat(validKiller, "zombieKills", 1)
-			end
-			AuraService.awardZombieKill(zombie.definition.Coins, validKiller, rewarded, assist)
+			AuraService.awardZombieKill(current.rewardId, tostring(stage) .. "/" .. zombie.rewardId, zombie.definition.Coins, validKiller, rewarded, assist)
 		end,
 	})
 end
@@ -529,58 +538,38 @@ end
 -- Team Battle
 ------------------------------------------------------------------------------------------
 
-local function onTeamMatchFinished(winner: string, reason: string)
+local function onTeamMatchFinished(winner: string, reason: string, matchId: number)
 	local current = match
-	if not current or current.mode ~= "TeamBattle" or current.ended then
+	if not current or current.id ~= matchId or current.mode ~= "TeamBattle" or current.ended or current.rewarded then return end
+	-- A disconnect or engine abort is not a sporting result. Only the rule modules can
+	-- finish by one of these known reasons.
+	local resultReasons = { time = true, timeout = true, ["sudden death"] = true, ["target reached"] = true, rounds = true, ["round limit"] = true }
+	if not resultReasons[reason] or (winner ~= "Red" and winner ~= "Blue" and winner ~= "Draw") then
+		cleanupMatch("technical abort: " .. reason, false)
 		return
 	end
+	current.rewarded = true
 	local red, blue = TeamBattleService.getScore()
 	showResult(if winner == "Draw" then ("DRAW  %d - %d"):format(red, blue) else ("%s GLADIATORS WIN  %d - %d"):format(winner:upper(), red, blue))
-	local winners, losers, draws = {}, {}, {}
-	for _, player in TeamBattleService.getParticipants() do
-		if player.Parent then
-			if winner == "Draw" then
-				table.insert(draws, player)
-				setState(player, GameStates.MatchComplete)
-			elseif TeamBattleService.teamOf(player) == winner then
-				table.insert(winners, player)
-				setState(player, GameStates.Victory)
-			else
-				table.insert(losers, player)
-				setState(player, GameStates.MatchComplete)
-			end
-		end
-	end
-	if not current.rewarded then
-		current.rewarded = true
-		local common = TeamModeDefinitions.Common
-		AuraService.awardMatchResult(winners, losers, common.WinAura, common.LoseAura)
-		if #draws > 0 then
-			AuraService.awardMatchResult(draws, {}, common.DrawAura, 0)
-		end
-		for _, player in TeamBattleService.getParticipants() do
-			if player.Parent then
-				InventoryService.addStat(player, "teamMatches", 1)
-				InventoryService.addStat(player, "eliminations", tonumber(player:GetAttribute(Config.EliminationsAttribute)) or 0)
-				InventoryService.addStat(player, "deaths", tonumber(player:GetAttribute(Config.DeathsAttribute)) or 0)
-			end
-		end
-		for _, player in winners do
-			InventoryService.addStat(player, "teamVictories", 1)
-		end
+	local common = TeamModeDefinitions.Common
+	for _, player in current.participants do
+		local won = winner ~= "Draw" and TeamBattleService.teamOf(player) == winner
+		local amount = if winner == "Draw" then common.DrawAura elseif won then common.WinAura else common.LoseAura
+		local stats = {
+			teamMatches = 1,
+			eliminations = tonumber(player:GetAttribute(Config.EliminationsAttribute)) or 0,
+			deaths = tonumber(player:GetAttribute(Config.DeathsAttribute)) or 0,
+		}
+		if won then stats.teamVictories = 1 end
+		setState(player, if won then GameStates.Victory else GameStates.MatchComplete)
+		task.spawn(AuraService.grant, player, current.rewardId, "result", amount, CurrencyConfig.denariiFor(amount), stats)
 	end
 	setMatchState(GameStates.Victory)
-	if arenaFolder then
-		VictoryService.play(arenaFolder)
-	end
-	print(PREFIX, ("Team Battle result: %s (%s)"):format(winner, reason))
-	task.delay(TeamModeDefinitions.Common.ResultSeconds, function()
-		if match == current then
-			cleanupMatch("team battle finished", winner ~= "Draw")
-		end
+	if arenaFolder then VictoryService.play(arenaFolder) end
+	task.delay(common.ResultSeconds, function()
+		if match == current then cleanupMatch("team battle finished", winner ~= "Draw") end
 	end)
 end
-
 -- Team Battle start (1v1 .. 4v4). Steps, all under one match:
 --   teams assigned -> COUNTDOWN -> protected team spawns behind closed barriers -> arena
 --   countdown -> MATCH_ACTIVE, barriers open. The submode rules live in TeamBattleService.
@@ -619,7 +608,7 @@ function MatchService.startTeams(red: { Player }, blue: { Player }, subMode: str
 	for _, entry in teams do
 		for index, player in entry.players do
 			current.alive[player] = true
-			AuraService.resetRunStats(player, subMode)
+			AuraService.resetRunStats(player, subMode, current.rewardId)
 			MomentumService.reset(player, if subMode == "ELIMINATION" then MomentumConfig.Start.EliminationRound else MomentumConfig.Start.TeamBattle)
 			PlayerMatchStateService.assign(player, current.id, "TeamBattle", entry.team, entry.zone)
 			player:SetAttribute(Config.ArenaRoleAttribute, "FIGHTER")
@@ -712,10 +701,7 @@ local function onPlayerRemoving(player: Player)
 		TeamBattleService.removeParticipant(player)
 	else
 		current.alive[player] = false
-		local index = table.find(current.participants, player)
-		if index then
-			table.remove(current.participants, index)
-		end
+		-- Retain the original roster so a disconnected boss contributor can receive an inbox claim.
 		publishPlayers()
 		if #livingParticipants(current) == 0 then
 			cleanupMatch("all fighters left", false)

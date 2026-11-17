@@ -62,7 +62,7 @@ local function newPlayer(id)
 	return p
 end
 '@
-foreach ($name in 'ArmorDefinitions','HelmetDefinitions','Config','CurrencyConfig','GladiatorLevelDefinitions','PlayerDataSchema','ShieldDefinitions','WeaponDefinitions','SpecialMoveDefinitions','GameStates','WeaponBalanceConfig','WeaponSpecialDefinitions','WeaponAttackDefinitions','SpecialPracticeDefinitions','ForgeDefinitions') {
+foreach ($name in 'ArmorDefinitions','HelmetDefinitions','Config','CurrencyConfig','GladiatorLevelDefinitions','PlayerDataSchema','ShieldDefinitions','WeaponDefinitions','SpecialMoveDefinitions','GameStates','WeaponBalanceConfig','WeaponSpecialDefinitions','WeaponAttackDefinitions','SpecialPracticeDefinitions','ForgeDefinitions','RewardTypes') {
     $harness += Wrap "Shared/$name" "src/shared/$name.luau"
 }
 foreach ($name in 'InventoryService','LoadoutRequestService','RateLimiter') {
@@ -136,7 +136,7 @@ check(Weapons.ById[Weapons.Starter].LevelRequired == 1 and Shields.ById[Shields.
 check(math.abs(Balance.pveFactor("BattleAxe") - (1 + 4 * Balance.PvELevelStep)) < 1e-9, "PvE damage unchanged by the new level numbers (tier 5)")
 
 ------------------------------------------------------------------ migration of older profiles
-check(Schema.Version == 13, "schema v13")
+check(Schema.Version == 14, "schema v14")
 local v6 = { version = 6, auraPoints = 3200, denarii = 540, ownedWeapons = "RustyGladius,BattleAxe", ownedShields = "WoodenBuckler,ThraexShield", ownedArmor = "RecruitLeather,ChampionArmor", equippedWeapon = "BattleAxe", equippedShield = "ThraexShield", equippedArmor = "ChampionArmor", preferences = { HudMode = "Minimal" }, stats = { zombieKills = 40 } }
 Inv.migrateProfile(v6)
 check(v6.auraPoints == 3200 and v6.denarii == 540, "v6 keeps Aura and Denarii")
@@ -148,7 +148,7 @@ Inv.migrateProfile(v6)
 check(v6.auraPoints == 3200 and v6.denarii == 540 and v6.earnings.aura == 0 and v6.earnings.since == since, "migration repeatable without double values")
 local v7 = { version = 7, specialAttempts = { ["RustyGladius:Gladius_SpecCleave"] = 12 } }
 Inv.migrateProfile(v7)
-check(v7.version == 13 and v7.specialAttempts["RustyGladius:Gladius_SpecCleave"] == 12 and v7.earnings.complete == false, "v7 keeps special practice and starts earnings tracking")
+check(v7.version == 14 and v7.specialAttempts["RustyGladius:Gladius_SpecCleave"] == 12 and v7.earnings.complete == false, "v7 keeps special practice and starts earnings tracking")
 local v4 = { version = 4, auraPoints = 300, ownedWeapons = "RustyGladius,LegionSword", ownedShields = "", ownedArmor = "" }
 Inv.migrateProfile(v4)
 check(v4.denarii == 300 and v4.auraPoints == 380 and v4.earnings.complete == false, "v4 -> v8 keeps the Denarii conversion")
@@ -306,6 +306,28 @@ Inv.addActiveSeconds(reconnect, 5)
 Inv.applyPurchase(reconnect, { denarii = 100 }, "TRANSFER-RECEIPT")
 check(not Inv.spendDenarii(reconnect, 1) and revisions == 1 and Inv.getDenarii(reconnect) == 87
 	and not Inv.hasReceipt(reconnect, "TRANSFER-RECEIPT"), "the transfer guard freezes balances, activity and receipts")
+frozen = false
+Inv.beginBattle(reconnect, "Coop", "match-A")
+local beforeReward = Inv.serialize(reconnect)
+local claim = { id = "match-A/boss/1/p4", matchId = "match-A", aura = 50, denarii = 75,
+	stats = { bossDefeats = 1 }, campaign = "Coop", stage = 1 }
+local applied, isNew = Inv.applyReward(reconnect, claim)
+local replayed, replayNew = Inv.applyReward(reconnect, claim)
+local withReward = Inv.serialize(reconnect)
+check(applied and isNew and replayed and not replayNew and withReward.auraPoints == beforeReward.auraPoints + 50
+	and withReward.denarii == beforeReward.denarii + 75 and withReward.stats.bossDefeats == (beforeReward.stats.bossDefeats or 0) + 1
+	and withReward.rewardIds[claim.id] and withReward.campaignClears.Coop["1"] and Inv.campaignStage(reconnect, "Coop") == 2,
+	"one inventory mutation pairs the benefit, statistics, evidence and checkpoint")
+local restoredRewards = newPlayer(101)
+Inv.load(restoredRewards, withReward, 0, 0)
+local restored, restoredNew = Inv.applyReward(restoredRewards, claim)
+check(restored and not restoredNew and Inv.serialize(restoredRewards).denarii == withReward.denarii,
+	"serialized reward evidence survives a new session")
+Inv.applyReward(restoredRewards, { id = "chapter3", aura = 0, denarii = 0, stats = {}, campaign = "Coop", stage = 3 })
+check(Inv.campaignStage(restoredRewards, "Coop") == 2 and Inv.campaignStage(restoredRewards, "Solo") == 1,
+	"an out-of-order chapter never skips a missing chapter or crosses modes")
+Inv.applyReward(restoredRewards, { id = "chapter2", aura = 0, denarii = 0, stats = {}, campaign = "Coop", stage = 2 })
+check(Inv.campaignStage(restoredRewards, "Coop") == 3, "recovery may replay chapters in any order")
 
 print("PASS: " .. checks .. " checks against the actual Luau sources (mock Roblox services).")
 '@

@@ -54,7 +54,7 @@ local function newPlayer(id)
 	return p
 end
 '@
-foreach ($name in 'ArmorDefinitions','HelmetDefinitions','Config','CurrencyConfig','GladiatorLevelDefinitions','PlayerDataSchema','ShieldDefinitions','WeaponDefinitions','SpecialMoveDefinitions','GameStates','WeaponBalanceConfig','WeaponSpecialDefinitions','WeaponAttackDefinitions','SpecialPracticeDefinitions','ForgeDefinitions','OracleDefinitions') {
+foreach ($name in 'ArmorDefinitions','HelmetDefinitions','Config','CurrencyConfig','GladiatorLevelDefinitions','PlayerDataSchema','ShieldDefinitions','WeaponDefinitions','SpecialMoveDefinitions','GameStates','WeaponBalanceConfig','WeaponSpecialDefinitions','WeaponAttackDefinitions','SpecialPracticeDefinitions','ForgeDefinitions','RewardTypes','OracleDefinitions') {
     $harness += Wrap "Shared/$name" "src/shared/$name.luau"
 }
 $harness += Wrap "Server/InventoryService" "src/server/InventoryService.luau"
@@ -329,7 +329,7 @@ check(not r.ok and Inv.getDenarii(p) == balance, "an expired offer is refused")
 -- SAVE DATA: copies, jobs, wear, designs, credits, receipts survive a rejoin / teleport (serialized)
 Inv.addWear(p, starter, 3)
 local saved = Inv.serialize(p)
-check(saved.version == 13 and saved.ownedHelmets:find("DragonHead") and saved.shieldDesigns[shieldId].Trim == "Gold" and #saved.weaponCopies[starter] == 2 and saved.weaponCopies[starter][1].design.Grip == "Gold" and saved.receipts["R-1"], "copies, designs and receipts in the saved profile (v13)")
+check(saved.version == 14 and saved.ownedHelmets:find("DragonHead") and saved.shieldDesigns[shieldId].Trim == "Gold" and #saved.weaponCopies[starter] == 2 and saved.weaponCopies[starter][1].design.Grip == "Gold" and saved.receipts["R-1"], "copies, designs and receipts in the saved profile (v14)")
 local q = newPlayer(2)
 Inv.load(q, saved, 0, 0, nil)
 check(#Inv.copies(q, starter) == 2 and Inv.forgeLevel(q, starter) == Inv.forgeLevel(p, starter) and Inv.hasReceipt(q, "R-1") and Inv.shieldDesign(q, shieldId).Paint == "LegionRed" and Inv.shieldDesign(q, shieldId).Boss == "Silver", "all of it after rejoin")
@@ -360,7 +360,7 @@ v9.version, v9.weaponCopies, v9.activeCopy, v9.receipts = 9, nil, nil, nil
 v9.forge = { [starter] = 1 }
 local o = newPlayer(3)
 Inv.load(o, v9, 0, 0, nil)
-check(#Inv.copies(o, starter) == 1 and Inv.forgeLevel(o, starter) == 1 and Inv.serialize(o).version == 13 and Inv.serialize(o).forge == nil, "v9 stage moves onto the first copy")
+check(#Inv.copies(o, starter) == 1 and Inv.forgeLevel(o, starter) == 1 and Inv.serialize(o).version == 14 and Inv.serialize(o).forge == nil, "v9 stage moves onto the first copy")
 local junk = table.clone(saved)
 junk.weaponCopies = { [starter] = { { uid = "a", forge = 9, wear = 400, design = { Grip = "Diamond" }, job = { kind = "Melt", untilTime = 1 } }, { uid = "a", forge = 1 } }, Fake = { { uid = "f" } } }
 local j = newPlayer(4)

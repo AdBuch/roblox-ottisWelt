@@ -1,8 +1,11 @@
 --!strict
--- Checkpoints belong to the exact roster, independent of temporary party IDs and join order.
+-- Legacy exact-roster checkpoints are imported once into personal mode checkpoints.
 local DataStoreService = game:GetService("DataStoreService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local EnvironmentConfig = require(ReplicatedStorage.Shared.EnvironmentConfig)
+local RewardTypes = require(ReplicatedStorage.Shared.RewardTypes)
+local Recovery = require(script.Parent.RewardRecoveryService)
+local InventoryService = require(script.Parent.InventoryService)
 
 type Progress = { cleared: number, attempts: { [string]: number } }
 local Campaign = {}
@@ -67,7 +70,7 @@ local function update(key: string, transform: (Progress) -> ()): Progress?
 	return nil
 end
 
-function Campaign.loadStage(key: string): number?
+function Campaign.loadStage(key: string, players: { Player }?, mode: string?): number?
 	local ok, raw = pcall(function()
 		return if EnvironmentConfig.useMockData() then mock[key] else store():GetAsync(key)
 	end)
@@ -75,7 +78,20 @@ function Campaign.loadStage(key: string): number?
 		warn("[ArenaCampaign] checkpoint read failed:", raw)
 		return nil
 	end
-	return math.min(normalize(raw).cleared + 1, #Campaign.Bosses)
+	local legacy = normalize(raw).cleared
+	if not players or not mode then return math.min(legacy + 1, #Campaign.Bosses) end
+	local stage = #Campaign.Bosses
+	for _, player in players do
+		for chapter = 1, legacy do
+			if not Recovery.submit(player.UserId, {
+				id = RewardTypes.id("legacy-" .. key, "chapter/" .. chapter, player.UserId),
+				aura = 0, denarii = 0, stats = {}, campaign = mode, stage = chapter,
+			}) then return nil end
+		end
+		if not Recovery.recover(player) then return nil end
+		stage = math.min(stage, InventoryService.campaignStage(player, mode))
+	end
+	return stage
 end
 
 function Campaign.beginBoss(key: string, stage: number): boolean
@@ -83,7 +99,7 @@ function Campaign.beginBoss(key: string, stage: number): boolean
 	local data = update(key, function(progress)
 		progress.attempts[boss] = math.min(9999, (progress.attempts[boss] or 0) + 1)
 	end)
-	return data == nil or data.attempts[boss] == 1
+	return data ~= nil and data.attempts[boss] == 1
 end
 
 function Campaign.clearStage(key: string, stage: number): boolean
