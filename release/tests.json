@@ -1,0 +1,17 @@
+{
+  "$comment": "The local Luau test suites (scripts/test-*.ps1) the release build records in its manifest. `required: true` suites must pass for a release build; the others are run and recorded but do not block (their state is a release finding, see docs/RELEASE_BASELINE.md).",
+  "suites": [
+    { "script": "scripts/test-arena-campaign.ps1", "required": true },
+    { "script": "scripts/test-combat-animation.ps1", "required": true, "args": { "CompilePath": "luau-compile" } },
+    { "script": "scripts/test-hero-combat.ps1", "required": true },
+    { "script": "scripts/test-lobby-ring.ps1", "required": true },
+    { "script": "scripts/test-pad-teams.ps1", "required": true },
+    { "script": "scripts/test-passive-momentum.ps1", "required": true },
+    { "script": "scripts/test-player-data.ps1", "required": true },
+    { "script": "scripts/test-progression.ps1", "required": true },
+    { "script": "scripts/test-rome-services.ps1", "required": true },
+    { "script": "scripts/test-specials.ps1", "required": true },
+    { "script": "scripts/test-rome-layout.ps1", "required": false, "reason": "red on the release baseline: six layout deviations (docs/RELEASE_BASELINE.md)" },
+    { "script": "scripts/test-rome-geometry.ps1", "required": false, "reason": "red on the release baseline: four geometry deviations, three from the opened training yards (docs/RELEASE_BASELINE.md)" }
+  ]
+}

@@ -23,7 +23,9 @@ gameplay outcome (damage, hits, combos, Aura, ownership, scores, victories, boss
 default.project.json                 = the Hub (start place); kept so `rojo serve` keeps working
 places/hub.project.json              OTTI HUB  (shared code + src/hub, PlaceRole "Hub")
 places/arena.project.json            COLOSSEUM ARENA (shared code + src/arena, PlaceRole "Arena")
-scripts/build-places.ps1 / .sh       builds build/OttiHub.rbxlx and build/OttiArena.rbxlx
+scripts/build-places.ps1 / .sh       builds build/OttiHub.rbxlx and build/OttiArena.rbxlx (quick local build)
+scripts/release/                     release pipeline: validate -> build + manifest -> publish (docs/RELEASE_PROCESS.md)
+release/targets.json, tools.json     allowlisted publish targets (DEV / STAGING / PROD) and pinned tool versions
 src/hub/PlaceRole, src/arena/PlaceRole   -> ReplicatedStorage.Shared.PlaceRole (build-time role)
 src/hub/server/   -> ServerScriptService.Server.Place  (Hub only)
   Main.server                        builds the hero lobbies, starts data, shops, training, Hub matchmaking
@@ -909,6 +911,7 @@ With Place IDs = 0 or in Studio nothing is teleported (and nothing pretends to b
 - **Prompts don't react to E:** interactions use **F** (E is the spectator "next" key).
 - **"Attack … rejected: …" warnings:** temporary diagnostics, switch off with `DebugRejectedAttacks = false` in `CombatConfig`.
 - **Build check:** `scripts/build-places.ps1` must build both `build/OttiHub.rbxlx` and `build/OttiArena.rbxlx`.
+- **Releases:** only through `scripts/release/` (validate, build with manifest, publish with rebuild and hash check); targets, rollback and the manual approval steps are in [docs/RELEASE_PROCESS.md](docs/RELEASE_PROCESS.md).
 - **"This place was not built as the Hub / Arena":** the Studio window is synced with the wrong project file (each place needs its own `rojo serve` port).
 - **Everything says STUDIO MOCK in a published place:** the Place IDs in `ExperienceConfig` are still 0 or belong to another environment.
 - **Players land in a public Arena server:** they are sent back to the Hub automatically (matches only run on reserved servers).

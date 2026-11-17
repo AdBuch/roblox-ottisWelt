@@ -1,0 +1,45 @@
+{
+  "$comment": "Publish targets of the Otti Colosseum experience: the ALLOWLIST of where a build may go. A target that is not listed here, or whose ids are null / 0 / malformed, is refused before anything is built or uploaded (scripts/release/Validate-Release.ps1). Ids are strings so no tool rounds them. DEV and PROD must match src/shared/ExperienceConfig.luau; STAGING is a separate experience that runs with the DEV environment of ExperienceConfig (its place ids are not configured there, so its servers select DEV data and memory names inside their own universe).",
+  "schemaVersion": 1,
+  "targets": {
+    "DEV": {
+      "description": "Development experience; private test accounts only",
+      "universeId": "10771565873",
+      "hub": { "placeId": "127694690386807", "name": "OTTI HUB (DEV)" },
+      "arena": { "placeId": "70661230851944", "name": "COLOSSEUM ARENA (DEV)" },
+      "environment": "DEV",
+      "dataStoreName": "OttiPlayerData_DEV_v1",
+      "memoryStoreNamespace": "OttiMatches_DEV",
+      "publishAllowed": true,
+      "requiresApproval": false,
+      "requireCommitOnOriginMain": false,
+      "apiKeyEnv": "OTTI_OPEN_CLOUD_API_KEY_DEV"
+    },
+    "STAGING": {
+      "description": "Pre-release experience for the manual acceptance with several test accounts. NOT CONFIGURED: fill the ids of a separate Roblox experience before the first use.",
+      "universeId": null,
+      "hub": { "placeId": null, "name": "OTTI HUB (STAGING)" },
+      "arena": { "placeId": null, "name": "COLOSSEUM ARENA (STAGING)" },
+      "environment": "DEV",
+      "dataStoreName": "OttiPlayerData_DEV_v1",
+      "memoryStoreNamespace": "OttiMatches_DEV",
+      "publishAllowed": false,
+      "requiresApproval": true,
+      "requireCommitOnOriginMain": true,
+      "apiKeyEnv": "OTTI_OPEN_CLOUD_API_KEY_STAGING"
+    },
+    "PROD": {
+      "description": "The public experience. NOT CONFIGURED: the PROD place ids are 0 in ExperienceConfig and unknown here (docs/RELEASE_BASELINE.md, release blocker).",
+      "universeId": null,
+      "hub": { "placeId": null, "name": "OTTI HUB (PROD)" },
+      "arena": { "placeId": null, "name": "COLOSSEUM ARENA (PROD)" },
+      "environment": "PROD",
+      "dataStoreName": "OttiPlayerData_PROD_v1",
+      "memoryStoreNamespace": "OttiMatches_PROD",
+      "publishAllowed": false,
+      "requiresApproval": true,
+      "requireCommitOnOriginMain": true,
+      "apiKeyEnv": "OTTI_OPEN_CLOUD_API_KEY_PROD"
+    }
+  }
+}

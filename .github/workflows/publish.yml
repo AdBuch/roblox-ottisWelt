@@ -1,0 +1,99 @@
+# MANUAL publish of a validated commit to ONE allowlisted target. Never runs on its own:
+# only workflow_dispatch, and the job runs in a GitHub environment named like the target
+# (DEV / STAGING / PROD), whose protection rules (required reviewers) are the approval gate.
+# The Open Cloud API key is the environment secret named in release/targets.json (apiKeyEnv);
+# it reaches the script only as an environment variable and is never echoed.
+#
+# The job validates, rebuilds both places and compares them with a fresh manifest, then
+# either SAVES versions (default) or PUBLISHES them (mode=publish). A partial failure
+# between the two uploads leaves the publish log in the kept artefact; see
+# docs/RELEASE_PROCESS.md for the retry and rollback steps.
+#
+# Requirements before the first run (not created by this repository):
+#   * GitHub environments DEV, STAGING, PROD with required reviewers for STAGING and PROD
+#   * environment secrets OTTI_OPEN_CLOUD_API_KEY_DEV / _STAGING / _PROD (Open Cloud API keys
+#     with universe-places:write on exactly that experience)
+#   * release/targets.json filled in for the target (ids), publishAllowed true
+name: publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Publish target (must be allowlisted in release/targets.json)'
+        required: true
+        type: choice
+        options: [DEV, STAGING, PROD]
+      mode:
+        description: 'save = new saved versions only (nothing live); publish = go live'
+        required: true
+        type: choice
+        options: [save, publish]
+        default: save
+      approval_reference:
+        description: 'Who approved this release and where it is recorded (required for STAGING and PROD)'
+        required: false
+        type: string
+      only:
+        description: 'Both, or retry one place after a partial failure'
+        required: true
+        type: choice
+        options: [Both, Hub, Arena]
+        default: Both
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    environment: ${{ inputs.target }}
+    steps:
+      - name: Checkout the commit to publish
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned tools
+        shell: powershell
+        run: .\scripts\release\Install-Tools.ps1 -Tool rojo
+
+      - name: Validate, build both places, write the manifest
+        shell: powershell
+        run: .\scripts\release\Build-Release.ps1 -Target ${{ inputs.target }} -OutputDir .\build\release\publish
+
+      - name: Dry run (what goes where)
+        shell: powershell
+        run: .\scripts\release\Publish-Release.ps1 -ManifestPath .\build\release\publish\manifest.json -Target ${{ inputs.target }} -DryRun -Only ${{ inputs.only }}
+
+      - name: Upload (save or publish)
+        shell: powershell
+        env:
+          OTTI_OPEN_CLOUD_API_KEY_DEV: ${{ secrets.OTTI_OPEN_CLOUD_API_KEY_DEV }}
+          OTTI_OPEN_CLOUD_API_KEY_STAGING: ${{ secrets.OTTI_OPEN_CLOUD_API_KEY_STAGING }}
+          OTTI_OPEN_CLOUD_API_KEY_PROD: ${{ secrets.OTTI_OPEN_CLOUD_API_KEY_PROD }}
+          CI: 'true'
+        run: |
+          $publish = if ('${{ inputs.mode }}' -eq 'publish') { '-Publish' } else { '' }
+          $approval = '${{ inputs.approval_reference }}'
+          $params = @('-ManifestPath', '.\build\release\publish\manifest.json', '-Target', '${{ inputs.target }}', '-Only', '${{ inputs.only }}')
+          if ($publish) { $params += '-Publish' }
+          if ($approval) { $params += @('-ApprovalReference', $approval) }
+          & .\scripts\release\Publish-Release.ps1 @params
+          exit $LASTEXITCODE
+
+      - name: Keep manifest and publish log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: publish-${{ inputs.target }}-${{ github.sha }}-${{ github.run_id }}
+          path: |
+            build/release/publish/manifest.json
+            build/release/publish/summary.txt
+            build/release/publish/publish-log.jsonl
+          if-no-files-found: warn
+          retention-days: 90
