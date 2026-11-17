@@ -1,38 +1,39 @@
 --!strict
--- Server-side teleports (TeleportService:TeleportAsync, current API) with retries.
---   toReserved(players, accessCode, payload, onFailed)  Hub -> reserved Arena server
---   toHub(players, payload, onFailed)                    Arena -> a public Hub server
--- The access code only ever lives in TeleportOptions on the server. TeleportData (payload) is
--- visible to the client: it never contains secrets and the destination never trusts it.
--- Failures (TeleportAsync errors and TeleportInitFailed) are retried per player
--- ExperienceConfig.Teleport.Retries times; then `onFailed(player, messageCode)` runs so the caller
--- can release reservations, unlock parties and show a compact message.
+-- Transfer ownership, profile preparation and Roblox retries live in one source-side flow.
 
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
 
+local Config = require(ReplicatedStorage.Shared.Config)
 local EnvironmentConfig = require(ReplicatedStorage.Shared.EnvironmentConfig)
 local ExperienceConfig = require(ReplicatedStorage.Shared.ExperienceConfig)
 local MatchTypes = require(ReplicatedStorage.Shared.MatchTypes)
-
-local PREFIX = "[OttiArena][Teleport]"
+local PlayerDataService = require(script.Parent.PlayerDataService)
+local Remotes = require(script.Parent.Remotes)
 
 export type FailureHandler = (player: Player, messageCode: string) -> ()
 
-type Pending = {
+type Failure = { result: Enum.TeleportResult?, options: TeleportOptions? }
+type Attempt = { id: string, placeId: number }
+type Transfer = {
 	placeId: number,
-	options: TeleportOptions,
+	payload: MatchTypes.TeleportPayload,
+	deadline: number,
 	retriesLeft: number,
 	delay: number,
-	onFailed: FailureHandler?,
-	token: number,
+	onFailed: FailureHandler,
+	preparing: boolean,
+	attempt: Attempt?,
+	failure: Failure?,
 }
 
 local TeleportUtil = {}
-
-local pending: { [Player]: Pending } = {}
-local tokenCounter = 0
+local pending: { [Player]: Transfer } = {}
+local inFlight: { [Player]: Attempt } = {}
+-- Roblox offers no cancellation. Keep ambiguous departures from starting a competing flight.
+local uncertain: { [Player]: Attempt } = {}
 
 local function codeFor(result: Enum.TeleportResult?): string
 	if result == Enum.TeleportResult.GameFull then
@@ -45,108 +46,260 @@ local function codeFor(result: Enum.TeleportResult?): string
 	return "TELEPORT_FAILED"
 end
 
-local function retryable(result: Enum.TeleportResult?): boolean
-	return result == nil or result == Enum.TeleportResult.Failure or result == Enum.TeleportResult.Flooded or result == Enum.TeleportResult.IsTeleporting
-end
-
-local send: (players: { Player }, placeId: number, options: TeleportOptions) -> boolean
-
-local function fail(player: Player, entry: Pending, result: Enum.TeleportResult?)
+local function finish(player: Player, entry: Transfer, code: string)
 	if pending[player] ~= entry then
 		return
 	end
-	if entry.retriesLeft > 0 and retryable(result) and player.Parent then
-		entry.retriesLeft -= 1
-		task.delay(entry.delay, function()
-			if pending[player] == entry and player.Parent then
-				send({ player }, entry.placeId, entry.options)
-			end
-		end)
+	pending[player] = nil
+	if not player.Parent then
 		return
 	end
-	pending[player] = nil
-	if entry.onFailed and player.Parent then
-		task.spawn(entry.onFailed, player, codeFor(result))
+	if entry.preparing then
+		PlayerDataService.cancelTransfer(player)
 	end
+	player:SetAttribute(Config.TeleportStateAttribute, "Failed")
+	Remotes.MatchEvent:FireClient(player, "Teleport", "Failed", code)
+	task.spawn(entry.onFailed, player, code)
 end
 
-send = function(players: { Player }, placeId: number, options: TeleportOptions): boolean
-	local ok, err = pcall(function()
-		TeleportService:TeleportAsync(placeId, players, options)
+local send: (players: { Player }, entries: { [Player]: Transfer }, routing: TeleportOptions) -> ()
+
+local function handleFailure(player: Player, entry: Transfer, routing: TeleportOptions)
+	local failure = entry.failure
+	if pending[player] ~= entry or inFlight[player] or not failure then
+		return
+	end
+	entry.failure = nil
+	local result = failure.result
+	if result == Enum.TeleportResult.IsTeleporting then
+		return -- Roblox still has a departure in progress; wait for its outcome or the watchdog.
+	end
+	entry.attempt = nil
+	local retryable = result == nil or result == Enum.TeleportResult.Failure or result == Enum.TeleportResult.Flooded
+	if not retryable or entry.retriesLeft <= 0 then
+		finish(player, entry, codeFor(result))
+		return
+	end
+	entry.retriesLeft -= 1
+	task.delay(entry.delay, function()
+		send({ player }, { [player] = entry }, failure.options or routing)
 	end)
-	if not ok then
-		warn(PREFIX, "TeleportAsync failed:", tostring(err))
-		for _, player in players do
-			local entry = pending[player]
-			if entry then
-				fail(player, entry, nil)
+end
+
+send = function(players: { Player }, entries: { [Player]: Transfer }, routing: TeleportOptions)
+	local valid: { Player } = {}
+	local attempt: Attempt? = nil
+	local options = Instance.new("TeleportOptions")
+	options.ReservedServerAccessCode = routing.ReservedServerAccessCode
+	options.ServerInstanceId = routing.ServerInstanceId
+	for _, player in players do
+		local entry = entries[player]
+		if pending[player] ~= entry or not player.Parent or inFlight[player] or uncertain[player] then
+			continue
+		end
+		if os.clock() >= entry.deadline then
+			finish(player, entry, "TELEPORT_TIMEOUT")
+		elseif not PlayerDataService.isTransferPrepared(player) then
+			finish(player, entry, "DATA_SAVE_FAILED")
+		else
+			if not attempt then
+				attempt = { id = HttpService:GenerateGUID(false), placeId = entry.placeId }
+				local hint = entry.payload
+				-- Whitelist wire fields. The attempt ID correlates Roblox callbacks on the source.
+				options:SetTeleportData({
+					attemptId = attempt.id,
+					kind = hint.kind,
+					matchId = hint.matchId,
+					message = hint.message,
+					fromSpectating = hint.fromSpectating,
+				})
+			end
+			entry.attempt = attempt
+			inFlight[player] = attempt
+			table.insert(valid, player)
+			if player:GetAttribute(Config.TeleportStateAttribute) ~= "Travelling" then
+				player:SetAttribute(Config.TeleportStateAttribute, "Travelling")
+				Remotes.MatchEvent:FireClient(player, "Teleport", if entry.payload.kind == "ToHub" then "Returning" else "Travelling", entry.payload.mode)
 			end
 		end
 	end
-	return ok
-end
-
-local function start(players: { Player }, placeId: number, options: TeleportOptions, retries: number, delay: number, onFailed: FailureHandler?): boolean
-	local valid = {}
-	for _, player in players do
-		if player.Parent then
-			tokenCounter += 1
-			pending[player] = { placeId = placeId, options = options, retriesLeft = retries, delay = delay, onFailed = onFailed, token = tokenCounter }
-			table.insert(valid, player)
+	if not attempt then
+		return
+	end
+	local ok = pcall(function()
+		TeleportService:TeleportAsync(attempt.placeId, valid, options)
+	end)
+	for _, player in valid do
+		if inFlight[player] == attempt then
+			inFlight[player] = nil
+		end
+		if not ok and uncertain[player] == attempt then
+			uncertain[player] = nil
+		end
+		local entry = entries[player]
+		if pending[player] == entry and entry.attempt == attempt then
+			if not ok and not entry.failure then
+				entry.failure = {}
+			end
+			handleFailure(player, entry, routing)
 		end
 	end
-	if #valid == 0 then
-		return false
-	end
-	return send(valid, placeId, options)
 end
 
--- Hub -> reserved Arena server. Returns false in mock mode (nothing is sent).
-function TeleportUtil.toReserved(players: { Player }, accessCode: string, payload: MatchTypes.TeleportPayload, onFailed: FailureHandler?): boolean
-	if not EnvironmentConfig.canTeleport() then
-		return false
+local function start(
+	players: { Player },
+	placeId: number,
+	payload: MatchTypes.TeleportPayload,
+	resolveAccessCode: (() -> string?)?,
+	retries: number,
+	delay: number,
+	onFailed: FailureHandler
+): { Player }
+	local entries: { [Player]: Transfer } = {}
+	local accepted: { Player } = {}
+	local deadline = os.clock() + ExperienceConfig.Teleport.TravelTimeoutSeconds
+	for _, player in players do
+		if not player.Parent or TeleportUtil.isPending(player) then
+			continue
+		end
+		local entry: Transfer = {
+			placeId = placeId,
+			payload = payload,
+			deadline = deadline,
+			retriesLeft = retries,
+			delay = delay,
+			onFailed = onFailed,
+			preparing = false,
+		}
+		pending[player] = entry
+		entries[player] = entry
+		table.insert(accepted, player)
+		player:SetAttribute(Config.TeleportStateAttribute, "Preparing")
+		Remotes.MatchEvent:FireClient(player, "Teleport", "Preparing")
+		task.delay(ExperienceConfig.Teleport.TravelTimeoutSeconds, function()
+			if pending[player] == entry then
+				if entry.attempt and (not entry.failure or entry.failure.result == Enum.TeleportResult.IsTeleporting) then
+					uncertain[player] = entry.attempt
+				end
+				finish(player, entry, "TELEPORT_TIMEOUT")
+			end
+		end)
 	end
-	local options = Instance.new("TeleportOptions")
-	options.ReservedServerAccessCode = accessCode
-	options:SetTeleportData(payload)
-	local config = ExperienceConfig.Teleport
-	return start(players, EnvironmentConfig.get().ArenaPlaceId, options, config.Retries, config.RetryDelaySeconds, onFailed)
+	if #accepted == 0 then
+		return accepted
+	end
+	task.spawn(function()
+		local routing = Instance.new("TeleportOptions")
+		if not EnvironmentConfig.canTeleport() then
+			for _, player in accepted do finish(player, entries[player], "UNREACHABLE") end
+			return
+		end
+		if resolveAccessCode then
+			local ok, accessCode = pcall(resolveAccessCode)
+			if not ok or not accessCode then
+				for _, player in accepted do finish(player, entries[player], "UNREACHABLE") end
+				return
+			end
+			routing.ReservedServerAccessCode = accessCode
+		end
+		local ready: { Player } = {}
+		local remaining = #accepted
+		for _, player in accepted do
+			task.spawn(function()
+				local entry = entries[player]
+				while pending[player] == entry and player.Parent and os.clock() < deadline
+					and PlayerDataService.getStatus(player) == "Loading" do
+					task.wait(0.1)
+				end
+				if pending[player] == entry and player.Parent and os.clock() < deadline then
+					entry.preparing = true
+					local ok, prepared = pcall(PlayerDataService.beginTransfer, player)
+					if ok and prepared then
+						table.insert(ready, player)
+					else
+						finish(player, entry, "DATA_SAVE_FAILED")
+					end
+				end
+				remaining -= 1
+			end)
+		end
+		while remaining > 0 and os.clock() < deadline do
+			task.wait(0.1)
+		end
+		send(ready, entries, routing)
+	end)
+	return accepted
 end
 
--- Arena -> any public Hub server.
-function TeleportUtil.toHub(players: { Player }, payload: MatchTypes.TeleportPayload, onFailed: FailureHandler?): boolean
-	if not EnvironmentConfig.canTeleport() then
-		return false
-	end
-	local options = Instance.new("TeleportOptions")
-	options:SetTeleportData(payload)
+function TeleportUtil.toReserved(players: { Player }, resolveAccessCode: () -> string?, payload: MatchTypes.TeleportPayload, onFailed: FailureHandler): { Player }
 	local config = ExperienceConfig.Teleport
-	return start(players, EnvironmentConfig.get().HubPlaceId, options, config.ReturnRetries, config.ReturnRetryDelaySeconds, onFailed)
+	return start(players, EnvironmentConfig.get().ArenaPlaceId, payload, resolveAccessCode, config.Retries, config.RetryDelaySeconds, onFailed)
+end
+
+function TeleportUtil.toHub(players: { Player }, payload: MatchTypes.TeleportPayload, onFailed: FailureHandler): { Player }
+	local config = ExperienceConfig.Teleport
+	return start(players, EnvironmentConfig.get().HubPlaceId, payload, nil, config.ReturnRetries, config.ReturnRetryDelaySeconds, onFailed)
 end
 
 function TeleportUtil.isPending(player: Player): boolean
-	return pending[player] ~= nil
+	return pending[player] ~= nil or inFlight[player] ~= nil or uncertain[player] ~= nil
 end
 
--- Reads the arriving player's TeleportData (untrusted: only ever used as a hint).
-function TeleportUtil.joinPayload(player: Player): { [string]: any }?
-	local ok, joinData = pcall(function()
-		return player:GetJoinData()
-	end)
-	local data = if ok and typeof(joinData) == "table" then (joinData :: any).TeleportData else nil
-	return if typeof(data) == "table" then data else nil
+function TeleportUtil.isForMatch(player: Player, matchId: string): boolean
+	local entry = pending[player]
+	return entry ~= nil and entry.payload.matchId == matchId
+end
+
+-- Data selects presentation or a record lookup. Arena admission verifies the server-side ticket.
+function TeleportUtil.joinPayload(player: Player): MatchTypes.TeleportPayload?
+	local ok, joinData = pcall(function() return player:GetJoinData() end)
+	local data: any = if ok and typeof(joinData) == "table" then (joinData :: any).TeleportData else nil
+	if typeof(data) ~= "table" then
+		return nil
+	end
+	if data.kind == "ToArena" and typeof(data.matchId) == "string" and #data.matchId > 0 and #data.matchId <= 64 then
+		return { kind = "ToArena", matchId = data.matchId }
+	elseif data.kind == "ToHub" then
+		return {
+			kind = "ToHub",
+			message = if typeof(data.message) == "string" and (MatchTypes.Messages :: any)[data.message] then data.message else nil,
+			fromSpectating = data.fromSpectating == true,
+		}
+	end
+	return nil
+end
+
+function TeleportUtil.markArrived(player: Player)
+	player:SetAttribute(Config.TeleportStateAttribute, "Arrived")
 end
 
 function TeleportUtil.init()
-	TeleportService.TeleportInitFailed:Connect(function(player: Player, result: Enum.TeleportResult, message: string)
-		local entry = pending[player]
-		warn(PREFIX, ("Teleport of %s failed: %s %s"):format(player.Name, tostring(result), message))
-		if entry then
-			fail(player, entry, result)
+	TeleportService.TeleportInitFailed:Connect(function(player: Player, result: Enum.TeleportResult, _, placeId: number, retryOptions: TeleportOptions)
+		local ok, data = pcall(function() return retryOptions:GetTeleportData() end)
+		local id = if ok and typeof(data) == "table" then data.attemptId else nil
+		local old = uncertain[player]
+		if old and old.id == id and old.placeId == placeId then
+			if result ~= Enum.TeleportResult.IsTeleporting then
+				uncertain[player] = nil
+			end
+			return
 		end
+		local entry = pending[player]
+		local attempt = if entry then entry.attempt else nil
+		if not entry or not attempt or attempt.id ~= id or attempt.placeId ~= placeId or entry.failure then
+			return
+		end
+		entry.failure = { result = result, options = retryOptions }
+		handleFailure(player, entry, retryOptions)
 	end)
 	Players.PlayerRemoving:Connect(function(player)
-		pending[player] = nil -- left (usually: the teleport succeeded)
+		local entry = pending[player]
+		pending[player] = nil
+		inFlight[player] = nil
+		uncertain[player] = nil
+		if entry and not entry.attempt then
+			task.spawn(entry.onFailed, player, "LEFT")
+		end
 	end)
 end
 

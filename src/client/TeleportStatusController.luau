@@ -212,7 +212,10 @@ function TeleportStatusController.start(gui: ScreenGui, request: RemoteFunction?
 				if a == "Returning" then
 					post.Visible = false
 				end
-				if a == "Travelling" then
+				if a == "Preparing" then
+					hubButton.Visible = false
+					flash("SAVING PROFILE…", 40)
+				elseif a == "Travelling" then
 					flash(("TRAVELLING · %s"):format((tostring(b or ""):gsub("_", " "))), 25)
 				elseif a == "Returning" then
 					flash("RETURNING TO THE HUB…", 25)

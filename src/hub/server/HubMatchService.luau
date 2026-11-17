@@ -63,7 +63,8 @@ local function respond(ok: boolean, message: string?, data: any?): Response
 end
 
 local function inLobby(player: Player): boolean
-	return GameStates.isInLobby(player:GetAttribute(GameStates.StateAttribute)) and PlayerDataService.isReady(player)
+	return GameStates.isInLobby(player:GetAttribute(GameStates.StateAttribute))
+		and PlayerDataService.isReady(player) and not TeleportUtil.isPending(player)
 end
 
 -- A match is being prepared for `player`: the lobby menu locks gear changes meanwhile.
@@ -123,17 +124,7 @@ local function startZombies(mode: MatchTypes.MatchMode, players: { Player }, par
 			end
 		end,
 	})
-	if not created.mock then
-		task.delay(20, function()
-			-- players who are still here after a successful start get their flags back
-			for _, player in valid do
-				setStarting(player, false)
-			end
-			if party and party.locked and not MatchmakingService.isQueued(party.members[1]) then
-				PartyService.setLocked(party, false)
-			end
-		end)
-	else
+	if created.mock then
 		for _, player in valid do
 			setStarting(player, false)
 		end
@@ -354,6 +345,7 @@ local function onArrival(player: Player)
 	end
 	local payload = TeleportUtil.joinPayload(player)
 	local returning = payload ~= nil and payload.kind == "ToHub"
+	TeleportUtil.markArrived(player) -- arrival here is the server's PlayerAdded, including direct joins
 	local firstCharacter = true
 	local initialSpawn = if returning then current.respawnSpawn else current.arrivalSpawn
 	player.RespawnLocation = initialSpawn
