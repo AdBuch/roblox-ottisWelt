@@ -37,6 +37,7 @@ local LoadoutRequestService = require(Server.LoadoutRequestService)
 local OttiBossService = require(Server.OttiBossService)
 local PlayerCombatService = require(Server.PlayerCombatService)
 local PlayerDataService = require(Server.PlayerDataService)
+local PurchaseService = require(Server.PurchaseService)
 local ProjectileService = require(Server.ProjectileService)
 local Remotes = require(Server.Remotes)
 local ShellService = require(Server.ShellService)
@@ -85,6 +86,11 @@ local _ = Remotes
 -- Services
 TeleportUtil.init()
 PlayerDataService.init(PlayerCombatService.refreshEquipment) -- same schema and store as the Hub
+PurchaseService.init(function(player, product)
+	if product.helmet then
+		PlayerCombatService.refreshEquipment(player)
+	end
+end)
 DamageEffectsService.init(arena)
 CrowdReactionService.build(arena)
 ShellService.init(arena, Arena.Layout.ShellPositions)

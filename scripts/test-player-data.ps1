@@ -6,6 +6,7 @@ param([string]$LuauPath = 'luau')
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $source = Get-Content -LiteralPath (Join-Path $repo 'src/server/PlayerDataService.luau') -Raw
+$purchaseSource = Get-Content -LiteralPath (Join-Path $repo 'src/server/PurchaseService.luau') -Raw
 $teleportSource = Get-Content -LiteralPath (Join-Path $repo 'src/server/TeleportUtil.luau') -Raw
 $arenaSource = Get-Content -LiteralPath (Join-Path $repo 'src/arena/server/ArenaReturnService.luau') -Raw
 
@@ -33,6 +34,7 @@ local task = {}
 function task.spawn(fn, ...) local co = coroutine.create(fn) resume(co, ...) return co end
 function task.wait(t) push(now + (t or 0), coroutine.running(), nil) coroutine.yield() return t end
 function task.delay(t, fn) push(now + t, nil, fn) end
+function task.defer(fn, ...) local args = table.pack(...) task.delay(0, function() fn(table.unpack(args, 1, args.n)) end) end
 local function run(untilTime)
 	while true do
 		local best, bestIndex = nil, nil
@@ -104,21 +106,22 @@ end
 local guid = 0
 local source
 -- One "server": its own PlayerDataService, InventoryService mock, Players service and BindToClose.
+local resetRequested = false
 local function newServer(name, mockData)
 	local server = { name = name, profiles = {}, changed = {}, players = {}, loaded = 0 }
 	local added, removing = signal(), signal()
 	local inv = {}
 	local function profile(p)
-		server.profiles[p] = server.profiles[p] or { denarii = 0, aura = 0 }
+		server.profiles[p] = server.profiles[p] or { denarii = 0, aura = 0, receipts = {} }
 		return server.profiles[p]
 	end
 	function inv.getAura(p) return profile(p).aura end
 	function inv.getDenarii(p) return profile(p).denarii end
 	function inv.load(p, saved, earnedAura, earnedDenarii)
-		server.profiles[p] = { denarii = (saved and saved.denarii or 0) + earnedDenarii, aura = (saved and saved.auraPoints or 0) + earnedAura }
+		server.profiles[p] = { denarii = (saved and saved.denarii or 0) + earnedDenarii, aura = (saved and saved.auraPoints or 0) + earnedAura, receipts = deep(saved and saved.receipts or {}) }
 	end
 	function inv.serialize(p)
-		return { version = 12, denarii = profile(p).denarii, auraPoints = profile(p).aura, session = { aura = 17, denarii = 9 } }
+		return { version = 13, denarii = profile(p).denarii, auraPoints = profile(p).aura, session = { aura = 17, denarii = 9 }, receipts = deep(profile(p).receipts) }
 	end
 	function inv.setMutationGuard(fn) server.canMutate = fn end
 	function inv.onChanged(fn) table.insert(server.changed, fn) end
@@ -132,13 +135,23 @@ local function newServer(name, mockData)
 		for _, fn in server.changed do fn(p) end
 		return true
 	end
+	function inv.applyPurchase(p, product, id)
+		if not server.canMutate(p) then return false, false end
+		local current = profile(p)
+		if current.receipts[id] then return true, false end
+		current.denarii += product.denarii
+		current.receipts[id] = true
+		for _, fn in server.changed do fn(p) end
+		return true, true
+	end
+	server.inventory = inv
 	local mocks = {
 		["Shared/Config"] = { DataStatusAttribute = "DataStatus", IntroSeenAttribute = "IntroSeen" },
 		["Shared/EnvironmentConfig"] = { get = function() return { DataStoreName = "Store" } end, useMockData = function() return mockData == true end, describe = function() return "test" end, name = function() return "DEV" end },
 		["Shared/ExperienceConfig"] = { Studio = { UnlockAllGear = false }, Teleport = { TransitionHoldSeconds = 60, RecoveryTimeoutSeconds = 20 } },
-		["Shared/PlayerDataSchema"] = { Version = 12 },
+		["Shared/PlayerDataSchema"] = { Version = 13 },
 		["Server/InventoryService"] = inv,
-		["Server/PlayerDataResetConfig"] = { tokenFor = function() return nil end },
+		["Server/PlayerDataResetConfig"] = { tokenFor = function() return if resetRequested then "test-reset" else nil end },
 		["Server/Remotes"] = { SavePreference = { OnServerEvent = signal() } },
 	}
 	local services = {
@@ -159,10 +172,15 @@ local function newServer(name, mockData)
 		function p:SetAttribute(k, v) self.attrs[k] = v end
 		function p:GetAttributeChangedSignal() return signal() end
 		function p:Kick(message) self.kicked = message end
+		server.players[id] = p
 		added.fire(p)
 		return p
 	end
-	function server.leave(p) p.Parent = nil removing.fire(p) end
+	function server.leave(p)
+		p.Parent = nil
+		if server.players[p.UserId] == p then server.players[p.UserId] = nil end
+		removing.fire(p)
+	end
 	return server
 end
 -- runs a yielding call and returns a box that holds its answer once it has finished
@@ -174,6 +192,7 @@ local function call(fn, ...)
 end
 '@
 $harness += "`nsource = function(script, game, require)`n$source`nend`n"
+$harness += "`nlocal purchaseSource = function(script, game, require, Enum)`n$purchaseSource`nend`n"
 $harness += "`nlocal arenaSource = function(script, game, require)`n$arenaSource`nend`n"
 $harness += "`nlocal teleportSource = function(script, game, require, Enum, Instance)`n$teleportSource`nend`n"
 $harness += @'
@@ -444,10 +463,10 @@ after(1)
 check(M.data.getStatus(mocked) == "Mock" and M.data.isReady(mocked) and not M.data.canPersist(mocked), "Studio mock is playable without persistence")
 check(call(M.data.flush, mocked).value == false and call(M.data.beginTransfer, mocked).value == false and db.player_34 == nil, "Studio mock cannot claim a durable write or transfer")
 
-db.player_35 = { version = 13, denarii = 99 }
+db.player_35 = { version = 14, denarii = 99 }
 local future = R.join(35)
 after(3)
-check(R.data.getStatus(future) == "Unsaved" and db.player_35.version == 13 and db.player_35.lock == nil, "an older schema cannot claim or overwrite a future profile")
+check(R.data.getStatus(future) == "Unsaved" and db.player_35.version == 14 and db.player_35.lock == nil, "an older schema cannot claim or overwrite a future profile")
 
 -- Real TeleportUtil and ArenaReturnService against the deterministic scheduler and a fake engine.
 local function newTransport(data)
@@ -649,6 +668,113 @@ after(3)
 local oldExpiry, oldEpoch = db.player_36.lock.expiresAt, db.player_36.leaseEpoch
 after(122)
 check(r.value == true and db.player_36.lock.expiresAt > oldExpiry and db.player_36.leaseEpoch == oldEpoch, "autosave renews a clean lease without changing ownership")
+
+-- Receipt handling uses the actual PurchaseService and PlayerDataService with a shared mock store.
+local function receiptProcessor(server)
+	local marketplace = {}
+	local services = {
+		MarketplaceService = marketplace,
+		Players = { GetPlayerByUserId = function(_, id) return server.players[id] end },
+		ReplicatedStorage = { Shared = { ForgeDefinitions = "Catalog" } },
+	}
+	local modules = {
+		Catalog = { product = function(id) return if id == 1 then { denarii = 10 } else nil end },
+		PlayerData = server.data, Inventory = server.inventory,
+	}
+	local script = { Parent = { PlayerDataService = "PlayerData", InventoryService = "Inventory" } }
+	local game = { GetService = function(_, name) return services[name] end }
+	local enum = { ProductPurchaseDecision = { PurchaseGranted = "Granted", NotProcessedYet = "Pending" } }
+	local notified = 0
+	local handler = purchaseSource(script, game, function(name) return modules[name] end, enum)
+	handler.init(function() notified += 1 end)
+	local callback = marketplace.ProcessReceipt
+	handler.init()
+	check(marketplace.ProcessReceipt == callback, "receipt callback registers once per server")
+	return function(player, receiptId, productId)
+		return call(callback, { PlayerId = player.UserId, ProductId = productId or 1, PurchaseId = receiptId })
+	end, function() return notified end
+end
+
+local ShopA, ShopB = newServer("ShopA"), newServer("ShopB")
+local shopA, notifications = receiptProcessor(ShopA)
+local shopB = receiptProcessor(ShopB)
+local client = ShopA.join(71)
+local queuedReceipt = shopA(client, "during-load")
+check(not queuedReceipt.done and db.player_71 == nil, "a receipt cannot complete before the profile loads")
+after(4)
+check(queuedReceipt.value == "Granted" and db.player_71.denarii == 10 and db.player_71.receipts["during-load"], "receipt on join can wait for a real load and commit")
+check(shopA(client, "unknown-product", 2).value == "Pending" and shopA(client, "", 1).value == "Pending", "unknown products and invalid purchase IDs stay pending")
+local unsavedShop = receiptProcessor(R)
+local mockShop = receiptProcessor(M)
+check(unsavedShop(future, "unsaved").value == "Pending" and mockShop(mocked, "mock").value == "Pending", "Unsaved and Mock cannot acknowledge a paid receipt")
+
+store.faultKey, store.rejectNext = "player_71", 2
+local failedOnce = shopA(client, "retry-save")
+after(2)
+local failedTwice = shopA(client, "retry-save")
+after(2)
+check(failedOnce.value == "Pending" and failedTwice.value == "Pending"
+	and db.player_71.denarii == 10 and not db.player_71.receipts["retry-save"] and ShopA.profiles[client].denarii == 20,
+	"failed writes leave no durable grant and an in-memory repeat cannot acknowledge or grant again")
+local committed = shopA(client, "retry-save")
+after(2)
+check(committed.value == "Granted" and db.player_71.denarii == 20 and db.player_71.receipts["retry-save"]
+	and notifications() == 2, "retry acknowledges the original grant only once it is durable")
+
+store.latency = 3
+local parallel1 = shopA(client, "concurrent")
+local parallel2 = shopA(client, "concurrent")
+check(not parallel1.done and not parallel2.done and ShopA.profiles[client].denarii == 30, "concurrent callbacks share the pending revision")
+after(5)
+check(parallel1.value == "Granted" and parallel2.value == "Granted" and db.player_71.denarii == 30
+	and notifications() == 3, "concurrent callbacks confirm a single committed grant")
+store.latency = 1
+
+local disconnect = ShopA.join(72)
+after(3)
+local duringDisconnect = shopA(disconnect, "disconnected")
+after(0.5)
+ShopA.leave(disconnect)
+after(4)
+local reconnected = ShopB.join(72)
+after(3)
+local deliveredAgain = shopB(reconnected, "disconnected")
+after(3)
+check(duringDisconnect.value == "Granted" and deliveredAgain.value == "Granted" and db.player_72.denarii == 10
+	and db.player_72.receipts.disconnected, "disconnect during commit and cross-place redelivery preserve one grant")
+
+local beforeCrash = ShopA.join(73)
+after(3)
+store.latency = 9
+local staleCallback = shopA(beforeCrash, "before-crash")
+after(1)
+check(not db.player_73.receipts and not db.player_73.denarii, "crash before UpdateAsync has persisted neither benefit nor evidence")
+db.player_73.lock.expiresAt = os.time() - 1
+store.latency = 1
+local owner = ShopB.join(73)
+after(3)
+local recoveredReceipt = shopB(owner, "before-crash")
+after(10)
+check(recoveredReceipt.value == "Granted" and staleCallback.value == "Pending" and db.player_73.denarii == 10
+	and db.player_73.receipts["before-crash"], "new owner commits once and an old callback cannot overwrite the new lease")
+
+local afterCrash = ShopA.join(74)
+after(3)
+store.responseDelay = 19
+local lostConfirmation = shopA(afterCrash, "after-crash")
+after(2)
+check(not lostConfirmation.done and db.player_74.denarii == 10 and db.player_74.receipts["after-crash"],
+	"crash after commit and before acknowledgement leaves the paired data durable")
+store.responseDelay = 0
+db.player_74.lock.expiresAt = os.time() - 1
+resetRequested = true
+local nextOwner = ShopB.join(74)
+after(3)
+resetRequested = false
+local replay = shopB(nextOwner, "after-crash")
+after(16)
+check(replay.value == "Granted" and lostConfirmation.value == "Pending" and db.player_74.denarii == 10
+	and db.player_74.receipts["after-crash"], "lost acknowledgement and a requested test reset cannot duplicate or delete a paid grant")
 
 -- 12. SHUTDOWN with a DataStore that doesn't answer: gives up before Roblox's 30 s
 local T = newServer("T")

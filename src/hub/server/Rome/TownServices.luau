@@ -15,12 +15,8 @@
 --
 -- ROBUX: the client asks to buy a product ("Buy"); the server remembers what the purchase is for
 -- (pending: finish this job / this design / this paint) and returns the product id to prompt.
--- MarketplaceService.ProcessReceipt grants each receipt once (saved receipt ids), turns the
--- product into Denarii or a credit, uses a credit for the pending action, saves, then answers
--- PurchaseGranted. Products with id 0 are not created yet: in Studio the same grant runs as a test
--- purchase, anywhere else they are refused.
--- Credits (Vorspulen, Design) can also be bought in advance, and the Robux HELMETS of the helm
--- shop are granted by the same receipt handler (TownServices.buyHelmet, asked by the shop menu).
+-- PurchaseService handles paid receipts in both places. Rome can use a confirmed credit for a
+-- pending action. Products with id 0 are available for in-memory Studio simulation only.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
@@ -28,6 +24,7 @@ local HttpService = game:GetService("HttpService")
 local ForgeDefinitions = require(ReplicatedStorage.Shared.ForgeDefinitions)
 local HelmetDefinitions = require(ReplicatedStorage.Shared.HelmetDefinitions)
 local OracleDefinitions = require(ReplicatedStorage.Shared.OracleDefinitions)
+local PurchaseConfig = require(ReplicatedStorage.Shared.PurchaseConfig)
 local GameStates = require(ReplicatedStorage.Shared.GameStates)
 local WeaponDefinitions = require(ReplicatedStorage.Shared.WeaponDefinitions)
 local ShieldDefinitions = require(ReplicatedStorage.Shared.ShieldDefinitions)
@@ -40,8 +37,7 @@ export type Deps = {
 	now: () -> number,
 	token: () -> string,
 	refresh: ((player: Player) -> ())?, -- re-attach the weapon in hand (PlayerCombatService)
-	save: ((player: Player) -> boolean)?, -- PlayerDataService.flush
-	isStudio: (() -> boolean)?, -- test purchases for products without an id
+	isStudioMock: ((player: Player) -> boolean)?,
 }
 
 type Offer = { kind: string, token: string, expires: number }
@@ -62,7 +58,6 @@ local lastRequest: { [Player]: number } = {}
 local busy: { [Player]: boolean } = {}
 local turns: { [Player]: number } = {}
 local pending: { [Player]: Pending } = {}
-local studioReceipts = 0
 local REQUEST_INTERVAL = 0.35
 
 -- Why a player can't use a counter right now, or nil.
@@ -97,8 +92,8 @@ local function slotList(source: { ForgeDefinitions.DesignSlot }): { any }
 	return slots
 end
 
-local function productReady(product: ForgeDefinitions.Product): boolean
-	return product.productId ~= 0 or (deps.isStudio ~= nil and deps.isStudio())
+local function productReady(player: Player, product: ForgeDefinitions.Product): boolean
+	return PurchaseConfig.PromptsEnabled and (product.productId > 0 or (deps.isStudioMock ~= nil and deps.isStudioMock(player)))
 end
 
 -- Everything the smith's dialog shows (all values from the server's definitions).
@@ -155,7 +150,7 @@ local function smithState(player: Player, token: string?): { [string]: any }
 	local products = {}
 	for _, p in ForgeDefinitions.Products do
 		if not p.helmet then -- helmets are sold in the helm shop
-			table.insert(products, { key = p.key, label = p.label, robux = p.robux, denarii = p.denarii, credits = p.credits, ready = productReady(p) })
+			table.insert(products, { key = p.key, label = p.label, robux = p.robux, denarii = p.denarii, credits = p.credits, ready = productReady(player, p) })
 		end
 	end
 	return {
@@ -239,45 +234,28 @@ local function applyPending(player: Player): (boolean, string?)
 	return false, nil
 end
 
-local function applyGrant(player: Player, product: ForgeDefinitions.Product, purchaseId: string): string?
-	local inv = deps.inventory
-	if inv.hasReceipt(player, purchaseId) then
-		return nil
+function TownServices.purchaseGranted(player: Player, product: ForgeDefinitions.Product)
+	if not deps or not player.Parent or not deps.isReady(player) then
+		return
 	end
-	if product.denarii then
-		inv.addDenarii(player, product.denarii)
+	local message: string? = nil
+	local action = pending[player]
+	if action and product.credits and product.credits[if action.action == "Skip" then "Skip" else "Design"] then
+		local _, appliedMessage = applyPending(player)
+		message = appliedMessage
 	end
-	for key, count in product.credits or {} do
-		inv.addCredit(player, key, count)
+	deps.fire(player, "ForgeUpdate", { state = smithState(player, nil), message = message or ("Gekauft: " .. product.label), ok = true })
+end
+
+local function simulatePurchase(player: Player, product: ForgeDefinitions.Product): boolean
+	if not deps.inventory.applyPurchase(player, product) then
+		return false
 	end
-	if product.helmet and inv.grantItem(player, "Helmet", product.helmet) then
-		inv.equip(player, "Helmet", product.helmet) -- worn at once, like a Denarii purchase
-	end
-	inv.recordReceipt(player, purchaseId)
 	if product.helmet then
 		refresh(player)
 	end
-	local _, message = applyPending(player)
-	return message
-end
-
--- Marketplace confirmation uses the durable path. A repeated receipt still has to flush.
-function TownServices.grant(player: Player, product: ForgeDefinitions.Product, purchaseId: string): boolean
-	local save = deps.save
-	if not save or not deps.isReady(player) then
-		return false
-	end
-	local message = applyGrant(player, product, purchaseId)
-	if not save(player) then
-		return false
-	end
-	deps.fire(player, "ForgeUpdate", { state = smithState(player, nil), message = message or ("Gekauft: " .. product.label), ok = true })
+	TownServices.purchaseGranted(player, product)
 	return true
-end
-
-local function simulatePurchase(player: Player, product: ForgeDefinitions.Product)
-	studioReceipts += 1
-	applyGrant(player, product, ("STUDIO-%d-%d"):format(player.UserId, studioReceipts))
 end
 
 -- The NPC prompts: open an offer (or explain why not).
@@ -374,16 +352,18 @@ local function smithRequest(player: Player, action: string, data: { [string]: an
 		local ok, message = applyPending(player)
 		return answer(ok, message or "Ungültige Anfrage.")
 	elseif action == "Buy" then
+		if not PurchaseConfig.PromptsEnabled then
+			return { ok = false, message = "Robux-Käufe sind derzeit deaktiviert." }
+		end
 		local product = ForgeDefinitions.product(data.key)
 		if not product or typeof(data.key) ~= "string" or product.helmet then
 			return { ok = false, message = "Ungültige Anfrage." }
 		end
 		-- credits may be bought in advance: without a chosen work they stay for later
-		if product.productId ~= 0 then
+		if product.productId > 0 then
 			return { ok = true, message = "Kauf wird geöffnet ...", productId = product.productId }
 		end
-		if deps.isStudio and deps.isStudio() then
-			simulatePurchase(player, product)
+		if deps.isStudioMock and deps.isStudioMock(player) and simulatePurchase(player, product) then
 			return answer(true, "Studio-Testkauf: " .. product.label, { studio = true })
 		end
 		return { ok = false, message = "Dieses Robux-Produkt ist noch nicht eingerichtet." }
@@ -442,6 +422,9 @@ end
 -- The helm shop's Robux helmets (asked by LoadoutRequestService "Buy" inside the shop): answers
 -- the product id to prompt, or grants a Studio test purchase when the product isn't created yet.
 function TownServices.buyHelmet(player: Player, id: string): { [string]: any }
+	if not PurchaseConfig.PromptsEnabled then
+		return { ok = false, code = "REFUSED", message = "Robux-Käufe sind derzeit deaktiviert." }
+	end
 	if not deps.isReady(player) then
 		return { ok = false, code = "REFUSED", message = "Dieses Profil ist gerade nicht verfügbar" }
 	end
@@ -453,11 +436,10 @@ function TownServices.buyHelmet(player: Player, id: string): { [string]: any }
 	if deps.inventory.owns(player, "Helmet", id) then
 		return { ok = false, code = "OWNED", message = "Bereits in deinem Besitz" }
 	end
-	if product.productId ~= 0 then
+	if product.productId > 0 then
 		return { ok = false, code = "ROBUX", message = "Kauf wird geöffnet …", productId = product.productId }
 	end
-	if deps.isStudio and deps.isStudio() then
-		simulatePurchase(player, product)
+	if deps.isStudioMock and deps.isStudioMock(player) and simulatePurchase(player, product) then
 		return { ok = true, code = "BOUGHT", message = "Studio-Testkauf: " .. product.label }
 	end
 	return { ok = false, code = "REFUSED", message = "Dieser Helm ist noch nicht erhältlich (Robux-Produkt fehlt)" }
@@ -481,15 +463,13 @@ function TownServices.init(dependencies: Deps, smith: () -> Vector3?, oracle: ()
 	smithAt, oracleAt = smith, oracle
 end
 
--- The live wiring in the Hub: real services, remotes, NPC prompts and Robux receipts.
+-- The live wiring in the Hub for NPC prompts and remotes.
 function TownServices.start(request: RemoteFunction, event: RemoteEvent, smith: BasePart?, oracle: BasePart?)
 	local Server = script.Parent.Parent.Parent
 	local InventoryService = require(Server.InventoryService) :: any
 	local PlayerDataService = require(Server.PlayerDataService) :: any
 	local PlayerCombatService = require(Server.PlayerCombatService) :: any
 	local CombatUtil = require(Server.CombatUtil) :: any
-	local MarketplaceService = game:GetService("MarketplaceService")
-	local RunService = game:GetService("RunService")
 	TownServices.init({
 		inventory = InventoryService,
 		isReady = PlayerDataService.isReady,
@@ -505,9 +485,8 @@ function TownServices.start(request: RemoteFunction, event: RemoteEvent, smith: 
 			return HttpService:GenerateGUID(false)
 		end,
 		refresh = PlayerCombatService.refreshEquipment,
-		save = PlayerDataService.flush,
-		isStudio = function(): boolean
-			return RunService:IsStudio()
+		isStudioMock = function(player: Player): boolean
+			return PlayerDataService.getStatus(player) == "Mock"
 		end,
 	}, function(): Vector3?
 		return if smith then smith.Position else nil
@@ -518,17 +497,6 @@ function TownServices.start(request: RemoteFunction, event: RemoteEvent, smith: 
 	LoadoutRequestService.setRobuxBuyer(TownServices.buyHelmet) -- the helm shop's Robux helmets
 	request.OnServerInvoke = function(player: Player, action: unknown, payload: unknown)
 		return TownServices.request(player, action, payload)
-	end
-	MarketplaceService.ProcessReceipt = function(receipt: any): Enum.ProductPurchaseDecision
-		local player = Players:GetPlayerByUserId(receipt.PlayerId)
-		local product = ForgeDefinitions.product(receipt.ProductId)
-		-- only on a profile that is loaded AND can be saved (never on an "Unsaved" one: the purchase
-		-- would be lost with the session; Roblox asks again on the next join)
-		if not player or not product or not PlayerDataService.isReady(player) or not PlayerDataService.canPersist(player) then
-			return Enum.ProductPurchaseDecision.NotProcessedYet
-		end
-		local ok = TownServices.grant(player, product, tostring(receipt.PurchaseId))
-		return if ok then Enum.ProductPurchaseDecision.PurchaseGranted else Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 	Players.PlayerRemoving:Connect(TownServices.forget)
 	task.spawn(function()

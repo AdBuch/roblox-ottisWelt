@@ -334,6 +334,10 @@ function PlayerDataService.load(player: Player)
 	local earnedAura = math.max(0, InventoryService.getAura(player) - auraAtJoin)
 	local earnedDenarii = math.max(0, InventoryService.getDenarii(player) - denariiAtJoin)
 	local resetToken = PlayerDataResetConfig.tokenFor(player.UserId, EnvironmentConfig.name(), if saved then saved.resetToken else nil)
+	if resetToken and saved and typeof(saved.receipts) == "table" and next(saved.receipts) ~= nil then
+		warn(PREFIX, ("Skipped test reset for %s: the profile has purchase history"):format(player.Name))
+		resetToken = nil
+	end
 	if resetToken and saved then
 		warn(PREFIX, ("TEST DATA RESET for %s (%d) with token %q"):format(player.Name, player.UserId, resetToken))
 		saved = nil

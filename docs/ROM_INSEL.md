@@ -151,11 +151,10 @@ Dialog `src/hub/client/RomeDialog.client.luau`.
   10× Vorspulen (99 R$ statt 150), 3× Design (129 R$ statt 147), 10× Design (349 R$ statt 490),
   Starterpaket 1200 Denarii + 1 Vorspulen + 1 Design (149 R$ statt 163). Gutschriften lassen sich
   im Schmied-Dialog auch auf Vorrat kaufen. Dazu je Robux-Helm ein Produkt (`Helmet_<Id>`, s. u.).
-  Gutschriften stehen in `Product.credits` und werden in `TownServices.grant` je Receipt einmal gewährt. `productId = 0` bis die Produkte im
-  Creator Hub angelegt sind: in Studio laufen Testkäufe über denselben Gewährungsweg, ausserhalb
-  werden sie abgelehnt. `MarketplaceService.ProcessReceipt` (nur Hub) gewährt jede Quittung einmal
-  (gespeicherte Kaufnummern), wandelt Vorspulen/Design in Gutschriften, löst die vorgemerkte Aktion
-  aus, speichert (`PlayerDataService.flush`) und meldet erst dann `PurchaseGranted`.
+  Gutschriften stehen in `Product.credits`. Der gemeinsame `PurchaseService` in Hub und Arena
+  speichert sie gemeinsam mit dem Kaufnachweis und quittiert erst den bestätigten Commit.
+  Im Hub kann danach eine passende vorgemerkte Aktion die Gutschrift verwenden. Bei `productId = 0`
+  steht die Shop-Simulation im Studio-Mock zur Verfügung. [Kaufverarbeitung](PURCHASE_RECEIPTS.md)
 - **Prüfungen des Servers** bei jeder Aktion: Angebots-Token (60 s), Nähe zum Schmied (16), Lobbyzustand,
   geladene Daten, Waffe, Besitz des Exemplars, freier Zustand, Vorbedingung, Serverpreis, Guthaben;
   Abbuchung und Auftrag in einem Schritt ohne Yield; Mindestabstand 0,35 s zwischen Anfragen.
