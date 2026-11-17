@@ -11,6 +11,7 @@
     { "script": "scripts/test-progression.ps1", "required": true },
     { "script": "scripts/test-rome-services.ps1", "required": true },
     { "script": "scripts/test-specials.ps1", "required": true },
+    { "script": "scripts/test-version-compatibility.ps1", "required": true },
     { "script": "scripts/test-rome-layout.ps1", "required": false, "reason": "red on the release baseline: six layout deviations (docs/RELEASE_BASELINE.md)" },
     { "script": "scripts/test-rome-geometry.ps1", "required": false, "reason": "red on the release baseline: four geometry deviations, three from the opened training yards (docs/RELEASE_BASELINE.md)" }
   ]
