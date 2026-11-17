@@ -188,7 +188,6 @@ local ForgeDefinitions = {
 		-- SALE bundle: cheaper than buying the parts one by one
 		table.freeze({ key = "RomeStarter", productId = 0, robux = 149, label = "Starterpaket: 1200 Denarii + Vorspulen + Design · SALE (statt 163 R$)", denarii = 1200, credits = table.freeze({ Skip = 1, Design = 1 }) } :: Product),
 	} :: { Product },
-	MaxReceipts = 50, -- processed purchase ids kept per profile (no double grant)
 }
 for _, def in HelmetDefinitions.Ordered do
 	if def.Robux > 0 then
