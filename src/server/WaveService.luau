@@ -154,10 +154,15 @@ startRound = function(newRound: number)
 			formationSlot += 1
 			spawn = (formationGate :: CFrame) * CFrame.new(if slot % 2 == 0 then -1.4 else 1.4, 0, math.floor(slot / 2) * 3.4)
 		end
+		local deathId = tostring(newRound) .. "/" .. tostring(i)
+		local deathHandled = false
 		local zombie = ZombieService.spawn(definition, spawn, function(z, killer, damagers)
-			if myToken ~= token then
+			if myToken ~= token or deathHandled then
 				return -- belonged to an aborted run
 			end
+			deathHandled = true
+			-- The spawn ordinal is stable even if the death callback is delivered twice.
+			z.rewardId = deathId
 			run.onZombieDied(z, killer, damagers)
 			aliveCount = math.max(0, aliveCount - 1)
 			publish()

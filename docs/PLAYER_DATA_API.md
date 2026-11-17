@@ -1,6 +1,6 @@
 # Spielerdaten in Hub und Arena
 
-Die beiden Places verwenden dieselbe serverseitige Speicher-API und pro Umgebung denselben DataStore. Der Schlüssel lautet `player_<UserId>`. [PlayerDataSchema v13](../src/shared/PlayerDataSchema.luau) speichert den Kaufnachweis als Menge. Der Gameplay-Abschnitt `session` speichert Aura, Denarii und Zeitangaben der Spielsitzung.
+Die beiden Places verwenden dieselbe serverseitige Speicher-API und pro Umgebung denselben DataStore. Der Schlüssel lautet `player_<UserId>`. [PlayerDataSchema v14](../src/shared/PlayerDataSchema.luau) speichert Kaufnachweise, Reward-IDs und persönliche Kampagnenkapitel. Der Gameplay-Abschnitt `session` speichert Aura, Denarii und Zeitangaben der Spielsitzung.
 
 ## Schnittstelle
 
@@ -25,6 +25,7 @@ Die beiden Places verwenden dieselbe serverseitige Speicher-API und pro Umgebung
 ## Übergabe an Task 6
 
 - Das persistente Kaufdatenformat v13 und die Migration stehen in [PURCHASE_RECEIPTS.md](PURCHASE_RECEIPTS.md). `lock`, `leaseEpoch`, `saveId` und `savedAt` gehören exklusiv zum Speicher-Dienst.
+- Profil v14 ergänzt die in [COMBAT_REWARD_RECOVERY.md](COMBAT_REWARD_RECOVERY.md) beschriebenen Reward-Nachweise und Checkpoints. Die Mutation und ihr Nachweis werden gemeinsam gespeichert.
 - Wenn Task 6 das Nutzdatenformat erweitert, müssen Leser und Schreiber beider Places dieselbe Migration verstehen. Der Speicher-Dienst verweigert Profile mit einer höheren Schema-Version. Zuständigkeit für Lease-Metadaten und Commit-Bestätigung liegt beim Daten-Task.
 - Alte Server der Release-Basis können einen Lock nach kurzer Wartezeit übernehmen oder ein Profil ohne Lock überschreiben. Vor einem gemeinsamen Rollout muss Task 6 eine koordinierte Umstellung für beide Places und laufende alte Schreiber planen. Der Mischbetrieb mit der bisherigen Storage-Implementierung hat keinen Fencing-Nachweis.
 

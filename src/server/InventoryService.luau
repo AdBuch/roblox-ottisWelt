@@ -34,6 +34,7 @@ local WeaponDefinitions = require(ReplicatedStorage.Shared.WeaponDefinitions)
 local WeaponSpecialDefinitions = require(ReplicatedStorage.Shared.WeaponSpecialDefinitions)
 local WeaponAttackDefinitions = require(ReplicatedStorage.Shared.WeaponAttackDefinitions)
 local SpecialPracticeDefinitions = require(ReplicatedStorage.Shared.SpecialPracticeDefinitions)
+local RewardTypes = require(ReplicatedStorage.Shared.RewardTypes)
 
 type WeaponDefinition = WeaponDefinitions.WeaponDefinition
 type ShieldDefinition = ShieldDefinitions.ShieldDefinition
@@ -54,7 +55,7 @@ export type Earnings = {
 export type Session = { aura: number, denarii: number, startedAt: number, lastSeen: number }
 
 -- Rewards of the last battle (started by beginBattle, filled by every reward of that battle).
-export type LastBattle = { aura: number, denarii: number, mode: string, at: number }
+export type LastBattle = { aura: number, denarii: number, mode: string, at: number, id: string? }
 
 -- Active fighting time and the Aura earned meanwhile: the basis of the optional play-time estimate.
 export type Activity = { aura: number, seconds: number, rewards: number }
@@ -88,6 +89,8 @@ export type Profile = {
 	shieldDesigns: { [string]: { [string]: string } }, -- shield id -> design slot -> option (ForgeDefinitions.ShieldSlots)
 	forgeCredits: { [string]: number }, -- Robux-bought, not yet used: Skip, Design
 	receipts: { [string]: boolean }, -- durable purchase evidence, stored with the benefits
+	rewardIds: { [string]: boolean },
+	campaignClears: { [string]: { [string]: boolean } },
 	forge: { [string]: number }?, -- v9 stages, folded into the copies on migration
 }
 
@@ -143,6 +146,8 @@ local function newProfile(): Profile
 		shieldDesigns = {},
 		forgeCredits = {},
 		receipts = {},
+		rewardIds = {},
+		campaignClears = {},
 	}
 end
 
@@ -371,7 +376,7 @@ function InventoryService.migrateProfile(profile: Profile): Profile
 	}
 	local last: any = profile.lastBattle
 	if typeof(last) == "table" and typeof(last.at) == "number" then
-		profile.lastBattle = { aura = wholeNumber(last.aura), denarii = wholeNumber(last.denarii), mode = if typeof(last.mode) == "string" then last.mode else "", at = last.at }
+		profile.lastBattle = { aura = wholeNumber(last.aura), denarii = wholeNumber(last.denarii), mode = if typeof(last.mode) == "string" then last.mode else "", at = last.at, id = if typeof(last.id) == "string" then last.id else nil }
 	else
 		profile.lastBattle = nil
 	end
@@ -480,6 +485,26 @@ function InventoryService.migrateProfile(profile: Profile): Profile
 		end
 	end
 	profile.receipts = receipts
+	local rewardIds: { [string]: boolean } = {}
+	if typeof(profile.rewardIds) == "table" then
+		for id, granted in profile.rewardIds do
+			if typeof(id) == "string" and granted == true then rewardIds[id] = true end
+		end
+	end
+	profile.rewardIds = rewardIds
+	local clears: { [string]: { [string]: boolean } } = {}
+	local savedClears: any = profile.campaignClears
+	for _, mode in { "Solo", "Coop" } do
+		local chapters = {}
+		for stage = 1, 3 do
+			local id = tostring(stage)
+			if typeof(savedClears) == "table" and typeof(savedClears[mode]) == "table" and savedClears[mode][id] == true then
+				chapters[id] = true
+			end
+		end
+		clears[mode] = chapters
+	end
+	profile.campaignClears = clears
 	profile.version = math.max(PROFILE_VERSION, savedVersion)
 	return profile
 end
@@ -698,13 +723,59 @@ function InventoryService.addReward(player: Player, aura: number, denarii: numbe
 	InventoryService.publish(player)
 end
 
+-- The recovery journal supplies server-authored claims. No yields between the benefit,
+-- statistics, checkpoint and evidence. Publication happens only after the revision advances.
+function InventoryService.applyReward(player: Player, claim: RewardTypes.Claim): (boolean, boolean)
+	if not canMutate(player) then return false, false end
+	local profile = getProfile(player)
+	if profile.rewardIds[claim.id] then return true, false end
+	profile.auraPoints += claim.aura
+	profile.denarii += claim.denarii
+	profile.earnings.aura += claim.aura
+	profile.earnings.denarii += claim.denarii
+	profile.session.aura += claim.aura
+	profile.session.denarii += claim.denarii
+	if profile.lastBattle and profile.lastBattle.id == claim.matchId and claim.matchId ~= nil then
+		profile.lastBattle.aura += claim.aura
+		profile.lastBattle.denarii += claim.denarii
+	end
+	if claim.aura > 0 then
+		profile.activity.aura += claim.aura
+		profile.activity.rewards += 1
+	end
+	for name, amount in claim.stats do
+		profile.stats[name] = (profile.stats[name] or 0) + amount
+	end
+	if claim.campaign and claim.stage then
+		local chapters = profile.campaignClears[claim.campaign] or {}
+		chapters[tostring(claim.stage)] = true
+		profile.campaignClears[claim.campaign] = chapters
+	end
+	profile.rewardIds[claim.id] = true
+	changed(player)
+	if profile.lastBattle and profile.lastBattle.id == claim.matchId and claim.matchId ~= nil then
+		player:SetAttribute(Config.RunAuraAttribute, (tonumber(player:GetAttribute(Config.RunAuraAttribute)) or 0) + claim.aura)
+		player:SetAttribute(Config.RunDenariiAttribute, (tonumber(player:GetAttribute(Config.RunDenariiAttribute)) or 0) + claim.denarii)
+		player:SetAttribute(Config.RunKillsAttribute, (tonumber(player:GetAttribute(Config.RunKillsAttribute)) or 0) + (claim.stats.zombieKills or 0))
+	end
+	InventoryService.publish(player)
+	return true, true
+end
+
+function InventoryService.campaignStage(player: Player, mode: string): number
+	local chapters = getProfile(player).campaignClears[mode] or {}
+	local cleared = 0
+	while cleared < 3 and chapters[tostring(cleared + 1)] do cleared += 1 end
+	return math.min(cleared + 1, 3)
+end
+
 -- A battle starts: its rewards are collected as "last battle" from now on.
-function InventoryService.beginBattle(player: Player, mode: string)
+function InventoryService.beginBattle(player: Player, mode: string, matchId: string?)
 	if not canMutate(player) then
 		return
 	end
 	local profile = getProfile(player)
-	profile.lastBattle = { aura = 0, denarii = 0, mode = mode, at = os.time() }
+	profile.lastBattle = { aura = 0, denarii = 0, mode = mode, at = os.time(), id = matchId }
 	changed(player)
 	InventoryService.publish(player)
 end
@@ -1391,6 +1462,12 @@ function InventoryService.serialize(player: Player): { [string]: any }
 		end)(),
 		forgeCredits = table.clone(profile.forgeCredits),
 		receipts = table.clone(profile.receipts),
+		rewardIds = table.clone(profile.rewardIds),
+		campaignClears = (function()
+			local copy = {}
+			for mode, chapters in profile.campaignClears do copy[mode] = table.clone(chapters) end
+			return copy
+		end)(),
 	}
 end
 

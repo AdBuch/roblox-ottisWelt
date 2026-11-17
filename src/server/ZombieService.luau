@@ -49,6 +49,7 @@ type ZombieAIProfile = ZombieAIProfiles.ZombieAIProfile
 type ConditionMods = ZombieAIProfiles.ConditionMods
 
 export type Zombie = {
+	rewardId: string,
 	definition: ZombieDefinition,
 	profile: ZombieAIProfile,
 	rig: ZombieFactory.ZombieRig,
@@ -1083,6 +1084,7 @@ function ZombieService.spawn(def: ZombieDefinition, cframe: CFrame, onDiedCallba
 	local now = os.clock()
 	local rng = Random.new()
 	local z: Zombie = {
+		rewardId = "",
 		definition = def,
 		profile = profile,
 		rig = rig,

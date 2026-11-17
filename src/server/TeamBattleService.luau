@@ -20,7 +20,7 @@ local Remotes = require(script.Parent.Remotes)
 export type TeamName = "Red" | "Blue"
 
 export type Hooks = {
-	finished: (winner: string, reason: string) -> (), -- "Red" | "Blue" | "Draw"
+	finished: (winner: string, reason: string, matchId: number) -> (), -- "Red" | "Blue" | "Draw"
 	statusChanged: () -> (),
 }
 
@@ -126,7 +126,7 @@ local function finish(current: Match, winner: string, reason: string)
 	print(PREFIX, ("Team Battle (%s) finished: %s (%s) %d-%d"):format(current.subMode, winner, reason, current.score.Red, current.score.Blue))
 	local currentHooks = hooks
 	if currentHooks then
-		task.spawn(currentHooks.finished, winner, reason)
+		task.spawn(currentHooks.finished, winner, reason, current.matchId)
 	end
 end
 
@@ -387,7 +387,9 @@ function TeamBattleService.removeParticipant(player: Player)
 	if not current or not current.teamOf[player] then
 		return
 	end
-	local team = current.teamOf[player]
+	-- A network departure aborts the result. It must not invoke onDeath and thereby
+	-- award an elimination round or victory to the remaining team.
+	if not current.finished then finish(current, "Draw", "participant disconnected") end
 	current.teamOf[player] = nil
 	current.alive[player] = nil
 	current.damageLog[player] = nil
@@ -395,15 +397,6 @@ function TeamBattleService.removeParticipant(player: Player)
 		log[player] = nil -- no credit for hitting someone who disconnected
 	end
 	publish(current)
-	for _, other in current.teamOf do
-		if other == team then
-			current.rules.onDeath(current, player, nil) -- e.g. Elimination: the round may end now
-			return
-		end
-	end
-	if not current.finished then
-		finish(current, if team == "Red" then "Blue" else "Red", "opponents left")
-	end
 end
 
 function TeamBattleService.getParticipants(): { Player }
