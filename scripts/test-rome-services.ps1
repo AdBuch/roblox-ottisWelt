@@ -350,7 +350,7 @@ check(recorded and not newReceipt and Inv.getDenarii(rejoinedBuyer) == rejoinedB
 	"v12 IDs survive migration, 64 more grants, a round trip, and oldest-receipt redelivery")
 check(Inv.owns(q, "Helmet", "DragonHead") and Inv.owns(q, "Helmet", "OttiHead") and Inv.getEquippedHelmet(q).Id == saved.equippedHelmet, "owned and worn helmets survive the rejoin")
 local v11 = table.clone(saved)
-v11.version, v11.shieldDesigns, v11.ownedHelmets, v11.equippedHelmet = 11, { [shieldId] = "ImperialBlue", Fake = "Gold" }, "Galea,NoHelmet", "Galea"
+v11.version, v11.shieldDesigns, v11.ownedHelmets, v11.equippedHelmet = 11, { [shieldId] = "ImperialBlue" }, "Galea", "Galea"
 local m = newPlayer(7)
 Inv.load(m, v11, 0, 0, nil)
 check(Inv.shieldDesign(m, shieldId).Paint == "ImperialBlue" and Inv.serialize(m).shieldDesigns.Fake == nil, "v11 shield paint becomes the Paint slot")
@@ -364,9 +364,9 @@ check(#Inv.copies(o, starter) == 1 and Inv.forgeLevel(o, starter) == 1 and Inv.s
 local junk = table.clone(saved)
 junk.weaponCopies = { [starter] = { { uid = "a", forge = 9, wear = 400, design = { Grip = "Diamond" }, job = { kind = "Melt", untilTime = 1 } }, { uid = "a", forge = 1 } }, Fake = { { uid = "f" } } }
 local j = newPlayer(4)
-Inv.load(j, junk, 0, 0, nil)
-local cleaned = Inv.copies(j, starter)
-check(#cleaned == 1 and cleaned[1].forge == Forge.MaxLevel and cleaned[1].wear == Forge.MaxWear and cleaned[1].design.Grip == nil and cleaned[1].job == nil and Inv.serialize(j).weaponCopies.Fake == nil, "bad copy data is clamped and cleaned")
+check(not pcall(Inv.load, j, junk, 0, 0, nil), "current-format unfamiliar copies are rejected instead of silently losing fields")
+junk.version = 13
+check(not pcall(Inv.load, j, junk, 0, 0, nil), "legacy unfamiliar economic data is refused instead of silently cleaned")
 -- PvE only: the whole PvE factor (incl. hardening and wear) is divided out against players
 for _, factor in { 1, 1.1, 1.1 * 0.85, 0.7 } do
 	local pve = Balance.pveFactor(starter) * factor

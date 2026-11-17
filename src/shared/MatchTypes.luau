@@ -9,6 +9,7 @@
 --   TeleportPayload  what a client CAN see (TeleportData): no secrets, never trusted.
 
 local MatchDefinitions = require(script.Parent.MatchDefinitions)
+local GameProtocol = require(script.Parent.GameProtocol)
 
 export type MatchMode = MatchDefinitions.MatchMode
 export type Role = MatchDefinitions.Role
@@ -21,6 +22,7 @@ export type RegistryRecord = {
 	subMode: string?,
 	status: MatchStatus,
 	protocol: number,
+	compatibility: GameProtocol.Capabilities,
 	policy: string,
 	round: number,
 	maxRounds: number,
@@ -50,6 +52,7 @@ export type MatchRecord = {
 	matchId: string,
 	mode: MatchMode,
 	protocol: number,
+	compatibility: GameProtocol.Capabilities,
 	privateServerId: string, -- game.PrivateServerId of the reserved Arena server ("" in mock mode)
 	fighters: { Fighter },
 	policy: string,
@@ -75,6 +78,7 @@ export type AdmissionTicket = {
 	expiresAt: number,
 	consumed: boolean,
 	protocol: number,
+	compatibility: GameProtocol.Capabilities,
 }
 
 export type SlotRecord = {
@@ -102,7 +106,7 @@ local MatchTypes = {
 		TELEPORT_FAILED = "TELEPORT FAILED — TRY AGAIN",
 		TELEPORT_TIMEOUT = "TRAVEL TIMED OUT — REJOIN IF TRAVEL IS STILL BLOCKED",
 		DATA_SAVE_FAILED = "PROFILE SAVE UNCONFIRMED — TRY AGAIN",
-		UPDATE = "GAME UPDATE IN PROGRESS",
+		UPDATE = "SPIELVERSIONEN PASSEN NICHT ZUSAMMEN — BITTE EINEM AKTUELLEN SERVER BEITRETEN",
 		INVALID = "ADMISSION REJECTED",
 		CANCELLED = "MATCH CANCELLED — A PLAYER COULD NOT JOIN",
 		NO_BATTLES = "NO LIVE BATTLES RIGHT NOW",

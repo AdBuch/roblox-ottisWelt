@@ -3,7 +3,7 @@
 -- The Hub issues one ticket per fighter / spectator, keyed "<matchId>:<userId>", short-lived.
 -- The Arena consumes it atomically (UpdateAsync): it must exist, not be expired or consumed,
 -- belong to this user and match, carry a valid role and a compatible protocol version.
--- TeleportData only carries the match id and requested role, both re-checked against the ticket.
+-- TeleportData selects the match lookup. Role and data compatibility come from server records.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -23,6 +23,7 @@ local function store()
 end
 
 function AdmissionTicketService.issue(matchId: string, userId: number, role: MatchTypes.Role, team: string, mode: MatchTypes.MatchMode): AdmissionTicket?
+	if not MatchDefinitions.isRole(role) or not MatchDefinitions.get(mode) then return nil end
 	local now = os.time()
 	local lifetime = ExperienceConfig.Tickets.LifetimeSeconds
 	local ticket: AdmissionTicket = {
@@ -36,6 +37,7 @@ function AdmissionTicketService.issue(matchId: string, userId: number, role: Mat
 		expiresAt = now + lifetime,
 		consumed = false,
 		protocol = GameProtocol.Version,
+		compatibility = GameProtocol.describe(),
 	}
 	if store().set(MatchTypes.ticketKey(matchId, userId), ticket, lifetime + 10) then
 		return ticket
@@ -48,9 +50,11 @@ function AdmissionTicketService.revoke(matchId: string, userId: number)
 end
 
 -- Validates and consumes the ticket of `userId` for `matchId` in one atomic update.
-function AdmissionTicketService.consume(matchId: string, userId: number): (AdmissionTicket?, Rejection?)
+function AdmissionTicketService.consume(matchId: string, userId: number, record: MatchTypes.MatchRecord): (AdmissionTicket?, Rejection?)
+	if not GameProtocol.isRecordCompatible(record) then return nil, "PROTOCOL" end
 	local rejection: Rejection? = nil
 	local ok, result = store().update(MatchTypes.ticketKey(matchId, userId), function(old: any)
+		rejection = nil -- MemoryStore may invoke the transform more than once
 		if typeof(old) ~= "table" then
 			rejection = "MISSING"
 			return nil
@@ -75,17 +79,24 @@ function AdmissionTicketService.consume(matchId: string, userId: number): (Admis
 			rejection = "BAD_ROLE"
 			return nil
 		end
-		if not GameProtocol.isCompatible(old.protocol) then
+		if not GameProtocol.isRecordCompatible(old) or old.protocol ~= record.protocol then
 			rejection = "PROTOCOL"
 			return nil
 		end
+		for _, name in { "minProtocol", "maxProtocol", "minRead", "maxRead", "write" } do
+			if old.compatibility[name] ~= record.compatibility[name] then
+				rejection = "PROTOCOL"
+				return nil
+			end
+		end
+		if old.mode ~= record.mode then rejection = "WRONG_MATCH" return nil end
 		old.consumed = true
 		return old
 	end, 60)
 	if not ok then
 		return nil, "STORE"
 	end
-	if rejection or typeof(result) ~= "table" then
+	if rejection or typeof(result) ~= "table" or result.consumed ~= true then
 		return nil, rejection or "MISSING"
 	end
 	return result :: AdmissionTicket, nil

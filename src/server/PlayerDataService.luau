@@ -30,7 +30,7 @@ local CLOSE_RETRY_SECONDS = 5
 local SHUTDOWN_SECONDS = 25
 local SHUTDOWN_SECONDS_STUDIO = 5
 
-type Status = "Loading" | "Loaded" | "Unsaved" | "Mock" | "Transferring"
+type Status = "Loading" | "Loaded" | "Unsaved" | "Mock" | "Transferring" | "Incompatible"
 
 type Session = {
 	status: Status,
@@ -68,6 +68,12 @@ end
 local function setStatus(player: Player, session: Session, status: Status)
 	session.status = status
 	player:SetAttribute(Config.DataStatusAttribute, status)
+end
+
+local function incompatible(player: Player, session: Session)
+	session.lost = true
+	setStatus(player, session, "Incompatible")
+	player:SetAttribute(Config.DataStatusMessageAttribute, "Deine gespeicherten Daten benötigen eine andere Spielversion. Bitte tritt einem aktuellen Server bei.")
 end
 
 local function retry<T>(call: () -> T): (boolean, T | string)
@@ -180,9 +186,15 @@ local function save(player: Player, session: Session, reason: string, release: b
 			return false
 		end
 		snapshot = data
+		if not PlayerDataSchema.canWrite(snapshot.version) then
+			session.busy = false
+			incompatible(player, session)
+			return false
+		end
 	end
 	local epoch = session.epoch
 	local denied = false
+	local unsupported = false
 	local function confirmed(record: any): boolean
 		if release then
 			return releasedBy(record, epoch, saveId)
@@ -192,6 +204,9 @@ local function save(player: Player, session: Session, reason: string, release: b
 	local ok, result = retry(function()
 		return dataStore:UpdateAsync(key(player), function(old: any)
 			denied = false
+			unsupported = typeof(old) == "table" and (not PlayerDataSchema.canRead(old.version)
+				or (snapshot ~= nil and not InventoryService.canWriteRecord(old)))
+			if unsupported then return nil end
 			if confirmed(old) then
 				return old -- the prior attempt committed but its response was lost
 			end
@@ -200,7 +215,13 @@ local function save(player: Player, session: Session, reason: string, release: b
 				return nil
 			end
 			-- When a player leaves during Load, release just the lease and preserve the old profile.
-			local nextRecord = table.clone(snapshot or old)
+			local nextRecord = table.clone(old)
+			if snapshot then
+				for field, value in snapshot do nextRecord[field] = value end
+				nextRecord.lastBattle = snapshot.lastBattle
+				nextRecord.resetToken = snapshot.resetToken
+				nextRecord.coins, nextRecord.forge, nextRecord.empty = nil, nil, nil
+			end
 			local now = os.time()
 			nextRecord.leaseEpoch = epoch
 			nextRecord.saveId = saveId
@@ -215,6 +236,8 @@ local function save(player: Player, session: Session, reason: string, release: b
 		session.committedRevision = covered
 		session.released = release
 		session.expiresAt = lockExpires(result)
+	elseif ok and unsupported then
+		incompatible(player, session)
 	elseif ok and denied then
 		loseProfile(player, session, reason)
 	else
@@ -230,7 +253,7 @@ local function claim(player: Player, session: Session, dataStore: DataStore): (b
 		local unsupported = false
 		local ok, result = retry(function()
 			return dataStore:UpdateAsync(key(player), function(old: any)
-				if typeof(old) == "table" and (tonumber(old.version) or 0) > PlayerDataSchema.Version then
+				if typeof(old) == "table" and not PlayerDataSchema.canRead(old.version) then
 					unsupported = true
 					return nil
 				end
@@ -303,7 +326,8 @@ function PlayerDataService.load(player: Player)
 		session.loading = false
 		if not session.closing then
 			warn(PREFIX, ("Load unconfirmed for %s: %s"):format(player.Name, tostring(record)))
-			setStatus(player, session, "Unsaved")
+			if record == "unsupported profile schema" then incompatible(player, session)
+			else setStatus(player, session, "Unsaved") end
 		end
 		return
 	end
@@ -316,10 +340,10 @@ function PlayerDataService.load(player: Player)
 		local legacyOk, legacyRecord = retry(function()
 			return legacy:GetAsync(key(player))
 		end)
-		if not legacyOk or (typeof(legacyRecord) == "table" and (tonumber(legacyRecord.version) or 0) > PlayerDataSchema.Version) then
+		if not legacyOk or (typeof(legacyRecord) == "table" and not PlayerDataSchema.canRead(legacyRecord.version)) then
 			warn(PREFIX, ("Legacy profile could not be loaded for %s"):format(player.Name))
 			session.loading = false
-			setStatus(player, session, "Unsaved")
+			if legacyOk then incompatible(player, session) else setStatus(player, session, "Unsaved") end
 			return
 		end
 		if typeof(legacyRecord) == "table" then
@@ -347,7 +371,7 @@ function PlayerDataService.load(player: Player)
 	if not loaded then
 		warn(PREFIX, ("Profile could not be loaded for %s: %s"):format(player.Name, tostring(loadError)))
 		session.loading = false
-		setStatus(player, session, "Unsaved")
+		incompatible(player, session)
 		return
 	end
 	session.initialized = true
@@ -463,9 +487,12 @@ function PlayerDataService.cancelTransfer(player: Player)
 		local epoch = session.epoch
 		local resumedEpoch = (epoch or 0) + 1
 		local denied = false
+		local unsupported = false
 		local ok, result = retry(function()
 			return dataStore:UpdateAsync(key(player), function(old: any)
 				denied = false
+				unsupported = typeof(old) == "table" and not PlayerDataSchema.canRead(old.version)
+				if unsupported then return nil end
 				if session.status ~= "Transferring" then
 					return nil
 				end
@@ -493,6 +520,8 @@ function PlayerDataService.cancelTransfer(player: Player)
 			session.releaseId = nil
 			session.released = false
 			setStatus(player, session, "Loaded")
+		elseif ok and unsupported then
+			incompatible(player, session)
 		elseif ok and denied then
 			loseProfile(player, session, "cancel transfer")
 		else

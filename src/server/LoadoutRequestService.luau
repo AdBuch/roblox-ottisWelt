@@ -60,6 +60,9 @@ function LoadoutRequestService.lockReason(player: Player): (string?, string?)
 	if EnvironmentConfig.role() ~= "Hub" then
 		return "NOT_LOBBY", "Ausrüstung wechselst du in der Lobby"
 	end
+	if PlayerDataService.getStatus(player) == "Incompatible" then
+		return "UPDATE", "Diese Daten benötigen eine andere Spielversion. Bitte neu beitreten."
+	end
 	if not PlayerDataService.isReady(player) then
 		return "LOADING", "Deine Ausrüstung wird noch geladen oder gespeichert"
 	end

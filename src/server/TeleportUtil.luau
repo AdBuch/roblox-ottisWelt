@@ -150,7 +150,7 @@ local function start(
 	players: { Player },
 	placeId: number,
 	payload: MatchTypes.TeleportPayload,
-	resolveAccessCode: (() -> string?)?,
+	resolveAccessCode: (() -> (string?, string?))?,
 	retries: number,
 	delay: number,
 	onFailed: FailureHandler
@@ -195,9 +195,10 @@ local function start(
 			return
 		end
 		if resolveAccessCode then
-			local ok, accessCode = pcall(resolveAccessCode)
+			local ok, accessCode, problem = pcall(resolveAccessCode)
 			if not ok or not accessCode then
-				for _, player in accepted do finish(player, entries[player], "UNREACHABLE") end
+				local code = if ok and problem == "UPDATE" then "UPDATE" else "UNREACHABLE"
+				for _, player in accepted do finish(player, entries[player], code) end
 				return
 			end
 			routing.ReservedServerAccessCode = accessCode
@@ -231,7 +232,7 @@ local function start(
 	return accepted
 end
 
-function TeleportUtil.toReserved(players: { Player }, resolveAccessCode: () -> string?, payload: MatchTypes.TeleportPayload, onFailed: FailureHandler): { Player }
+function TeleportUtil.toReserved(players: { Player }, resolveAccessCode: () -> (string?, string?), payload: MatchTypes.TeleportPayload, onFailed: FailureHandler): { Player }
 	local config = ExperienceConfig.Teleport
 	return start(players, EnvironmentConfig.get().ArenaPlaceId, payload, resolveAccessCode, config.Retries, config.RetryDelaySeconds, onFailed)
 end

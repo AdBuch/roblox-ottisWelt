@@ -3,7 +3,7 @@
 -- PlayerDataService stores). Saved data is independent of code builds and GameProtocol:
 --   * the DataStore name per environment never changes for normal updates (ExperienceConfig)
 --   * Version only increases; InventoryService.migrateProfile moves every older profile forward,
---     keeps Aura and owned items, adds missing fields and re-validates equipped items
+--     keeps Aura and owned items, adds missing fields and refuses unfamiliar economic data
 -- Persisted: Aura (progress), Denarii (money), owned + equipped weapon/shield/armor, statistics,
 -- victories, preferences.
 -- Never persisted: health, round, match score, match id, cooldowns, projectiles, buffs, positions.
@@ -36,6 +36,9 @@
 
 local PlayerDataSchema = {
 	Version = 14,
+	MinReadVersion = 0, -- missing version is the legacy v0 profile
+	MaxReadVersion = 14,
+	WriteVersion = 14,
 
 	-- A new play session starts when the profile was not seen for this long (teleports take seconds)
 	SessionGapSeconds = 20 * 60,
@@ -66,6 +69,16 @@ local PlayerDataSchema = {
 		CameraShake = table.freeze({ "Full", "Reduced", "Off" }),
 	}),
 }
+
+function PlayerDataSchema.canRead(version: unknown): boolean
+	if version == nil then return true end
+	return typeof(version) == "number" and version % 1 == 0
+		and version >= PlayerDataSchema.MinReadVersion and version <= PlayerDataSchema.MaxReadVersion
+end
+
+function PlayerDataSchema.canWrite(version: unknown): boolean
+	return version == PlayerDataSchema.WriteVersion
+end
 
 function PlayerDataSchema.isStat(key: unknown): boolean
 	return typeof(key) == "string" and table.find(PlayerDataSchema.Stats, key) ~= nil

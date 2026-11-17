@@ -57,6 +57,7 @@ local function build(current: MatchTypes.MatchRecord): MatchTypes.RegistryRecord
 		subMode = if isTeam then current.mode else nil,
 		status = status,
 		protocol = GameProtocol.Version,
+		compatibility = GameProtocol.describe(),
 		policy = current.policy,
 		round = attr(Config.RoundAttribute, 0),
 		maxRounds = attr(Config.RoundMaxAttribute, 7),

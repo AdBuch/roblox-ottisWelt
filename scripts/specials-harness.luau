@@ -61,9 +61,9 @@ Inventory.practiceSpecial(player, "RustyGladius", "RebellionCombo", "Training")
 check(attrs[Practice.attribute(key)] == 46, "the allowance resets on a new day")
 local malformed = table.clone(saved)
 malformed.specialAttempts = { [key] = 9999, bogus = 12 }
-Inventory.load(player, malformed, 0, 0)
+check(not pcall(Inventory.load, player, malformed, 0, 0), "unfamiliar special data refuses the load")
 local clean = Inventory.serialize(player).specialAttempts
-check(clean.bogus == nil and clean[key] == 296, "migration caps and validates ids")
+check(clean.bogus == nil and clean[key] == 46, "refused migration retains the last usable profile")
 malformed.specialAttempts = nil
 malformed.version = 6
 Inventory.load(player, malformed, 0, 0)

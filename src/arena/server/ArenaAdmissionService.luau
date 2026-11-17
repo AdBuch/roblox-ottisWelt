@@ -86,15 +86,15 @@ local function loadRecord(matchId: string): (MatchRecord?, string?)
 		return loadRecord(matchId)
 	end
 	loadingRecord = true
-	local loaded = MatchRecordService.getMatch(matchId)
+	local loaded, problem = MatchRecordService.getMatch(matchId)
 	loadingRecord = false
 	if not loaded then
-		return nil, "ENDED"
+		return nil, problem or "ENDED"
 	end
 	if loaded.privateServerId == "" or loaded.privateServerId ~= game.PrivateServerId then
 		return nil, "INVALID" -- a ticket for another server
 	end
-	if not GameProtocol.isCompatible(loaded.protocol) or not MatchDefinitions.get(loaded.mode) then
+	if not GameProtocol.isRecordCompatible(loaded) or not MatchDefinitions.get(loaded.mode) then
 		return nil, "UPDATE"
 	end
 	record = loaded
@@ -122,7 +122,7 @@ local function admit(player: Player)
 		reject(player, problem or "INVALID", "match record")
 		return
 	end
-	local ticket, rejection = AdmissionTicketService.consume(matchId, player.UserId)
+	local ticket, rejection = AdmissionTicketService.consume(matchId, player.UserId, current)
 	if not ticket then
 		reject(player, if rejection == "PROTOCOL" then "UPDATE" elseif rejection == "EXPIRED" or rejection == "CONSUMED" then "INVALID" else "UNREACHABLE", tostring(rejection))
 		return

@@ -44,7 +44,7 @@ local function valid(record: any): boolean
 	if typeof(record.heartbeatAt) ~= "number" or os.time() - record.heartbeatAt > ExperienceConfig.Registry.ExpirationSeconds then
 		return false -- stale (missed heartbeats)
 	end
-	return GameProtocol.isCompatible(record.protocol)
+	return GameProtocol.isRecordCompatible(record)
 end
 
 -- Hub: all live, compatible matches (cached for a few seconds per Hub server).

@@ -48,7 +48,7 @@ local role = "Hub"
 local ready = {}
 local refreshed = 0
 mocks["Shared/EnvironmentConfig"] = { role = function() return role end }
-mocks["Server/PlayerDataService"] = { isReady = function(p) return ready[p] ~= false end }
+mocks["Server/PlayerDataService"] = { isReady = function(p) return ready[p] ~= false end, getStatus = function() return "Loaded" end }
 mocks["Server/PlayerCombatService"] = { refreshEquipment = function() refreshed += 1 end }
 mocks["Server/Remotes"] = { LoadoutRequest = {} }
 local shopSells = nil -- the kind the shop room the player stands in sells (nil = not in a shop)
@@ -328,6 +328,69 @@ check(Inv.campaignStage(restoredRewards, "Coop") == 2 and Inv.campaignStage(rest
 	"an out-of-order chapter never skips a missing chapter or crosses modes")
 Inv.applyReward(restoredRewards, { id = "chapter2", aura = 0, denarii = 0, stats = {}, campaign = "Coop", stage = 2 })
 check(Inv.campaignStage(restoredRewards, "Coop") == 3, "recovery may replay chapters in any order")
+
+local function cloneTree(value)
+	if type(value) ~= "table" then return value end
+	local copy = {}
+	for key, entry in value do copy[key] = cloneTree(entry) end
+	return copy
+end
+local function equalTree(a, b)
+	if type(a) ~= type(b) then return false end
+	if type(a) ~= "table" then return a == b end
+	for key, value in a do if not equalTree(value, b[key]) then return false end end
+	for key in b do if a[key] == nil then return false end end
+	return true
+end
+check(Schema.MinReadVersion == 0 and Schema.MaxReadVersion == 14 and Schema.WriteVersion == 14
+	and Schema.canRead(nil) and Schema.canRead(1) and Schema.canRead(14)
+	and not Schema.canRead(15) and not Schema.canRead("14") and not Schema.canRead(14.5)
+	and Schema.canWrite(14) and not Schema.canWrite(13), "read and write formats are explicit and reject ambiguous versions")
+for _, version in { 1, 4, 9, 11, 12, 13, 14 } do
+	local fixture = cloneTree(withReward)
+	fixture.version = version
+	if version == 1 then fixture.coins, fixture.auraPoints = 25, nil end
+	if version == 9 then fixture.forge, fixture.weaponCopies = { RustyGladius = 2 }, nil end
+	if version == 11 then
+		fixture.ownedHelmets, fixture.equippedHelmet = "Galea,DragonHead", "Galea"
+		fixture.shieldDesigns = { WoodenBuckler = "LegionRed" }
+	end
+	if version <= 12 then fixture.receipts = { "paid-A", "paid-B", "paid-A" } end
+	fixture.forgeCredits = { Skip = 4, Design = 7 }
+	local original = cloneTree(fixture)
+	local migrating = newPlayer(200 + version)
+	Inv.load(migrating, fixture, 0, 0)
+	check(equalTree(fixture, original), "load migration does not mutate the supplied snapshot v" .. version)
+	local migrated = Inv.serialize(migrating)
+	local once = cloneTree(fixture)
+	Inv.migrateProfile(once)
+	local twice = cloneTree(once)
+	Inv.migrateProfile(twice)
+	check(equalTree(once, twice), "migration is idempotent v" .. version)
+	check(migrated.forgeCredits.Skip == 4 and migrated.forgeCredits.Design == 7
+		and (version > 12 or (migrated.receipts["paid-A"] and migrated.receipts["paid-B"])), "credits and paid receipt evidence survive v" .. version)
+	if version == 11 then
+		check(Inv.owns(migrating, "Helmet", "SpartaHelm") and Inv.owns(migrating, "Helmet", "DragonHead")
+			and migrated.shieldDesigns.WoodenBuckler.Paint == "LegionRed", "helmet rename preserves the paid helmet and shield design")
+	end
+end
+local forward = cloneTree(withReward)
+forward.version, forward.newInventory = 15, { keep = true }
+local unchanged = cloneTree(forward)
+check(not pcall(Inv.migrateProfile, forward) and equalTree(forward, unchanged), "a newer profile remains byte-equivalent after refused migration")
+local extension = cloneTree(withReward)
+extension.futureSystem = { nested = { inventory = "preserve" } }
+local extensible = newPlayer(301)
+Inv.load(extensible, extension, 0, 0)
+Inv.addDenarii(extensible, 2)
+check(equalTree(Inv.serialize(extensible).futureSystem, extension.futureSystem), "unfamiliar top-level fields survive load, mutation and serialization")
+local nested = cloneTree(withReward)
+nested.forgeCredits.NewCredit = 10
+local nestedOriginal = cloneTree(nested)
+check(not pcall(Inv.migrateProfile, nested) and equalTree(nested, nestedOriginal), "unfamiliar nested economic data is rejected without mutating its record")
+check(not Inv.canWriteRecord(nested) and equalTree(nested, nestedOriginal), "stored-record preflight refuses unfamiliar nested fields without touching the source")
+nested.version = 13
+check(not Inv.canWriteRecord(nested), "legacy format cannot silently drop an unfamiliar new credit")
 
 print("PASS: " .. checks .. " checks against the actual Luau sources (mock Roblox services).")
 '@
