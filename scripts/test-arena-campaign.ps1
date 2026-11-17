@@ -17,6 +17,8 @@ local store = {
 }
 local mock = false
 modules.EnvironmentConfig = { useMockData = function() return mock end, name = function() return "DEV" end }
+modules.RewardRecoveryService = {}
+modules.InventoryService = {}
 local services = {
     ReplicatedStorage = { Shared = script.Parent },
     DataStoreService = { GetDataStore = function(_, name)
@@ -26,7 +28,7 @@ local services = {
 }
 local game = { GetService = function(_, name) return assert(services[name]) end }
 '@
-foreach ($entry in @('shared/GameModeDefinitions','shared/ZombieDefinitions','shared/ZombieAttackDefinitions','shared/RoundDefinitions','server/ArenaCampaignProgress')) {
+foreach ($entry in @('shared/RewardTypes','shared/GameModeDefinitions','shared/ZombieDefinitions','shared/ZombieAttackDefinitions','shared/RoundDefinitions','server/ArenaCampaignProgress')) {
     $name = Split-Path -Leaf $entry
     $module = Get-Content -LiteralPath (Join-Path $repo "src/$entry.luau") -Raw
     $source += "`nmodules.$name = (function()`n$module`nend)()`n"
@@ -52,6 +54,16 @@ mock = true
 assert(campaign.loadStage(pair) == 1 and campaign.clearStage(pair, 1), "Studio mock data is isolated")
 mock = false
 assert(campaign.loadStage(pair) == 3)
+local personal = { [24] = 2, [55] = 2, [124] = 1 }
+modules.RewardRecoveryService.submit = function() return true end
+modules.RewardRecoveryService.recover = function() return true end
+modules.InventoryService.campaignStage = function(player, mode) return if mode == "Coop" then personal[player.UserId] else 1 end
+assert(campaign.loadStage("new-group", {first, second}, "Coop") == 2, "same roster resumes the personal minimum")
+assert(campaign.loadStage("new-group", {second, first}, "Coop") == 2, "join order does not change progression")
+assert(campaign.loadStage("changed-group", {first, third}, "Coop") == 1, "changed roster starts at its least advanced member")
+assert(campaign.loadStage("solo", {first}, "Solo") == 1, "solo progress remains separate")
+modules.RewardRecoveryService.recover = function(player) return player ~= second end
+assert(campaign.loadStage("new-group", {first, second}, "Coop") == nil, "unconfirmed recovery blocks a group start")
 
 local waves = modules.RoundDefinitions
 assert(waves.campaignVariant(1, 1, 1) == nil)
@@ -74,6 +86,9 @@ assert(zombies.TerracottaSamurai.Health > zombies.ZombieNinja.Health and zombies
 assert(modules.ZombieAttackDefinitions.forZombie("NunchakuNinja")[1].Steps[1].KnockdownSeconds > 0)
 print("PASS: roster checkpoints, boss attempts and chapter wave rosters")
 '@
+$match = Get-Content -LiteralPath (Join-Path $repo 'src/server/MatchService.luau') -Raw
+$source += "`nlocal function matchSource(script, game, require, task)`n$match`nend`n"
+$source += Get-Content -LiteralPath (Join-Path $PSScriptRoot 'match-recovery-harness.luau') -Raw
 $temp = Join-Path ([System.IO.Path]::GetTempPath()) ('arena-campaign-' + [guid]::NewGuid() + '.luau')
 try {
     [System.IO.File]::WriteAllText($temp, $source)

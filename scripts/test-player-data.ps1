@@ -7,6 +7,9 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $source = Get-Content -LiteralPath (Join-Path $repo 'src/server/PlayerDataService.luau') -Raw
 $purchaseSource = Get-Content -LiteralPath (Join-Path $repo 'src/server/PurchaseService.luau') -Raw
+$recoverySource = Get-Content -LiteralPath (Join-Path $repo 'src/server/RewardRecoveryService.luau') -Raw
+$auraSource = Get-Content -LiteralPath (Join-Path $repo 'src/server/AuraService.luau') -Raw
+$rewardTypesSource = Get-Content -LiteralPath (Join-Path $repo 'src/shared/RewardTypes.luau') -Raw
 $teleportSource = Get-Content -LiteralPath (Join-Path $repo 'src/server/TeleportUtil.luau') -Raw
 $arenaSource = Get-Content -LiteralPath (Join-Path $repo 'src/arena/server/ArenaReturnService.luau') -Raw
 
@@ -67,12 +70,16 @@ function store:UpdateAsync(key, transform)
 	self.inFlight[key] = (self.inFlight[key] or 0) + 1
 	self.maxInFlight = math.max(self.maxInFlight, self.inFlight[key])
 	task.wait(self.latency)
-	if self.failNext > 0 then
+	if self.failNext > 0 and (self.failKey == nil or self.failKey == key) then
 		self.inFlight[key] -= 1
 		self.failNext -= 1
 		error("DataStore request failed")
 	end
 	local new = transform(deep(db[key]))
+	if self.rejectAck and key:find("^inbox:") and next(new) == nil and db[key] and next(db[key]) then
+		self.inFlight[key] -= 1
+		return deep(db[key])
+	end
 	if self.rejectNext > 0 and key == self.faultKey then
 		self.rejectNext -= 1
 		self.inFlight[key] -= 1
@@ -112,16 +119,19 @@ local function newServer(name, mockData)
 	local added, removing = signal(), signal()
 	local inv = {}
 	local function profile(p)
-		server.profiles[p] = server.profiles[p] or { denarii = 0, aura = 0, receipts = {} }
+		server.profiles[p] = server.profiles[p] or { denarii = 0, aura = 0, receipts = {}, rewardIds = {}, campaignClears = {}, stats = {} }
 		return server.profiles[p]
 	end
 	function inv.getAura(p) return profile(p).aura end
 	function inv.getDenarii(p) return profile(p).denarii end
 	function inv.load(p, saved, earnedAura, earnedDenarii)
-		server.profiles[p] = { denarii = (saved and saved.denarii or 0) + earnedDenarii, aura = (saved and saved.auraPoints or 0) + earnedAura, receipts = deep(saved and saved.receipts or {}) }
+		server.profiles[p] = { denarii = (saved and saved.denarii or 0) + earnedDenarii, aura = (saved and saved.auraPoints or 0) + earnedAura,
+			receipts = deep(saved and saved.receipts or {}), rewardIds = deep(saved and saved.rewardIds or {}),
+			campaignClears = deep(saved and saved.campaignClears or {}), stats = deep(saved and saved.stats or {}) }
 	end
 	function inv.serialize(p)
-		return { version = 13, denarii = profile(p).denarii, auraPoints = profile(p).aura, session = { aura = 17, denarii = 9 }, receipts = deep(profile(p).receipts) }
+		return { version = 14, denarii = profile(p).denarii, auraPoints = profile(p).aura, session = { aura = 17, denarii = 9 },
+			receipts = deep(profile(p).receipts), rewardIds = deep(profile(p).rewardIds), campaignClears = deep(profile(p).campaignClears), stats = deep(profile(p).stats) }
 	end
 	function inv.setMutationGuard(fn) server.canMutate = fn end
 	function inv.onChanged(fn) table.insert(server.changed, fn) end
@@ -144,12 +154,27 @@ local function newServer(name, mockData)
 		for _, fn in server.changed do fn(p) end
 		return true, true
 	end
+	function inv.applyReward(p, claim)
+		if not server.canMutate(p) then return false, false end
+		local current = profile(p)
+		if current.rewardIds[claim.id] then return true, false end
+		current.aura += claim.aura
+		current.denarii += claim.denarii
+		for key, value in claim.stats do current.stats[key] = (current.stats[key] or 0) + value end
+		if claim.campaign then
+			current.campaignClears[claim.campaign] = current.campaignClears[claim.campaign] or {}
+			current.campaignClears[claim.campaign][tostring(claim.stage)] = true
+		end
+		current.rewardIds[claim.id] = true
+		for _, fn in server.changed do fn(p) end
+		return true, true
+	end
 	server.inventory = inv
 	local mocks = {
 		["Shared/Config"] = { DataStatusAttribute = "DataStatus", IntroSeenAttribute = "IntroSeen" },
 		["Shared/EnvironmentConfig"] = { get = function() return { DataStoreName = "Store" } end, useMockData = function() return mockData == true end, describe = function() return "test" end, name = function() return "DEV" end },
 		["Shared/ExperienceConfig"] = { Studio = { UnlockAllGear = false }, Teleport = { TransitionHoldSeconds = 60, RecoveryTimeoutSeconds = 20 } },
-		["Shared/PlayerDataSchema"] = { Version = 13 },
+		["Shared/PlayerDataSchema"] = { Version = 14 },
 		["Server/InventoryService"] = inv,
 		["Server/PlayerDataResetConfig"] = { tokenFor = function() return if resetRequested then "test-reset" else nil end },
 		["Server/Remotes"] = { SavePreference = { OnServerEvent = signal() } },
@@ -193,6 +218,9 @@ end
 '@
 $harness += "`nsource = function(script, game, require)`n$source`nend`n"
 $harness += "`nlocal purchaseSource = function(script, game, require, Enum)`n$purchaseSource`nend`n"
+$harness += "`nlocal recoverySource = function(script, game, require)`n$recoverySource`nend`n"
+$harness += "`nlocal auraSource = function(script, game, require)`n$auraSource`nend`n"
+$harness += "`nlocal rewardTypes = (function()`n$rewardTypesSource`nend)()`n"
 $harness += "`nlocal arenaSource = function(script, game, require)`n$arenaSource`nend`n"
 $harness += "`nlocal teleportSource = function(script, game, require, Enum, Instance)`n$teleportSource`nend`n"
 $harness += @'
@@ -463,10 +491,10 @@ after(1)
 check(M.data.getStatus(mocked) == "Mock" and M.data.isReady(mocked) and not M.data.canPersist(mocked), "Studio mock is playable without persistence")
 check(call(M.data.flush, mocked).value == false and call(M.data.beginTransfer, mocked).value == false and db.player_34 == nil, "Studio mock cannot claim a durable write or transfer")
 
-db.player_35 = { version = 14, denarii = 99 }
+db.player_35 = { version = 15, denarii = 99 }
 local future = R.join(35)
 after(3)
-check(R.data.getStatus(future) == "Unsaved" and db.player_35.version == 14 and db.player_35.lock == nil, "an older schema cannot claim or overwrite a future profile")
+check(R.data.getStatus(future) == "Unsaved" and db.player_35.version == 15 and db.player_35.lock == nil, "an older schema cannot claim or overwrite a future profile")
 
 -- Real TeleportUtil and ArenaReturnService against the deterministic scheduler and a fake engine.
 local function newTransport(data)
@@ -775,6 +803,112 @@ local replay = shopB(nextOwner, "after-crash")
 after(16)
 check(replay.value == "Granted" and lostConfirmation.value == "Pending" and db.player_74.denarii == 10
 	and db.player_74.receipts["after-crash"], "lost acknowledgement and a requested test reset cannot duplicate or delete a paid grant")
+
+-- Reward intent survives separately from the atomic reward/checkpoint profile commit.
+local function rewardRecovery(server)
+	local inboxStore = { UpdateAsync = function(_, key, fn) return store:UpdateAsync("inbox:" .. key, fn) end }
+	local names = setmetatable({}, { __index = function(_, name) return name end })
+	local modules = {
+		RewardTypes = rewardTypes,
+		EnvironmentConfig = { name = function() return "DEV" end, useMockData = function() return false end },
+		InventoryService = server.inventory, PlayerDataService = server.data,
+	}
+	local services = {
+		ReplicatedStorage = { Shared = names }, Players = {},
+		DataStoreService = { GetDataStore = function(_, name) check(name == "OttiRewardInbox_DEV_v1", "reward inbox is environment-scoped") return inboxStore end },
+	}
+	return recoverySource({ Parent = names }, { GetService = function(_, name) return services[name] end }, function(name) return assert(modules[name], name) end)
+end
+local ArenaRewards, HubRewards = newServer("ArenaRewards"), newServer("HubRewards")
+local arenaRecovery, hubRecovery = rewardRecovery(ArenaRewards), rewardRecovery(HubRewards)
+local fighter = ArenaRewards.join(81)
+after(3)
+local boss = {
+	id = rewardTypes.id("stable-match", "boss/1", 81), matchId = "stable-match",
+	aura = 50, denarii = 50, stats = { bossDefeats = 1 }, campaign = "Coop", stage = 1,
+}
+local bossFirst = call(arenaRecovery.submit, 81, boss)
+local bossRepeat = call(arenaRecovery.submit, 81, deep(boss))
+after(3)
+check(bossFirst.value and bossRepeat.value and db["inbox:player_81"][boss.id] ~= nil
+	and db.player_81.denarii == nil, "duplicate boss end events produce the same recoverable intent before any profile mutation")
+-- Crash here: the inbox is durable, while profile benefit and chapter have not committed.
+ArenaRewards.leave(fighter)
+after(3)
+local resumed = HubRewards.join(81)
+after(3)
+store.failKey, store.failNext = "player_81", 3
+local memberFailed = call(hubRecovery.recover, resumed)
+after(9)
+check(memberFailed.value == false and db.player_81.denarii == 0 and not db.player_81.campaignClears.Coop
+	and db["inbox:player_81"][boss.id] ~= nil, "failed profile save cannot separate a durable reward from its checkpoint")
+store.failKey, store.failNext = nil, 0
+store.rejectAck = true
+local committedClaim = call(hubRecovery.recover, resumed)
+after(5)
+check(committedClaim.value and db.player_81.denarii == 50 and db.player_81.campaignClears.Coop["1"]
+	and db.player_81.rewardIds[boss.id] and db.player_81.stats.bossDefeats == 1
+	and db["inbox:player_81"][boss.id] ~= nil, "profile benefit, reward evidence and checkpoint commit before inbox acknowledgement")
+-- Crash after profile commit, before inbox acknowledgement: new server replays the same claim.
+HubRewards.leave(resumed)
+after(3)
+local twiceResumed = ArenaRewards.join(81)
+after(3)
+store.rejectAck = false
+local replayedClaim = call(arenaRecovery.recover, twiceResumed)
+after(5)
+check(replayedClaim.value and db.player_81.denarii == 50 and db.player_81.stats.bossDefeats == 1
+	and next(db["inbox:player_81"]) == nil, "post-commit crash and redelivery never grant the boss twice")
+
+local disconnected = ArenaRewards.join(82)
+after(3)
+ArenaRewards.leave(disconnected)
+after(3)
+local offlineBoss = deep(boss)
+offlineBoss.id = rewardTypes.id("stable-match", "boss/1", 82)
+local offlineSubmitted = call(arenaRecovery.submit, 82, offlineBoss)
+after(3)
+local returned = HubRewards.join(82)
+after(3)
+local recoveredOffline = call(hubRecovery.recover, returned)
+after(5)
+check(offlineSubmitted.value and recoveredOffline.value and db.player_82.denarii == 50
+	and db.player_82.campaignClears.Coop["1"], "a disconnected eligible contributor recovers the confirmed claim in the Hub")
+
+local healthyMember = ArenaRewards.join(83)
+after(3)
+local partial = deep(boss)
+partial.id = rewardTypes.id("stable-match", "boss/1", 83)
+store.failKey, store.failNext = "inbox:player_83", 3
+local refusedIntent = call(arenaRecovery.submit, 83, partial)
+after(7)
+check(refusedIntent.value == false and db["inbox:player_83"] == nil and db.player_83.denarii == nil,
+	"one group member's unconfirmed intent cannot claim durable progress")
+store.failKey, store.failNext = nil, 0
+local retryIntent = call(arenaRecovery.submit, 83, partial)
+after(2)
+local recoveredMember = call(arenaRecovery.recover, healthyMember)
+after(5)
+check(retryIntent.value and recoveredMember.value and db.player_83.denarii == 50 and db.player_81.denarii == 50,
+	"retry of one member leaves other committed members unchanged")
+local realAuraPlayer = ArenaRewards.join(84)
+after(3)
+local auraNames = setmetatable({}, { __index = function(_, name) return name end })
+local auraModules = {
+	RewardTypes = rewardTypes, RewardRecoveryService = arenaRecovery, InventoryService = ArenaRewards.inventory,
+	GameStates = {}, Config = {}, CombatConfig = { Feedback = { Shop = "Shop", Aura = "Aura" } },
+	CurrencyConfig = { denariiFor = function(amount) return amount end },
+	Remotes = { CombatFeedback = { FireClient = function() end } },
+}
+local aura = auraSource({ Parent = auraNames }, { GetService = function(_, name)
+	return if name == "ReplicatedStorage" then { Shared = auraNames } else {}
+end }, function(name) return assert(auraModules[name], name) end)
+local bossEndOne = call(aura.awardBossVictory, { { player = realAuraPlayer, amount = 25 } }, "real-match", 1, "Coop")
+local bossEndTwo = call(aura.awardBossVictory, { { player = realAuraPlayer, amount = 25 } }, "real-match", 1, "Coop")
+after(10)
+check(bossEndOne.value and bossEndTwo.value and db.player_84.denarii == 25 and db.player_84.stats.bossDefeats == 1
+	and db.player_84.campaignClears.Coop["1"] and db.player_84.rewardIds["real-match/boss/1/p84"],
+	"the actual Aura boss path deduplicates concurrent end events with match, chapter and player IDs")
 
 -- 12. SHUTDOWN with a DataStore that doesn't answer: gives up before Roblox's 30 s
 local T = newServer("T")

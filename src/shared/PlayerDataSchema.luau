@@ -30,11 +30,12 @@
 -- v12: `shieldDesigns` is shield id -> { slot -> option } (paint, edge, boss, ornaments; the v10
 -- paint id becomes the Paint slot). The helmet "Galea" became "SpartaHelm" (owners keep it).
 -- v13: `receipts` is an unpruned set keyed by PurchaseId. All surviving v12 IDs are imported.
+-- v14: `rewardIds` and `campaignClears` commit reward evidence and personal checkpoints together.
 -- PlayerDataService adds `lock`, `leaseEpoch`, `saveId` and `savedAt` to the record.
 -- `session` belongs to the profile and stores gameplay earnings.
 
 local PlayerDataSchema = {
-	Version = 13,
+	Version = 14,
 
 	-- A new play session starts when the profile was not seen for this long (teleports take seconds)
 	SessionGapSeconds = 20 * 60,
