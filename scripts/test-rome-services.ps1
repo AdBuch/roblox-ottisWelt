@@ -26,7 +26,10 @@ local function signal() return { Connect = function() return { Disconnect = func
 local realOs = os
 local clockTime = 2000000
 local os = setmetatable({ time = function() return clockTime end }, { __index = realOs })
+local task = { defer = function(callback, ...) callback(...) end }
 local sources, loaded, mocks = {}, {}, {}
+local promptConfig = { PromptsEnabled = true }
+mocks["Shared/PurchaseConfig"] = promptConfig
 local function folder(prefix)
 	return setmetatable({}, { __index = function(_, name) return prefix .. "/" .. name end })
 end
@@ -45,7 +48,7 @@ local services = {
 }
 local game = { GetService = function(_, name) return assert(services[name], "service " .. name) end }
 local function newPlayer(id)
-	local p = { UserId = id, Name = "P" .. id, attrs = { GameState = "LOBBY", Location = "Lobby" } }
+	local p = { UserId = id, Name = "P" .. id, Parent = true, attrs = { GameState = "LOBBY", Location = "Lobby" } }
 	function p:GetAttribute(k) return self.attrs[k] end
 	function p:SetAttribute(k, v) self.attrs[k] = v end
 	return p
@@ -56,6 +59,7 @@ foreach ($name in 'ArmorDefinitions','HelmetDefinitions','Config','CurrencyConfi
 }
 $harness += Wrap "Server/InventoryService" "src/server/InventoryService.luau"
 $harness += Wrap "Rome/TownServices" "src/hub/server/Rome/TownServices.luau"
+$harness += Wrap "Server/PurchaseService" "src/server/PurchaseService.luau"
 $harness += Wrap "Shared/ColosseumLayout" "src/shared/ColosseumLayout.luau"
 $harness += Wrap "Rome/RomeLayout" "src/hub/server/Rome/RomeLayout.luau"
 $harness += Wrap "Rome/WorldEdgeService" "src/hub/server/Rome/WorldEdgeService.luau"
@@ -86,8 +90,7 @@ Town.init({
 	now = function() return now end,
 	token = function() tokens += 1 return "T" .. tokens end,
 	refresh = function() refreshed += 1 end,
-	save = function() return confirmedSave end,
-	isStudio = function() return studio end,
+	isStudioMock = function() return studio end,
 }, function() return vec(0, 0, 0) end, function() return vec(100, 0, 0) end)
 local function last() return events[#events] end
 local function tick() now += 1 end
@@ -96,6 +99,24 @@ local starter = Weapons.Starter
 
 local p = newPlayer(1)
 Inv.load(p, nil, 0, 0, nil)
+local marketplace = {}
+services.MarketplaceService = marketplace
+services.Players.GetPlayerByUserId = function(_, id) return if id == p.UserId then p else nil end
+mocks["Server/PlayerDataService"] = {
+	getStatus = function() return "Loaded" end,
+	canPersist = function() return true end,
+	flush = function() return confirmedSave end,
+}
+local testProduct, testProductId = nil, 1 -- mock-only Roblox catalog entry
+local function deliver(product, id)
+	testProduct = product
+	return marketplace.ProcessReceipt({ PlayerId = p.UserId, ProductId = testProductId, PurchaseId = id })
+		== Enum.ProductPurchaseDecision.PurchaseGranted
+end
+local purchase = sources["Server/PurchaseService"]
+mocks["Shared/ForgeDefinitions"] = { product = function(id) return if id == testProductId then testProduct else nil end }
+purchase({ Parent = folder("Server") }).init(Town.purchaseGranted)
+mocks["Shared/ForgeDefinitions"] = nil
 roots[p] = { Position = vec(40, 0, 0) }
 -- FORGE: too far away -> refused, no offer
 Town.openForge(p)
@@ -184,13 +205,19 @@ check(Inv.copies(p, starter)[1].design.Grip == "Gold", "golden grip on copy 1")
 -- RECEIPTS: the same purchase is granted once
 balance = Inv.getDenarii(p)
 local pack = Forge.product("DenariiSmall")
-check(Town.grant(p, pack, "R-1") and Town.grant(p, pack, "R-1") and Inv.getDenarii(p) == balance + pack.denarii, "a receipt grants its Denarii exactly once")
+check(deliver(pack, "R-1") and deliver(pack, "R-1") and Inv.getDenarii(p) == balance + pack.denarii, "a receipt grants its Denarii exactly once")
 local receiptBalance = Inv.getDenarii(p)
 confirmedSave = false
-check(not Town.grant(p, pack, "R-UNCONFIRMED") and Inv.getDenarii(p) == receiptBalance + pack.denarii, "an unconfirmed receipt is pending")
-check(not Town.grant(p, pack, "R-UNCONFIRMED") and Inv.getDenarii(p) == receiptBalance + pack.denarii, "an unconfirmed receipt retry does not grant twice")
+check(not deliver(pack, "R-UNCONFIRMED") and Inv.getDenarii(p) == receiptBalance + pack.denarii, "an unconfirmed receipt is pending")
+check(not deliver(pack, "R-UNCONFIRMED") and Inv.getDenarii(p) == receiptBalance + pack.denarii, "an unconfirmed receipt retry does not grant twice")
 confirmedSave = true
-check(Town.grant(p, pack, "R-UNCONFIRMED") and Inv.getDenarii(p) == receiptBalance + pack.denarii, "an acknowledged retry confirms the pending receipt")
+check(deliver(pack, "R-UNCONFIRMED") and Inv.getDenarii(p) == receiptBalance + pack.denarii, "an acknowledged retry confirms the pending receipt")
+promptConfig.PromptsEnabled = false
+tick()
+r = Town.request(p, "Buy", { token = token, key = "DenariiSmall" })
+check(not r.ok and r.productId == nil and not Town.buyHelmet(p, "KrokoHead").ok, "kill switch blocks smith and helmet prompts")
+check(deliver(pack, "R-SWITCH-OFF"), "a paid receipt is fulfilled with prompts disabled")
+promptConfig.PromptsEnabled = true
 -- SKIP (Robux): finishes a running job at once
 tick()
 local inHand = Inv.copyInUse(p, starter)
@@ -257,7 +284,7 @@ h = Town.buyHelmet(p, "DragonHead")
 check(not h.ok and h.code == "OWNED", "never bought twice")
 h = Town.buyHelmet(p, "SpartaHelm")
 check(not h.ok and not Inv.owns(p, "Helmet", "SpartaHelm"), "a Denarii helmet is no Robux product")
-check(Town.grant(p, Forge.product(Helmets.productKey("OttiHead")), "R-H1") and Town.grant(p, Forge.product(Helmets.productKey("OttiHead")), "R-H1") and Inv.owns(p, "Helmet", "OttiHead"), "a helmet receipt grants once")
+check(deliver(Forge.product(Helmets.productKey("OttiHead")), "R-H1") and deliver(Forge.product(Helmets.productKey("OttiHead")), "R-H1") and Inv.owns(p, "Helmet", "OttiHead"), "a helmet receipt grants once")
 studio = false
 h = Town.buyHelmet(p, "KrokoHead")
 check(not h.ok and not Inv.owns(p, "Helmet", "KrokoHead"), "without a product id a Robux helmet is not sold outside Studio")
@@ -302,10 +329,25 @@ check(not r.ok and Inv.getDenarii(p) == balance, "an expired offer is refused")
 -- SAVE DATA: copies, jobs, wear, designs, credits, receipts survive a rejoin / teleport (serialized)
 Inv.addWear(p, starter, 3)
 local saved = Inv.serialize(p)
-check(saved.version == 12 and saved.ownedHelmets:find("DragonHead") and saved.shieldDesigns[shieldId].Trim == "Gold" and #saved.weaponCopies[starter] == 2 and saved.weaponCopies[starter][1].design.Grip == "Gold" and table.find(saved.receipts, "R-1"), "copies, designs and receipts in the saved profile (v12)")
+check(saved.version == 13 and saved.ownedHelmets:find("DragonHead") and saved.shieldDesigns[shieldId].Trim == "Gold" and #saved.weaponCopies[starter] == 2 and saved.weaponCopies[starter][1].design.Grip == "Gold" and saved.receipts["R-1"], "copies, designs and receipts in the saved profile (v13)")
 local q = newPlayer(2)
 Inv.load(q, saved, 0, 0, nil)
 check(#Inv.copies(q, starter) == 2 and Inv.forgeLevel(q, starter) == Inv.forgeLevel(p, starter) and Inv.hasReceipt(q, "R-1") and Inv.shieldDesign(q, shieldId).Paint == "LegionRed" and Inv.shieldDesign(q, shieldId).Boss == "Silver", "all of it after rejoin")
+local legacyReceipts = table.clone(saved)
+legacyReceipts.version, legacyReceipts.receipts = 12, { "oldest", "oldest", "other" }
+local legacyBuyer = newPlayer(92)
+Inv.load(legacyBuyer, legacyReceipts, 0, 0)
+for i = 1, 64 do
+	Inv.applyPurchase(legacyBuyer, pack, "purchase-" .. i)
+end
+local durableLedger = Inv.serialize(legacyBuyer)
+local rejoinedBuyer = newPlayer(92)
+Inv.load(rejoinedBuyer, durableLedger, 0, 0)
+local rejoinedBalance = Inv.getDenarii(rejoinedBuyer)
+local recorded, newReceipt = Inv.applyPurchase(rejoinedBuyer, pack, "oldest")
+check(recorded and not newReceipt and Inv.getDenarii(rejoinedBuyer) == rejoinedBalance
+	and Inv.hasReceipt(rejoinedBuyer, "purchase-1") and Inv.hasReceipt(rejoinedBuyer, "purchase-64"),
+	"v12 IDs survive migration, 64 more grants, a round trip, and oldest-receipt redelivery")
 check(Inv.owns(q, "Helmet", "DragonHead") and Inv.owns(q, "Helmet", "OttiHead") and Inv.getEquippedHelmet(q).Id == saved.equippedHelmet, "owned and worn helmets survive the rejoin")
 local v11 = table.clone(saved)
 v11.version, v11.shieldDesigns, v11.ownedHelmets, v11.equippedHelmet = 11, { [shieldId] = "ImperialBlue", Fake = "Gold" }, "Galea,NoHelmet", "Galea"
@@ -318,7 +360,7 @@ v9.version, v9.weaponCopies, v9.activeCopy, v9.receipts = 9, nil, nil, nil
 v9.forge = { [starter] = 1 }
 local o = newPlayer(3)
 Inv.load(o, v9, 0, 0, nil)
-check(#Inv.copies(o, starter) == 1 and Inv.forgeLevel(o, starter) == 1 and Inv.serialize(o).version == 12 and Inv.serialize(o).forge == nil, "v9 stage moves onto the first copy")
+check(#Inv.copies(o, starter) == 1 and Inv.forgeLevel(o, starter) == 1 and Inv.serialize(o).version == 13 and Inv.serialize(o).forge == nil, "v9 stage moves onto the first copy")
 local junk = table.clone(saved)
 junk.weaponCopies = { [starter] = { { uid = "a", forge = 9, wear = 400, design = { Grip = "Diamond" }, job = { kind = "Melt", untilTime = 1 } }, { uid = "a", forge = 1 } }, Fake = { { uid = "f" } } }
 local j = newPlayer(4)

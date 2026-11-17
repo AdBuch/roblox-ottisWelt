@@ -29,11 +29,12 @@
 -- v11: helmets (`ownedHelmets`, `equippedHelmet`, HelmetDefinitions). Old profiles own only the bare head.
 -- v12: `shieldDesigns` is shield id -> { slot -> option } (paint, edge, boss, ornaments; the v10
 -- paint id becomes the Paint slot). The helmet "Galea" became "SpartaHelm" (owners keep it).
+-- v13: `receipts` is an unpruned set keyed by PurchaseId. All surviving v12 IDs are imported.
 -- PlayerDataService adds `lock`, `leaseEpoch`, `saveId` and `savedAt` to the record.
 -- `session` belongs to the profile and stores gameplay earnings.
 
 local PlayerDataSchema = {
-	Version = 12,
+	Version = 13,
 
 	-- A new play session starts when the profile was not seen for this long (teleports take seconds)
 	SessionGapSeconds = 20 * 60,

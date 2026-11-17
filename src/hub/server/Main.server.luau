@@ -30,6 +30,8 @@ local LobbyService = require(Server.LobbyService)
 local LoadoutRequestService = require(Server.LoadoutRequestService)
 local PlayerCombatService = require(Server.PlayerCombatService)
 local PlayerDataService = require(Server.PlayerDataService)
+local PurchaseService = require(Server.PurchaseService)
+local TownServices = require(script.Parent.Rome.TownServices)
 local Remotes = require(Server.Remotes)
 local TeleportUtil = require(Server.TeleportUtil)
 local TrainingService = require(Server.TrainingService)
@@ -90,6 +92,12 @@ PlayerDataService.init(function(player: Player) -- same schema and store as the 
 	PlayerCombatService.refreshEquipment(player)
 	LobbyIntroService.onLoaded(player)
 end)
+PurchaseService.init(function(player, product)
+	if product.helmet then
+		PlayerCombatService.refreshEquipment(player)
+	end
+	TownServices.purchaseGranted(player, product)
+end)
 PlayerCombatService.init()
 LoadoutRequestService.init() -- equip OWNED gear from the lobby menu (server-validated)
 -- Training: the straw dummies stand in the two yards behind the smithy and the helm shop in Rome
@@ -106,7 +114,6 @@ HubMatchService.init(lobby)
 -- lobbies are ready first; the town follows in the background, players can already play.
 local Rome = script.Parent.Rome
 local RomeWorld = require(Rome.RomeWorld)
-local TownServices = require(Rome.TownServices)
 local WorldEdgeService = require(Rome.WorldEdgeService)
 local function remote(name: string, class: string): Instance
 	local folder = ReplicatedStorage:WaitForChild(Config.RemotesFolderName)

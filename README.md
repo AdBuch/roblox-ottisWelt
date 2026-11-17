@@ -635,8 +635,8 @@ mock data unless `StudioMockData = false`. Loaded data always goes through
   acquire an expired or released lease. A release and a new acquisition are serialized by `UpdateAsync`.
 - **Release:** teleports require a confirmed release. Shutdown waits up to 25 s for pending profiles and logs
   any unconfirmed releases. See the [player data API and rollout requirements](docs/PLAYER_DATA_API.md).
-- **Robux receipts** are granted only on a profile that can be saved, and confirmed to Roblox only after a confirmed
-  save; the saved receipt id prevents a second grant.
+- **Robux receipts** use one handler in each place. The benefit and purchase ID share one profile commit.
+  See [paid purchases and the prompt switch](docs/PURCHASE_RECEIPTS.md).
 - **Test:** `scripts/test-player-data.ps1 -LuauPath <luau.exe>` (mock DataStore, several servers).
 - **Preferences:** the client may only send whitelisted values (`SavePreference` remote, rate limited).
 - **Schema v6:** Aura is experience; levels are derived, not stored. The old `ControlMode` / `BloodFx` preferences are
@@ -686,7 +686,7 @@ OTTI HUB (start place, public servers)                COLOSSEUM ARENA (one reser
 | MemoryStore maps | `OttiMatches_DEV_*` | `OttiMatches_PROD_*` |
 | Studio | mock player data (`StudioMockData`), mock MemoryStore | never used in Studio |
 
-The store names never change for normal updates. `PlayerDataSchema.Version` (now 5) only moves forward;
+The store names never change for normal updates. `PlayerDataSchema.Version` (now 13) only moves forward;
 `InventoryService.migrateProfile` keeps Aura and owned items, adds missing fields (armor, statistics, Denarii), drops
 unknown ids and re-validates equipped items. A pre-multi-place save (`OttiColosseum_PlayerData_v1`) is imported
 once if the environment store has no profile yet. Persisted: Aura, Denarii, owned + equipped weapon / shield / armor,

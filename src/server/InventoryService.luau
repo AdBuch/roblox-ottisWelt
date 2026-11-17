@@ -87,7 +87,7 @@ export type Profile = {
 	nextCopy: number, -- uid counter
 	shieldDesigns: { [string]: { [string]: string } }, -- shield id -> design slot -> option (ForgeDefinitions.ShieldSlots)
 	forgeCredits: { [string]: number }, -- Robux-bought, not yet used: Skip, Design
-	receipts: { string }, -- processed Robux purchase ids (newest last)
+	receipts: { [string]: boolean }, -- durable purchase evidence, stored with the benefits
 	forge: { [string]: number }?, -- v9 stages, folded into the copies on migration
 }
 
@@ -469,16 +469,15 @@ function InventoryService.migrateProfile(profile: Profile): Profile
 		end
 	end
 	profile.forgeCredits = credits
-	local receipts: { string } = {}
+	local receipts: { [string]: boolean } = {}
 	if typeof(profile.receipts) == "table" then
-		for _, r in profile.receipts :: any do
-			if typeof(r) == "string" then
-				table.insert(receipts, r)
+		for key, value in profile.receipts :: any do
+			if typeof(key) == "number" and typeof(value) == "string" and value ~= "" then
+				receipts[value] = true -- v12 list
+			elseif typeof(key) == "string" and key ~= "" and value == true then
+				receipts[key] = true
 			end
 		end
-	end
-	while #receipts > ForgeDefinitions.MaxReceipts do
-		table.remove(receipts, 1)
 	end
 	profile.receipts = receipts
 	profile.version = math.max(PROFILE_VERSION, savedVersion)
@@ -825,8 +824,7 @@ function InventoryService.purchase(player: Player, kind: ItemKind, id: string): 
 	return true, ("Bought %s for %d Denarii"):format(name, price)
 end
 
--- Gives an item without a price: a granted Robux purchase (TownServices.grant, one receipt = one
--- grant). Returns false when the item is unknown or already owned.
+-- Gives an item without a price. Returns false when the item is unknown or already owned.
 function InventoryService.grantItem(player: Player, kind: ItemKind, id: string): boolean
 	if not canMutate(player) or not InventoryService.isItem(kind, id) or InventoryService.owns(player, kind, id) then
 		return false
@@ -1234,21 +1232,38 @@ function InventoryService.useCredit(player: Player, key: string): boolean
 	return true
 end
 
--- Processed Robux purchases: a receipt is granted at most once per profile.
 function InventoryService.hasReceipt(player: Player, purchaseId: string): boolean
-	return table.find(getProfile(player).receipts, purchaseId) ~= nil
+	return getProfile(player).receipts[purchaseId] == true
 end
 
-function InventoryService.recordReceipt(player: Player, purchaseId: string)
-	if not canMutate(player) then
-		return
+-- One non-yielding mutation and revision for the benefit and its receipt. A nil ID is
+-- reserved for the Hub's in-memory Studio simulation.
+function InventoryService.applyPurchase(player: Player, product: ForgeDefinitions.Product, purchaseId: string?): (boolean, boolean)
+	if not canMutate(player) or purchaseId == "" then
+		return false, false
 	end
-	local receipts = getProfile(player).receipts
-	table.insert(receipts, purchaseId)
-	while #receipts > ForgeDefinitions.MaxReceipts do
-		table.remove(receipts, 1)
+	local profile = getProfile(player)
+	if purchaseId and profile.receipts[purchaseId] then
+		return true, false
+	end
+	local helmet = product.helmet
+	if helmet and not HelmetDefinitions.ById[helmet] then
+		return false, false
+	end
+	profile.denarii += product.denarii or 0
+	for key, count in product.credits or {} do
+		profile.forgeCredits[key] = (profile.forgeCredits[key] or 0) + count
+	end
+	if helmet and not profile.ownedHelmets[helmet] then
+		profile.ownedHelmets[helmet] = true
+		profile.equippedHelmet = helmet
+	end
+	if purchaseId then
+		profile.receipts[purchaseId] = true
 	end
 	changed(player)
+	InventoryService.publish(player)
+	return true, true
 end
 
 -- Pays a fixed service price (e.g. the oracle) exactly once. Never makes the balance negative.
