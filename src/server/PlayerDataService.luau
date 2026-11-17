@@ -50,6 +50,7 @@ type Session = {
 	lost: boolean,
 	lastPreference: number,
 	transferAttempt: number,
+	recoveryAttempt: number?,
 	resuming: boolean,
 }
 
@@ -432,11 +433,24 @@ function PlayerDataService.cancelTransfer(player: Player)
 	end
 	session.resuming = true
 	local attempt = session.transferAttempt
+	if session.recoveryAttempt ~= attempt then
+		session.recoveryAttempt = attempt
+		task.delay(ExperienceConfig.Teleport.RecoveryTimeoutSeconds, function()
+			if sessions[player] == session and not session.closing and session.transferAttempt == attempt
+				and session.status == "Transferring" then
+				-- Ownership could not be confirmed. Keep this profile playable in memory;
+				-- any unacknowledged lease expires and a rejoin performs a fresh load.
+				session.epoch = nil
+				setStatus(player, session, "Unsaved")
+				warn(PREFIX, ("Transfer recovery timed out for %s; progress is session-only"):format(player.Name))
+			end
+		end)
+	end
 	task.spawn(function()
 		while session.busy do
 			task.wait(0.1)
 		end
-		if session.closing or session.lost then
+		if session.closing or session.lost or session.status ~= "Transferring" then
 			session.resuming = false
 			return
 		end
@@ -447,6 +461,9 @@ function PlayerDataService.cancelTransfer(player: Player)
 		local ok, result = retry(function()
 			return dataStore:UpdateAsync(key(player), function(old: any)
 				denied = false
+				if session.status ~= "Transferring" then
+					return nil
+				end
 				if owns(old, session.token, resumedEpoch) then
 					return old -- reacquire committed before an earlier response was lost
 				end
@@ -463,7 +480,9 @@ function PlayerDataService.cancelTransfer(player: Player)
 				return nil
 			end)
 		end)
-		if ok and (owns(result, session.token, epoch) or owns(result, session.token, resumedEpoch)) then
+		if session.status ~= "Transferring" then
+			-- The watchdog already entered session-only mode. Ignore the late result.
+		elseif ok and (owns(result, session.token, epoch) or owns(result, session.token, resumedEpoch)) then
 			session.epoch = (result :: any).leaseEpoch
 			session.expiresAt = lockExpires(result)
 			session.releaseId = nil

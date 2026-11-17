@@ -3,12 +3,14 @@
 -- Both captains confirm unchanged equal-size teams. No client supplies members or team IDs.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ExperienceConfig = require(ReplicatedStorage.Shared.ExperienceConfig)
 local GameStates = require(ReplicatedStorage.Shared.GameStates)
 local MatchTypes = require(ReplicatedStorage.Shared.MatchTypes)
 local Server = script.Parent.Parent
 local CombatUtil = require(Server.CombatUtil)
 local InventoryService = require(Server.InventoryService)
 local PlayerDataService = require(Server.PlayerDataService)
+local TeleportUtil = require(Server.TeleportUtil)
 local LobbyService = require(Server.LobbyService)
 local PartyService = require(script.Parent.PartyService)
 local MatchmakingService = require(script.Parent.MatchmakingService)
@@ -48,7 +50,7 @@ local function members(party: Party, padId: string): ({ Player }?, string)
 	for _, member in party.members do
 		if not member.Parent or not contains(member, padId)
 			or not GameStates.isInLobby(member:GetAttribute(GameStates.StateAttribute))
-			or not PlayerDataService.isReady(member) or MatchmakingService.isQueued(member) then
+			or not PlayerDataService.isReady(member) or MatchmakingService.isQueued(member) or TeleportUtil.isPending(member) then
 			return nil, "Everybody must be on their team mosaic, loaded and outside a queue"
 		end
 		local valid, reason = InventoryService.hasValidLoadout(member)
@@ -131,7 +133,7 @@ function PadTeamBattleService.confirm(player: Player, padId: string): (boolean, 
 			end
 		end
 	end
-	if not created.mock then task.delay(25, cleanup) end
+	if not created.mock then task.delay(ExperienceConfig.Teleport.TravelTimeoutSeconds + 1, cleanup) end
 	local options: HubTeleportService.Options = {
 		matchId = created.record.matchId, role = "FIGHTER", mode = MODE, mock = created.mock,
 		onFailed = function(member: Player, _code: string)

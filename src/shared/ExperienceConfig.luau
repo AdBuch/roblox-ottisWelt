@@ -44,7 +44,9 @@ local ExperienceConfig = {
 		ReturnRetries = 5, -- Arena -> Hub attempts (then the emergency button stays visible)
 		ReturnRetryDelaySeconds = 3,
 		ArrivalTimeoutSeconds = 25, -- Arena waits this long for the expected fighters
-		TransitionHoldSeconds = 30, -- a profile marked "transferring" goes back to normal after this
+		TravelTimeoutSeconds = 40, -- includes preparation, Roblox attempts and retry delays
+		TransitionHoldSeconds = 60, -- storage fallback; longer than the source travel deadline
+		RecoveryTimeoutSeconds = 20, -- unconfirmed profile recovery falls back to session-only
 	}),
 
 	Registry = table.freeze({

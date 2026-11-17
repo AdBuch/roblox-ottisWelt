@@ -13,13 +13,15 @@ local MatchTypes = require(ReplicatedStorage.Shared.MatchTypes)
 local Server = script.Parent.Parent
 local AdmissionTicketService = require(Server.AdmissionTicketService)
 local MatchRecordService = require(Server.MatchRecordService)
-local PlayerDataService = require(Server.PlayerDataService)
 local Remotes = require(Server.Remotes)
 local TeleportUtil = require(Server.TeleportUtil)
 
-local PREFIX = "[OttiArena][Hub]"
-
 local HubTeleportService = {}
+local revoking: { [string]: boolean } = {}
+
+function HubTeleportService.isRevoking(player: Player, matchId: string): boolean
+	return revoking[MatchTypes.ticketKey(matchId, player.UserId)] == true
+end
 
 function HubTeleportService.message(player: Player, text: string, ok: boolean?)
 	Remotes.CombatFeedback:FireClient(player, CombatConfig.Feedback.Shop, text, ok == true)
@@ -34,14 +36,19 @@ export type Options = {
 	onFailed: (player: Player, code: string) -> (), -- release slots / unlock party / requeue
 }
 
--- Sends `players` to the reserved server of `matchId`. Returns the players that were sent.
+-- Returns the players accepted for preparation.
 function HubTeleportService.send(players: { Player }, options: Options): { Player }
 	local function failed(player: Player, code: string)
-		PlayerDataService.cancelTransfer(player)
-		AdmissionTicketService.revoke(options.matchId, player.UserId)
-		HubTeleportService.message(player, (MatchTypes.Messages :: any)[code] or MatchTypes.Messages.TELEPORT_FAILED, false)
-		Remotes.MatchEvent:FireClient(player, "Teleport", "Failed", code)
-		options.onFailed(player, code)
+		local key = MatchTypes.ticketKey(options.matchId, player.UserId)
+		revoking[key] = true
+		if player.Parent then
+			HubTeleportService.message(player, (MatchTypes.Messages :: any)[code] or MatchTypes.Messages.TELEPORT_FAILED, false)
+		end
+		-- Clear local locks promptly, even if the ticket store is slow.
+		task.spawn(options.onFailed, player, code)
+		local ok = pcall(AdmissionTicketService.revoke, options.matchId, player.UserId)
+		revoking[key] = nil
+		if not ok then warn("[OttiArena][Hub]", "Travel ticket cleanup failed") end
 	end
 
 	if options.mock then
@@ -54,41 +61,19 @@ function HubTeleportService.send(players: { Player }, options: Options): { Playe
 		return {}
 	end
 
-	local connection = MatchRecordService.getConnection(options.matchId)
-	if not connection then
-		for _, player in players do
-			failed(player, "UNREACHABLE")
-		end
-		return {}
-	end
-	local ready = {}
+	local payload: MatchTypes.TeleportPayload = { kind = "ToArena", matchId = options.matchId, mode = options.mode }
+	local accepted = TeleportUtil.toReserved(players, function()
+		local connection = MatchRecordService.getConnection(options.matchId)
+		return if connection then connection.accessCode else nil
+	end, payload, failed)
+	local skipped: { [Player]: boolean } = {}
 	for _, player in players do
-		if player.Parent and PlayerDataService.beginTransfer(player) and player.Parent then
-			table.insert(ready, player)
-		elseif player.Parent then
-			failed(player, "DATA_SAVE_FAILED")
+		if not skipped[player] and not table.find(accepted, player) and not TeleportUtil.isForMatch(player, options.matchId) then
+			skipped[player] = true
+			task.spawn(failed, player, if player.Parent then "TELEPORT_FAILED" else "LEFT")
 		end
 	end
-	for index = #ready, 1, -1 do
-		local player = ready[index]
-		if not player.Parent then
-			table.remove(ready, index)
-		elseif not PlayerDataService.isTransferPrepared(player) then
-			table.remove(ready, index)
-			failed(player, "DATA_SAVE_FAILED")
-		else
-			Remotes.MatchEvent:FireClient(player, "Teleport", "Travelling", options.mode)
-		end
-	end
-	if #ready == 0 then
-		return {}
-	end
-	local payload: MatchTypes.TeleportPayload = { kind = "ToArena", matchId = options.matchId, role = options.role, mode = options.mode }
-	if not TeleportUtil.toReserved(ready, connection.accessCode, payload, failed) then
-		-- toReserved already reported each failed player (or we are in mock mode)
-		print(PREFIX, ("Teleport to %s did not start for %d player(s)"):format(options.matchId, #ready))
-	end
-	return ready
+	return accepted
 end
 
 return HubTeleportService

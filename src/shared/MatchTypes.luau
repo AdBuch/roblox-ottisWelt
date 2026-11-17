@@ -88,8 +88,7 @@ export type SlotRecord = {
 export type TeleportPayload = {
 	kind: "ToArena" | "ToHub",
 	matchId: string?,
-	role: Role?,
-	mode: string?, -- loading-screen text only
+	mode: string?, -- source travel status only
 	message: string?, -- ToHub: a known message code (shown compactly in the Hub)
 	fromSpectating: boolean?,
 }
@@ -101,6 +100,7 @@ local MatchTypes = {
 		FULL = "MATCH IS ALREADY FULL",
 		ENDED = "BATTLE HAS ENDED",
 		TELEPORT_FAILED = "TELEPORT FAILED — TRY AGAIN",
+		TELEPORT_TIMEOUT = "TRAVEL TIMED OUT — REJOIN IF TRAVEL IS STILL BLOCKED",
 		DATA_SAVE_FAILED = "PROFILE SAVE UNCONFIRMED — TRY AGAIN",
 		UPDATE = "GAME UPDATE IN PROGRESS",
 		INVALID = "ADMISSION REJECTED",
